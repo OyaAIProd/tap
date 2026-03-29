@@ -46,7 +46,7 @@ export default {
 }
 ```
 
-## 3. Page API — 10 Methods
+## 3. Page API — 11 Methods
 
 | Method | Mode | Description |
 |--------|------|-------------|
@@ -60,6 +60,7 @@ export default {
 | `page.click(target)` | debugger | Click by selector or visible text |
 | `page.type(selector, text)` | debugger | Type into input |
 | `page.upload(selector, files)` | debugger | Upload files |
+| `page.claw(site, name, args)` | — | Run another claw (composition) |
 
 Scripting mode = undetectable. Debugger mode = ms-level attach/detach.
 
