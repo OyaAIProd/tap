@@ -130,6 +130,9 @@ async fn write_response(
     Ok(())
 }
 
+/// Tap protocol version. Must match PROTOCOL_VERSION in protocol.js.
+const TAP_PROTOCOL_VERSION: &str = "1.0.0";
+
 fn handle_initialize(id: &Value) -> Value {
     json!({
         "jsonrpc": "2.0",
@@ -141,7 +144,8 @@ fn handle_initialize(id: &Value) -> Value {
             },
             "serverInfo": {
                 "name": "tap",
-                "version": env!("CARGO_PKG_VERSION")
+                "version": env!("CARGO_PKG_VERSION"),
+                "tapProtocol": TAP_PROTOCOL_VERSION
             }
         }
     })
