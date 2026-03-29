@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "webclaw": {
-      "command": "sh",
-      "args": ["-c", "pkill -f 'webclaw mcp' 2>/dev/null; sleep 0.5; exec webclaw mcp"],
+      "command": "webclaw",
+      "args": ["mcp"],
       "cwd": "/Users/leo/Documents/claw"
     }
   }

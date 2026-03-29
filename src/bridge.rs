@@ -5,7 +5,6 @@
 
 use std::sync::Arc;
 
-use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
 use crate::cdp::BridgeClient;
@@ -41,10 +40,22 @@ impl BridgeServer {
 
 /// Background listener — accepts extension connections.
 async fn listen_loop(client_slot: Arc<Mutex<Option<BridgeClient>>>) -> Result<(), String> {
-    let addr = format!("127.0.0.1:{}", BRIDGE_PORT);
-    let listener = TcpListener::bind(&addr)
-        .await
-        .map_err(|e| format!("bridge: cannot bind {} ({})", addr, e))?;
+    let addr: std::net::SocketAddr = format!("127.0.0.1:{}", BRIDGE_PORT)
+        .parse()
+        .map_err(|e| format!("bridge: bad addr: {}", e))?;
+
+    let listener = match try_bind(addr) {
+        Ok(l) => l,
+        Err(_) => {
+            // Port occupied — kill the old process and retry
+            eprintln!("bridge: port {} in use, killing old process...", BRIDGE_PORT);
+            let _ = std::process::Command::new("sh")
+                .args(["-c", &format!("lsof -ti:{} | xargs kill", BRIDGE_PORT)])
+                .status();
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            try_bind(addr).map_err(|e| format!("bridge: cannot bind {} ({})", addr, e))?
+        }
+    };
 
     eprintln!("bridge: listening on ws://{}", addr);
 
@@ -67,6 +78,14 @@ async fn listen_loop(client_slot: Arc<Mutex<Option<BridgeClient>>>) -> Result<()
             }
         }
     }
+}
+
+/// Try to bind a TCP listener with SO_REUSEADDR.
+fn try_bind(addr: std::net::SocketAddr) -> Result<tokio::net::TcpListener, std::io::Error> {
+    let socket = tokio::net::TcpSocket::new_v4()?;
+    socket.set_reuseaddr(true)?;
+    socket.bind(addr)?;
+    socket.listen(16)
 }
 
 /// Connect and attach in one step — isolates non-Send errors from the spawned task.
@@ -96,10 +115,20 @@ async fn try_connect_and_attach(
 /// Try to connect via Chrome extension bridge (blocking, with timeout).
 /// Used by CLI commands that don't have a persistent BridgeServer.
 pub async fn try_extension_bridge() -> Result<BridgeClient, Box<dyn std::error::Error>> {
-    let addr = format!("127.0.0.1:{}", BRIDGE_PORT);
-    let listener = TcpListener::bind(&addr)
-        .await
+    let addr: std::net::SocketAddr = format!("127.0.0.1:{}", BRIDGE_PORT)
+        .parse()
+        .map_err(|e| format!("bridge: bad addr: {}", e))?;
+    let socket = tokio::net::TcpSocket::new_v4()
+        .map_err(|e| format!("bridge: socket: {}", e))?;
+    socket
+        .set_reuseaddr(true)
+        .map_err(|e| format!("bridge: reuseaddr: {}", e))?;
+    socket
+        .bind(addr)
         .map_err(|e| format!("bridge: cannot bind port {} ({})", BRIDGE_PORT, e))?;
+    let listener = socket
+        .listen(16)
+        .map_err(|e| format!("bridge: listen: {}", e))?;
 
     eprintln!("bridge: waiting for Chrome extension on ws://{}...", addr);
 
@@ -131,6 +160,7 @@ pub async fn try_extension_bridge() -> Result<BridgeClient, Box<dyn std::error::
 
 #[cfg(test)]
 mod tests {
+    use tokio::net::TcpListener;
     use super::*;
 
     #[test]

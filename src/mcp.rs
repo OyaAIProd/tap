@@ -642,21 +642,54 @@ async fn handle_tool_call(id: &Value, params: &Value, client: &BridgeClient) -> 
 
     let result = execute_tool(tool_name, args, client).await;
 
+    // For action tools, collect any toasts/notifications that appeared
+    let is_action = matches!(
+        tool_name,
+        "click"
+            | "click_selector"
+            | "type_text"
+            | "press_key"
+            | "select"
+            | "navigate"
+            | "scroll"
+            | "upload"
+    );
+    let toasts = if is_action {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        client
+            .send("WebClaw.collect_toasts", Some(json!({})))
+            .await
+            .ok()
+            .and_then(|v| v.as_array().cloned())
+            .unwrap_or_default()
+    } else {
+        vec![]
+    };
+
     match result {
-        Ok(content) => json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "result": {
-                "content": [{
-                    "type": "text",
-                    "text": if content.is_string() {
-                        content.as_str().unwrap().to_string()
-                    } else {
-                        serde_json::to_string_pretty(&content).unwrap_or_default()
-                    }
-                }]
+        Ok(content) => {
+            let mut text = if content.is_string() {
+                content.as_str().unwrap().to_string()
+            } else {
+                serde_json::to_string_pretty(&content).unwrap_or_default()
+            };
+
+            // Append toast notifications if any
+            if !toasts.is_empty() {
+                let msgs: Vec<&str> = toasts.iter().filter_map(|t| t["text"].as_str()).collect();
+                if !msgs.is_empty() {
+                    text.push_str(&format!("\n\n[page notifications: {}]", msgs.join("; ")));
+                }
             }
-        }),
+
+            json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "content": [{"type": "text", "text": text}]
+                }
+            })
+        }
         Err(e) => json!({
             "jsonrpc": "2.0",
             "id": id,
@@ -807,6 +840,76 @@ async fn execute_tool(
             }
         }
 
+        // --- Screenshot: capture, decode base64, save to file ---
+        "screenshot" => {
+            let path = args["path"]
+                .as_str()
+                .unwrap_or("/tmp/webclaw-screenshot.png");
+            let result = client
+                .send("Page.captureScreenshot", Some(json!({"format": "png"})))
+                .await?;
+            if let Some(b64) = result["data"].as_str() {
+                use base64::Engine;
+                let bytes = base64::engine::general_purpose::STANDARD
+                    .decode(b64)
+                    .map_err(|e| format!("base64 decode: {}", e))?;
+                std::fs::write(path, &bytes).map_err(|e| format!("write {}: {}", path, e))?;
+                Ok(json!(format!("saved to {} ({} bytes)", path, bytes.len())))
+            } else {
+                Err("screenshot: no data returned".into())
+            }
+        }
+
+        // --- Accessibility tree with optional interactive filter ---
+        "ax_tree" => {
+            let filter = args["filter"].as_str().unwrap_or("all");
+            if filter == "interactive" {
+                client
+                    .send("WebClaw.ax_tree_interactive", Some(json!({})))
+                    .await
+            } else {
+                let result = client
+                    .send("Accessibility.getFullAXTree", Some(json!({})))
+                    .await?;
+                let text = serde_json::to_string(&result).unwrap_or_default();
+                if text.len() > 50_000 {
+                    Ok(json!({
+                        "truncated": true,
+                        "note": format!("Full AX tree was {}KB — use filter='interactive' for a focused view.", text.len() / 1024),
+                        "tree": &text[..50_000]
+                    }))
+                } else {
+                    Ok(result)
+                }
+            }
+        }
+
+        // --- DOM tree with extension-side summarization ---
+        "read_dom" => client.send("WebClaw.read_dom", Some(args.clone())).await,
+
+        // --- Download/save_image: fetch via browser, save to file ---
+        "download" | "save_image" => {
+            let result = client
+                .send(&format!("WebClaw.{}", name), Some(args.clone()))
+                .await?;
+            if let Some(data_url) = result["data"].as_str() {
+                let output = args["output"].as_str().ok_or("missing output path")?;
+                let b64 = data_url.split(',').next_back().unwrap_or(data_url);
+                use base64::Engine;
+                let bytes = base64::engine::general_purpose::STANDARD
+                    .decode(b64)
+                    .map_err(|e| format!("base64 decode: {}", e))?;
+                std::fs::write(output, &bytes).map_err(|e| format!("write {}: {}", output, e))?;
+                Ok(json!(format!(
+                    "saved to {} ({} bytes)",
+                    output,
+                    bytes.len()
+                )))
+            } else {
+                Err(format!("{}: no data returned", name).into())
+            }
+        }
+
         // --- CDP relay tools — forward directly to extension ---
         "navigate" => {
             client
@@ -825,76 +928,15 @@ async fn execute_tool(
     }
 }
 
-/// Relay an MCP tool call as a CDP command to the extension.
-/// Maps tool names to CDP method names and forwards arguments.
+/// Relay an MCP tool call to the extension as a WebClaw.{name} command.
 async fn relay_to_extension(
     name: &str,
     args: &Value,
     client: &BridgeClient,
 ) -> Result<Value, Box<dyn std::error::Error>> {
-    let (method, params) = match name {
-        "screenshot" => ("Page.captureScreenshot", json!({"format": "png"})),
-        "ax_tree" => ("Accessibility.getFullAXTree", json!({})),
-        "read_dom" => (
-            "DOM.getDocument",
-            json!({"depth": args["depth"].as_i64().unwrap_or(10)}),
-        ),
-        "click" => (
-            "Input.dispatchMouseEvent",
-            json!({"type": "mousePressed", "text": args["text"]}),
-        ),
-        "click_selector" => (
-            "Input.dispatchMouseEvent",
-            json!({"selector": args["selector"]}),
-        ),
-        "type_text" => (
-            "Input.dispatchKeyEvent",
-            json!({"selector": args["selector"], "text": args["text"]}),
-        ),
-        "find"
-        | "page_info"
-        | "hover"
-        | "scroll"
-        | "press_key"
-        | "select"
-        | "upload"
-        | "dismiss_dialog"
-        | "force_state"
-        | "element_info"
-        | "event_listeners"
-        | "cookies"
-        | "hit_test"
-        | "top_layer"
-        | "download"
-        | "save_image"
-        | "network_log_start"
-        | "network_log_dump"
-        | "network_log_dump_bodies"
-        | "api_log"
-        | "global_names"
-        | "resource_tree"
-        | "resource_content"
-        | "search_resource"
-        | "request_replay"
-        | "storage_items"
-        | "intercept_on"
-        | "intercept_off"
-        | "intercept_list"
-        | "intercept_continue"
-        | "intercept_fulfill"
-        | "intercept_fail"
-        | "set_cookie" => {
-            // Generic relay: send as WebClaw.{tool_name} with original args
-            let result = client
-                .send(&format!("WebClaw.{}", name), Some(args.clone()))
-                .await?;
-            return Ok(result);
-        }
-        _ => return Err(format!("unknown tool: {}", name).into()),
-    };
-
-    let result = client.send(method, Some(params)).await?;
-    Ok(result)
+    client
+        .send(&format!("WebClaw.{}", name), Some(args.clone()))
+        .await
 }
 
 #[cfg(test)]

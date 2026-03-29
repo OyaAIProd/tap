@@ -116,26 +116,60 @@ async function routeCDP(method, params = {}) {
     }
 
     case 'Runtime.evaluate': {
-      // Use debugger for arbitrary expression eval — bypasses page CSP
-      return await withDebugger(async () => {
-        const result = await chrome.debugger.sendCommand(
-          { tabId: activeTabId },
-          'Runtime.evaluate',
-          {
-            expression: params.expression,
-            returnByValue: true,
-            awaitPromise: true,
+      // Try scripting mode first (no timeout, undetectable)
+      // Falls back to debugger for pages with strict CSP
+      const [evalResult] = await chrome.scripting.executeScript({
+        target: { tabId: activeTabId },
+        func: (expr) => {
+          try {
+            const result = (0, eval)(expr)
+            return { __ok: true, value: result }
+          } catch (e) {
+            return { __ok: false, error: e.message }
           }
-        )
-        return result
+        },
+        args: [params.expression],
+        world: 'MAIN'
       })
+      const wrapped = evalResult?.result
+      if (wrapped?.__ok) {
+        return { result: { type: typeof wrapped.value, value: wrapped.value } }
+      }
+      // CSP or eval error — fall back to debugger with no idle detach
+      if (detachTimer) { clearTimeout(detachTimer); detachTimer = null }
+      if (debuggerTabId !== activeTabId) {
+        if (debuggerTabId) await chrome.debugger.detach({ tabId: debuggerTabId }).catch(() => {})
+        await chrome.debugger.attach({ tabId: activeTabId }, '1.3')
+        debuggerTabId = activeTabId
+      }
+      try {
+        return await chrome.debugger.sendCommand(
+          { tabId: activeTabId }, 'Runtime.evaluate',
+          { expression: params.expression, returnByValue: true, awaitPromise: true }
+        )
+      } finally {
+        detachTimer = setTimeout(async () => {
+          if (debuggerTabId) {
+            await chrome.debugger.detach({ tabId: debuggerTabId }).catch(() => {})
+            debuggerTabId = null
+          }
+        }, 500)
+      }
     }
 
     case 'Page.captureScreenshot': {
-      const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' })
-      // Strip data URL prefix, return raw base64 like CDP does
-      const base64 = dataUrl.replace(/^data:image\/png;base64,/, '')
-      return { data: base64 }
+      try {
+        const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' })
+        const base64 = dataUrl.replace(/^data:image\/png;base64,/, '')
+        return { data: base64 }
+      } catch {
+        // Fallback: use CDP debugger (works on GPU-rendered pages)
+        return await withDebugger(async () => {
+          return await chrome.debugger.sendCommand(
+            { tabId: activeTabId }, 'Page.captureScreenshot', { format: 'png' }
+          )
+        })
+      }
     }
 
     case 'Network.getCookies': {
@@ -207,34 +241,364 @@ async function handleBridgeCommand(method, params = {}) {
 
 // --- WebClaw Protocol Commands (via bridge WebSocket) ---
 
+// Network log buffer for network_log_start/dump
+let networkLogEntries = []
+let networkLogActive = false
+
+async function requireTab() {
+  if (!activeTabId) throw new Error('No tab. Call Bridge.attach first.')
+  return activeTabId
+}
+
 async function handleClawCommand(method, params = {}) {
   switch (method) {
+    // ---- Core ----
+
     case 'WebClaw.pageIntelligence': {
       const tabId = params.tabId || activeTabId
       if (!tabId) throw new Error('No tab. Call Bridge.attach first.')
       return await gatherPageIntelligence(tabId)
     }
 
-    case 'WebClaw.run': {
+    case 'WebClaw.run':
       return await handleClawAction({ action: 'run', ...params })
+
+    case 'WebClaw.list':
+      return await handleClawAction({ action: 'list' })
+
+    case 'WebClaw.page_info': {
+      const tabId = await requireTab()
+      const tab = await chrome.tabs.get(tabId)
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => ({
+          url: location.href, title: document.title, readyState: document.readyState,
+          viewport: { w: window.innerWidth, h: window.innerHeight },
+          scroll: { x: window.scrollX, y: window.scrollY }
+        }),
+        world: 'MAIN'
+      })
+      return result?.result || { url: tab.url, title: tab.title }
     }
 
-    case 'WebClaw.list': {
-      return await handleClawAction({ action: 'list' })
+    // ---- Interaction tools (CDP native events) ----
+
+    case 'WebClaw.click': {
+      const tabId = await requireTab()
+      const text = params.text
+      if (!text) throw new Error('click: missing text param')
+
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (t) => {
+          // Try CSS selector first
+          let el = null
+          try { el = document.querySelector(t) } catch {}
+          // Fallback: find by visible text (leaf-first)
+          if (!el) {
+            const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT)
+            let best = null
+            while (walker.nextNode()) {
+              const node = walker.currentNode
+              if (node.offsetParent === null) continue
+              const nodeText = node.innerText?.trim()
+              if (nodeText && nodeText.includes(t)) {
+                // Prefer smaller (more specific) elements
+                if (!best || node.innerText.length <= best.innerText.length) best = node
+              }
+            }
+            el = best
+          }
+          if (!el) return null
+          el.scrollIntoView({ block: 'center', behavior: 'instant' })
+          const rect = el.getBoundingClientRect()
+          return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+        },
+        args: [text],
+        world: 'MAIN'
+      })
+      const pos = result?.result
+      if (!pos) throw new Error(`click: "${text}" not found`)
+      await cdpClick(tabId, pos.x, pos.y)
+      return `clicked "${text}" at (${Math.round(pos.x)}, ${Math.round(pos.y)})`
     }
+
+    case 'WebClaw.click_selector': {
+      const tabId = await requireTab()
+      const selector = params.selector
+      if (!selector) throw new Error('click_selector: missing selector param')
+
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (sel) => {
+          const el = document.querySelector(sel)
+          if (!el) return null
+          el.scrollIntoView({ block: 'center', behavior: 'instant' })
+          const rect = el.getBoundingClientRect()
+          return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+        },
+        args: [selector],
+        world: 'MAIN'
+      })
+      const pos = result?.result
+      if (!pos) throw new Error(`click_selector: "${selector}" not found`)
+      await cdpClick(tabId, pos.x, pos.y)
+      return `clicked "${selector}" at (${Math.round(pos.x)}, ${Math.round(pos.y)})`
+    }
+
+    case 'WebClaw.type_text': {
+      const tabId = await requireTab()
+      const selector = params.selector
+      const text = params.text
+      if (!selector || text === undefined) throw new Error('type_text: missing selector or text')
+
+      // Focus and clear via scripting
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (sel) => {
+          const el = document.querySelector(sel)
+          if (!el) return
+          el.scrollIntoView({ block: 'center', behavior: 'instant' })
+          el.focus()
+          el.click()
+          // Clear existing content
+          if (el.select) el.select()
+          else if (el.contentEditable === 'true') {
+            const range = document.createRange()
+            range.selectNodeContents(el)
+            const selection = window.getSelection()
+            selection.removeAllRanges()
+            selection.addRange(range)
+          }
+        },
+        args: [selector],
+        world: 'MAIN'
+      })
+      await new Promise(r => setTimeout(r, 100))
+
+      // Type via CDP keyboard events
+      await withDebugger(async () => {
+        // Delete selected content first
+        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Input.dispatchKeyEvent', {
+          type: 'keyDown', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8
+        })
+        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Input.dispatchKeyEvent', {
+          type: 'keyUp', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8
+        })
+        // Type each character
+        for (const char of text) {
+          await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Input.dispatchKeyEvent', {
+            type: 'keyDown', text: char, key: char, code: `Key${char.toUpperCase()}`
+          })
+          await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Input.dispatchKeyEvent', {
+            type: 'keyUp', key: char, code: `Key${char.toUpperCase()}`
+          })
+        }
+      })
+
+      // Trigger framework reactivity (Vue, React)
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (sel, val) => {
+          const el = document.querySelector(sel)
+          if (!el) return
+          // For native inputs, set value via property descriptor to trigger Vue/React
+          if ('value' in el) {
+            const setter = Object.getOwnPropertyDescriptor(
+              el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,
+              'value'
+            )?.set
+            if (setter) setter.call(el, val)
+          }
+          el.dispatchEvent(new Event('input', { bubbles: true }))
+          el.dispatchEvent(new Event('change', { bubbles: true }))
+        },
+        args: [selector, text],
+        world: 'MAIN'
+      })
+
+      return `typed ${text.length} chars into "${selector}"`
+    }
+
+    case 'WebClaw.hover': {
+      const tabId = await requireTab()
+      const selector = params.selector
+      if (!selector) throw new Error('hover: missing selector')
+
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (sel) => {
+          const el = document.querySelector(sel)
+          if (!el) return null
+          el.scrollIntoView({ block: 'center', behavior: 'instant' })
+          const rect = el.getBoundingClientRect()
+          return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+        },
+        args: [selector],
+        world: 'MAIN'
+      })
+      const pos = result?.result
+      if (!pos) throw new Error(`hover: "${selector}" not found`)
+
+      await withDebugger(async () => {
+        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Input.dispatchMouseEvent', {
+          type: 'mouseMoved', x: pos.x, y: pos.y
+        })
+      })
+      return `hovered "${selector}"`
+    }
+
+    case 'WebClaw.scroll': {
+      const tabId = await requireTab()
+      const selector = params.selector
+      if (!selector) throw new Error('scroll: missing selector')
+
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (sel) => {
+          const el = document.querySelector(sel)
+          if (!el) return false
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          return true
+        },
+        args: [selector],
+        world: 'MAIN'
+      })
+      if (!result?.result) throw new Error(`scroll: "${selector}" not found`)
+      return `scrolled to "${selector}"`
+    }
+
+    case 'WebClaw.press_key': {
+      await requireTab()
+      const key = params.key
+      if (!key) throw new Error('press_key: missing key')
+      const modifiers = params.modifiers || 0
+
+      // Map key names to CDP key event params
+      const keyMap = {
+        Enter: { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 },
+        Tab: { key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 },
+        Escape: { key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 },
+        Backspace: { key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 },
+        Delete: { key: 'Delete', code: 'Delete', windowsVirtualKeyCode: 46 },
+        ArrowUp: { key: 'ArrowUp', code: 'ArrowUp', windowsVirtualKeyCode: 38 },
+        ArrowDown: { key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 },
+        ArrowLeft: { key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37 },
+        ArrowRight: { key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39 },
+        Home: { key: 'Home', code: 'Home', windowsVirtualKeyCode: 36 },
+        End: { key: 'End', code: 'End', windowsVirtualKeyCode: 35 },
+        PageUp: { key: 'PageUp', code: 'PageUp', windowsVirtualKeyCode: 33 },
+        PageDown: { key: 'PageDown', code: 'PageDown', windowsVirtualKeyCode: 34 },
+        Space: { key: ' ', code: 'Space', windowsVirtualKeyCode: 32 },
+      }
+      const mapped = keyMap[key] || { key, code: `Key${key.toUpperCase()}`, windowsVirtualKeyCode: key.charCodeAt(0) }
+
+      await withDebugger(async () => {
+        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Input.dispatchKeyEvent', {
+          type: 'keyDown', modifiers, ...mapped
+        })
+        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Input.dispatchKeyEvent', {
+          type: 'keyUp', modifiers, ...mapped
+        })
+      })
+      return `pressed ${key}`
+    }
+
+    case 'WebClaw.select': {
+      const tabId = await requireTab()
+      const { selector, value } = params
+      if (!selector || value === undefined) throw new Error('select: missing selector or value')
+
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (sel, val) => {
+          const el = document.querySelector(sel)
+          if (!el) return false
+          el.value = val
+          el.dispatchEvent(new Event('change', { bubbles: true }))
+          el.dispatchEvent(new Event('input', { bubbles: true }))
+          return true
+        },
+        args: [selector, value],
+        world: 'MAIN'
+      })
+      if (!result?.result) throw new Error(`select: "${selector}" not found`)
+      return `selected "${value}" in "${selector}"`
+    }
+
+    case 'WebClaw.upload': {
+      const tabId = await requireTab()
+      const { selector, files } = params
+      if (!selector || !files) throw new Error('upload: missing selector or files')
+      const fileList = typeof files === 'string' ? files.split(',').map(f => f.trim()) : files
+
+      await withDebugger(async () => {
+        const doc = await chrome.debugger.sendCommand({ tabId: activeTabId }, 'DOM.getDocument', {})
+        const node = await chrome.debugger.sendCommand({ tabId: activeTabId }, 'DOM.querySelector', {
+          nodeId: doc.root.nodeId, selector
+        })
+        if (!node?.nodeId) throw new Error(`upload: "${selector}" not found`)
+        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'DOM.setFileInputFiles', {
+          nodeId: node.nodeId, files: fileList
+        })
+      })
+      return `uploaded ${fileList.length} file(s) to "${selector}"`
+    }
+
+    // ---- Perception tools ----
 
     case 'WebClaw.find': {
-      const tabId = activeTabId
-      if (!tabId) throw new Error('No tab. Call Bridge.attach first.')
+      const tabId = await requireTab()
       const query = params.query
       const role = params.role || ''
+      if (!query) throw new Error('find: missing query')
+
       const [result] = await chrome.scripting.executeScript({
         target: { tabId },
         func: (q, r) => {
-          return Array.from(document.querySelectorAll('*'))
-            .filter(el => el.textContent.includes(q) && el.offsetParent !== null && (!r || el.getAttribute('role') === r))
-            .slice(0, 20)
-            .map(el => ({ tag: el.tagName, text: el.textContent.trim().substring(0, 100), role: el.getAttribute('role') || '' }))
+          const vw = window.innerWidth, vh = window.innerHeight
+
+          function region(rect) {
+            const cx = rect.x + rect.width / 2, cy = rect.y + rect.height / 2
+            const col = cx < vw / 3 ? 'left' : cx > vw * 2 / 3 ? 'right' : 'center'
+            const row = cy < vh / 3 ? 'top' : cy > vh * 2 / 3 ? 'bottom' : 'middle'
+            return `${row}-${col}`
+          }
+
+          function quickSel(el) {
+            if (el.id) return '#' + el.id
+            const testId = el.getAttribute('data-testid') || el.getAttribute('data-test-id')
+            if (testId) return `[data-testid="${testId}"]`
+            if (el.name && el.tagName !== 'DIV') return `${el.tagName.toLowerCase()}[name="${el.name}"]`
+            const cls = Array.from(el.classList || []).filter(c => !/^(svelte-|css-|_|sc-)/.test(c)).slice(0, 2)
+            if (cls.length) return `${el.tagName.toLowerCase()}.${cls.join('.')}`
+            return el.tagName.toLowerCase()
+          }
+
+          // Leaf-first: skip parent if a visible child also matches
+          const candidates = Array.from(document.querySelectorAll('*')).filter(el => {
+            if (el.offsetParent === null && el !== document.body) return false
+            const text = el.innerText?.trim() || ''
+            if (!text.toLowerCase().includes(q.toLowerCase())) return false
+            if (r && el.getAttribute('role') !== r) return false
+            for (const child of el.children) {
+              if (child.innerText?.trim().toLowerCase().includes(q.toLowerCase()) && child.offsetParent !== null) return false
+            }
+            return true
+          }).slice(0, 20)
+
+          return candidates.map(el => {
+            const rect = el.getBoundingClientRect()
+            return {
+              tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || '',
+              text: el.innerText?.trim().substring(0, 120) || '',
+              selector: quickSel(el),
+              box: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
+              center: { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) },
+              region: region(rect),
+              visible_in_viewport: rect.top < vh && rect.bottom > 0 && rect.left < vw && rect.right > 0
+            }
+          })
         },
         args: [query, role],
         world: 'MAIN'
@@ -242,21 +606,513 @@ async function handleClawCommand(method, params = {}) {
       return result?.result || []
     }
 
-    case 'WebClaw.page_info': {
-      const tabId = activeTabId
-      if (!tabId) throw new Error('No tab. Call Bridge.attach first.')
-      const tab = await chrome.tabs.get(tabId)
+    case 'WebClaw.element_info': {
+      const tabId = await requireTab()
+      const selector = params.selector
+      if (!selector) throw new Error('element_info: missing selector')
+
       const [result] = await chrome.scripting.executeScript({
         target: { tabId },
-        func: () => ({ url: location.href, title: document.title, readyState: document.readyState }),
+        func: (sel) => {
+          const el = document.querySelector(sel)
+          if (!el) return null
+          const rect = el.getBoundingClientRect()
+          const cs = getComputedStyle(el)
+          return {
+            tag: el.tagName.toLowerCase(), id: el.id || null,
+            classes: Array.from(el.classList),
+            attrs: Object.fromEntries(Array.from(el.attributes).map(a => [a.name, a.value.substring(0, 200)])),
+            text: el.innerText?.trim().substring(0, 300) || '',
+            box: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
+            visible: el.offsetParent !== null, editable: el.isContentEditable || el.tagName === 'INPUT' || el.tagName === 'TEXTAREA',
+            disabled: el.disabled || false, value: el.value?.substring(0, 200) || null,
+            display: cs.display, position: cs.position, overflow: cs.overflow
+          }
+        },
+        args: [selector],
         world: 'MAIN'
       })
-      return result?.result || { url: tab.url, title: tab.title }
+      return result?.result || { error: `"${selector}" not found` }
+    }
+
+    case 'WebClaw.hit_test': {
+      const tabId = await requireTab()
+      const { x, y } = params
+      if (x === undefined || y === undefined) throw new Error('hit_test: missing x or y')
+
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (px, py) => {
+          const el = document.elementFromPoint(px, py)
+          if (!el) return null
+          function quickSel(e) {
+            if (e.id) return '#' + e.id
+            const cls = Array.from(e.classList || []).filter(c => !/^(svelte-|css-|_|sc-)/.test(c)).slice(0, 2)
+            if (cls.length) return `${e.tagName.toLowerCase()}.${cls.join('.')}`
+            return e.tagName.toLowerCase()
+          }
+          return {
+            tag: el.tagName.toLowerCase(), selector: quickSel(el),
+            text: el.innerText?.trim().substring(0, 100) || '',
+            role: el.getAttribute('role') || '',
+            editable: el.isContentEditable || el.tagName === 'INPUT' || el.tagName === 'TEXTAREA'
+          }
+        },
+        args: [x, y],
+        world: 'MAIN'
+      })
+      return result?.result || { error: `nothing at (${x}, ${y})` }
+    }
+
+    case 'WebClaw.top_layer': {
+      const tabId = await requireTab()
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          const layers = []
+          // Check open dialogs
+          document.querySelectorAll('dialog[open]').forEach(d => {
+            layers.push({ type: 'dialog', text: d.innerText?.trim().substring(0, 200) || '' })
+          })
+          // Check elements with high z-index that might be modals
+          document.querySelectorAll('[role="dialog"], [role="alertdialog"], [class*="modal"], [class*="overlay"], [class*="popup"]').forEach(el => {
+            if (el.offsetParent !== null || getComputedStyle(el).display !== 'none') {
+              layers.push({ type: 'modal', cls: el.className?.toString().substring(0, 80), text: el.innerText?.trim().substring(0, 200) || '' })
+            }
+          })
+          return layers
+        },
+        world: 'MAIN'
+      })
+      return result?.result || []
+    }
+
+    case 'WebClaw.ax_tree_interactive': {
+      const tabId = await requireTab()
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          const items = []
+          const sels = 'a[href], button, input, textarea, select, [role="button"], [role="link"], [role="textbox"], [role="checkbox"], [role="radio"], [role="tab"], [role="menuitem"], [contenteditable="true"], [tabindex]'
+          document.querySelectorAll(sels).forEach(el => {
+            if (el.offsetParent === null) return
+            const rect = el.getBoundingClientRect()
+            if (rect.width === 0 || rect.height === 0) return
+            function qs(e) {
+              if (e.id) return '#' + e.id
+              const tid = e.getAttribute('data-testid')
+              if (tid) return `[data-testid="${tid}"]`
+              if (e.name) return `${e.tagName.toLowerCase()}[name="${e.name}"]`
+              const cls = Array.from(e.classList || []).filter(c => !/^(svelte-|css-|_|sc-)/.test(c)).slice(0, 2)
+              if (cls.length) return `${e.tagName.toLowerCase()}.${cls.join('.')}`
+              return e.tagName.toLowerCase()
+            }
+            items.push({
+              tag: el.tagName.toLowerCase(),
+              role: el.getAttribute('role') || el.type || el.tagName.toLowerCase(),
+              name: el.getAttribute('aria-label') || el.innerText?.trim().substring(0, 80) || el.placeholder || el.name || '',
+              selector: qs(el),
+              box: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
+              disabled: el.disabled || false, value: el.value?.substring(0, 100) || null
+            })
+          })
+          return items
+        },
+        world: 'MAIN'
+      })
+      return { interactive: result?.result || [] }
+    }
+
+    case 'WebClaw.read_dom': {
+      const tabId = await requireTab()
+      const selector = params.selector || 'body'
+      const maxDepth = params.depth || 6
+      const summary = params.summary !== false
+
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (sel, depth, doSummary) => {
+          const root = document.querySelector(sel)
+          if (!root) return null
+          function walk(el, d) {
+            if (d > depth) return null
+            if (el.offsetParent === null && el !== document.body && el.tagName !== 'HTML' && el.tagName !== 'HEAD') return null
+            const tag = el.tagName.toLowerCase()
+            if (['script', 'style', 'noscript', 'svg', 'path', 'link', 'meta'].includes(tag)) return null
+            const node = { tag }
+            if (el.id) node.id = el.id
+            if (doSummary) {
+              const role = el.getAttribute('role')
+              if (role) node.role = role
+              const ariaLabel = el.getAttribute('aria-label')
+              if (ariaLabel) node.label = ariaLabel
+              const textNode = el.childNodes.length === 1 && el.childNodes[0].nodeType === 3
+                ? el.childNodes[0].textContent.trim().substring(0, 80) : null
+              if (textNode) node.text = textNode
+              if (['input', 'button', 'a', 'select', 'textarea'].includes(tag)) {
+                if (el.className) node.cls = String(el.className).substring(0, 60)
+                if (el.name) node.name = el.name
+                if (el.type) node.type = el.type
+                if (el.href) node.href = el.href
+                if (el.placeholder) node.placeholder = el.placeholder
+              }
+            } else {
+              const text = el.innerText?.substring(0, 200) || ''
+              if (text) node.text = text
+            }
+            const children = []
+            for (const child of el.children) { const c = walk(child, d + 1); if (c) children.push(c) }
+            if (children.length) node.children = children
+            return node
+          }
+          return walk(root, 0)
+        },
+        args: [selector, maxDepth, summary],
+        world: 'MAIN'
+      })
+      return result?.result || { error: `"${selector}" not found` }
+    }
+
+    // ---- State tools ----
+
+    case 'WebClaw.cookies': {
+      const tabId = await requireTab()
+      const tab = await chrome.tabs.get(tabId)
+      const cookies = await chrome.cookies.getAll({ url: tab.url })
+      return { cookies }
+    }
+
+    case 'WebClaw.set_cookie': {
+      await requireTab()
+      const { url, name, value, domain, path, secure, httpOnly, sameSite, expirationDate } = params
+      if (!url || !name) throw new Error('set_cookie: missing url or name')
+      const cookie = { url, name, value: value || '' }
+      if (domain) cookie.domain = domain
+      if (path) cookie.path = path
+      if (secure !== undefined) cookie.secure = secure
+      if (httpOnly !== undefined) cookie.httpOnly = httpOnly
+      if (sameSite) cookie.sameSite = sameSite
+      if (expirationDate) cookie.expirationDate = expirationDate
+      await chrome.cookies.set(cookie)
+      return { set: true, name }
+    }
+
+    case 'WebClaw.dismiss_dialog': {
+      await requireTab()
+      const accept = params.accept !== false
+      await withDebugger(async () => {
+        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Page.handleJavaScriptDialog', {
+          accept, promptText: params.prompt_text || ''
+        })
+      })
+      return { dismissed: true, accepted: accept }
+    }
+
+    case 'WebClaw.force_state': {
+      const tabId = await requireTab()
+      const { selector, state } = params
+      if (!selector || !state) throw new Error('force_state: missing selector or state')
+      await withDebugger(async () => {
+        const doc = await chrome.debugger.sendCommand({ tabId: activeTabId }, 'DOM.getDocument', {})
+        const node = await chrome.debugger.sendCommand({ tabId: activeTabId }, 'DOM.querySelector', {
+          nodeId: doc.root.nodeId, selector
+        })
+        if (!node?.nodeId) throw new Error(`"${selector}" not found`)
+        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'CSS.forcePseudoState', {
+          nodeId: node.nodeId, forcedPseudoClasses: Array.isArray(state) ? state : [state]
+        })
+      })
+      return { forced: true, selector, state }
+    }
+
+    case 'WebClaw.event_listeners': {
+      const tabId = await requireTab()
+      const selector = params.selector
+      if (!selector) throw new Error('event_listeners: missing selector')
+      let listeners = []
+      await withDebugger(async () => {
+        const { result } = await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Runtime.evaluate', {
+          expression: `document.querySelector(${JSON.stringify(selector)})`,
+          returnByValue: false
+        })
+        if (result?.objectId) {
+          const res = await chrome.debugger.sendCommand({ tabId: activeTabId }, 'DOMDebugger.getEventListeners', {
+            objectId: result.objectId
+          })
+          listeners = (res.listeners || []).map(l => ({ type: l.type, useCapture: l.useCapture, passive: l.passive, once: l.once }))
+        }
+      })
+      return listeners
+    }
+
+    case 'WebClaw.storage_items': {
+      const tabId = await requireTab()
+      const storageType = params.type || 'local'
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (t) => {
+          const s = t === 'session' ? sessionStorage : localStorage
+          const items = {}
+          for (let i = 0; i < s.length; i++) {
+            const key = s.key(i)
+            items[key] = s.getItem(key)?.substring(0, 500)
+          }
+          return { type: t, count: s.length, items }
+        },
+        args: [storageType],
+        world: 'MAIN'
+      })
+      return result?.result || {}
+    }
+
+    // ---- Network tools ----
+
+    case 'WebClaw.network_log_start': {
+      await requireTab()
+      networkLogEntries = []
+      networkLogActive = true
+      await withDebugger(async () => {
+        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Network.enable', {})
+      })
+      return { started: true }
+    }
+
+    case 'WebClaw.network_log_dump': {
+      const entries = networkLogEntries.map(e => ({
+        url: e.url, method: e.method, status: e.status,
+        type: e.type, time: e.time
+      }))
+      return { count: entries.length, entries }
+    }
+
+    case 'WebClaw.network_log_dump_bodies': {
+      // Return entries with response bodies
+      const entries = networkLogEntries.slice(-50).map(e => ({
+        url: e.url, method: e.method, status: e.status,
+        type: e.type, responseBody: e.responseBody || null
+      }))
+      return { count: entries.length, entries }
+    }
+
+    case 'WebClaw.api_log': {
+      const tabId = await requireTab()
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          const log = window.__webclaw_api_log || []
+          window.__webclaw_api_log = []
+          return log
+        },
+        world: 'MAIN'
+      })
+      return result?.result || []
+    }
+
+    case 'WebClaw.download': {
+      const tabId = await requireTab()
+      const { url, output } = params
+      if (!url) throw new Error('download: missing url')
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: async (u) => {
+          const res = await fetch(u, { credentials: 'include' })
+          const blob = await res.blob()
+          const reader = new FileReader()
+          return new Promise(resolve => {
+            reader.onload = () => resolve(reader.result)
+            reader.readAsDataURL(blob)
+          })
+        },
+        args: [url],
+        world: 'MAIN'
+      })
+      return { data: result?.result, output: output || '/tmp/webclaw-download' }
+    }
+
+    case 'WebClaw.save_image': {
+      const tabId = await requireTab()
+      const { selector, output } = params
+      if (!selector || !output) throw new Error('save_image: missing selector or output')
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: async (sel) => {
+          const img = document.querySelector(sel)
+          if (!img || !img.src) return null
+          const res = await fetch(img.src, { credentials: 'include' })
+          const blob = await res.blob()
+          const reader = new FileReader()
+          return new Promise(resolve => {
+            reader.onload = () => resolve(reader.result)
+            reader.readAsDataURL(blob)
+          })
+        },
+        args: [selector],
+        world: 'MAIN'
+      })
+      return { data: result?.result, output }
+    }
+
+    // ---- Resource inspection ----
+
+    case 'WebClaw.global_names': {
+      const tabId = await requireTab()
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          const iframe = document.createElement('iframe')
+          iframe.style.display = 'none'
+          document.body.appendChild(iframe)
+          const defaults = new Set(Object.getOwnPropertyNames(iframe.contentWindow))
+          document.body.removeChild(iframe)
+          const custom = Object.getOwnPropertyNames(window).filter(n => !defaults.has(n))
+          return custom.slice(0, 200)
+        },
+        world: 'MAIN'
+      })
+      return result?.result || []
+    }
+
+    case 'WebClaw.resource_tree': {
+      await requireTab()
+      let tree = null
+      await withDebugger(async () => {
+        tree = await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Page.getResourceTree', {})
+      })
+      return tree || {}
+    }
+
+    case 'WebClaw.resource_content': {
+      await requireTab()
+      const { frameId, url } = params
+      if (!url) throw new Error('resource_content: missing url')
+      let content = null
+      await withDebugger(async () => {
+        content = await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Page.getResourceContent', {
+          frameId: frameId || (await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Page.getResourceTree', {}))?.frameTree?.frame?.id,
+          url
+        })
+      })
+      return content || {}
+    }
+
+    case 'WebClaw.search_resource': {
+      await requireTab()
+      const { query } = params
+      if (!query) throw new Error('search_resource: missing query')
+      let results = []
+      await withDebugger(async () => {
+        const search = await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Page.searchInResource', {
+          frameId: (await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Page.getResourceTree', {}))?.frameTree?.frame?.id,
+          ...params
+        })
+        results = search?.result || []
+      })
+      return results
+    }
+
+    case 'WebClaw.request_replay': {
+      await requireTab()
+      const { requestId } = params
+      if (!requestId) throw new Error('request_replay: missing requestId')
+      await withDebugger(async () => {
+        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Network.replayXHR', { requestId })
+      })
+      return { replayed: true, requestId }
+    }
+
+    // ---- Intercept tools ----
+
+    case 'WebClaw.intercept_on': {
+      await requireTab()
+      const patterns = params.patterns || [{ urlPattern: '*' }]
+      await withDebugger(async () => {
+        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Fetch.enable', { patterns })
+      })
+      return { enabled: true, patterns }
+    }
+
+    case 'WebClaw.intercept_off': {
+      await requireTab()
+      await withDebugger(async () => {
+        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Fetch.disable', {})
+      })
+      return { disabled: true }
+    }
+
+    case 'WebClaw.intercept_list': {
+      return { note: 'Intercept patterns are managed via intercept_on. No persistent list.' }
+    }
+
+    case 'WebClaw.intercept_continue': {
+      await requireTab()
+      const { requestId, url, method, headers } = params
+      if (!requestId) throw new Error('intercept_continue: missing requestId')
+      await withDebugger(async () => {
+        const p = { requestId }
+        if (url) p.url = url
+        if (method) p.method = method
+        if (headers) p.headers = headers
+        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Fetch.continueRequest', p)
+      })
+      return { continued: true }
+    }
+
+    case 'WebClaw.intercept_fulfill': {
+      await requireTab()
+      const { requestId, responseCode, body, responseHeaders } = params
+      if (!requestId) throw new Error('intercept_fulfill: missing requestId')
+      await withDebugger(async () => {
+        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Fetch.fulfillRequest', {
+          requestId, responseCode: responseCode || 200,
+          body: body ? btoa(body) : undefined,
+          responseHeaders: responseHeaders || []
+        })
+      })
+      return { fulfilled: true }
+    }
+
+    case 'WebClaw.intercept_fail': {
+      await requireTab()
+      const { requestId, errorReason } = params
+      if (!requestId) throw new Error('intercept_fail: missing requestId')
+      await withDebugger(async () => {
+        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Fetch.failRequest', {
+          requestId, errorReason: errorReason || 'Failed'
+        })
+      })
+      return { failed: true }
+    }
+
+    // ---- Toast collection ----
+
+    case 'WebClaw.collect_toasts': {
+      if (!activeTabId) return []
+      try {
+        const [result] = await chrome.scripting.executeScript({
+          target: { tabId: activeTabId },
+          func: () => {
+            const toasts = window.__webclaw_toasts || []
+            window.__webclaw_toasts = []
+            return toasts
+          },
+          world: 'MAIN'
+        })
+        return result?.result || []
+      } catch { return [] }
     }
 
     default:
       throw new Error(`Unknown WebClaw command: ${method}`)
   }
+}
+
+// --- CDP Click Helper ---
+async function cdpClick(tabId, x, y) {
+  await withDebugger(async () => {
+    const p = { x, y, button: 'left', clickCount: 1 }
+    await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Input.dispatchMouseEvent', { type: 'mousePressed', ...p })
+    await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...p })
+  })
 }
 
 // --- WebClaw Action Handler ---
@@ -399,14 +1255,6 @@ function wsSend(msg) {
   }
 }
 
-// --- CDP Event Forwarding (when debugger is attached by withDebugger) ---
-
-chrome.debugger.onEvent.addListener((source, method, params) => {
-  if (source.tabId === activeTabId) {
-    wsSend({ method, params })
-  }
-})
-
 // --- Helpers ---
 
 function waitForTabLoad(tabId) {
@@ -476,6 +1324,67 @@ chrome.omnibox.onInputEntered.addListener((text, disposition) => {
     chrome.tabs.update({ url: resultsUrl })
   } else {
     chrome.tabs.create({ url: resultsUrl })
+  }
+})
+
+// --- Toast Observer: auto-inject on page load ---
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (tabId === activeTabId && changeInfo.status === 'complete') {
+    chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        if (window.__webclaw_toast_observer) return
+        window.__webclaw_toasts = window.__webclaw_toasts || []
+
+        const observer = new MutationObserver((mutations) => {
+          for (const mutation of mutations) {
+            for (const node of mutation.addedNodes) {
+              if (node.nodeType !== 1) continue
+              const cls = (node.className || '').toString().toLowerCase()
+              const role = node.getAttribute?.('role') || ''
+              const ariaLive = node.getAttribute?.('aria-live') || ''
+              const isToast =
+                role === 'alert' || role === 'status' ||
+                ariaLive === 'polite' || ariaLive === 'assertive' ||
+                /toast|notification|snackbar|alert|message(?![-_])|notice|tip/.test(cls)
+              if (isToast) {
+                const text = node.innerText?.trim()
+                if (text && text.length > 0 && text.length < 500) {
+                  window.__webclaw_toasts.push({ text, time: Date.now(), cls: cls.substring(0, 100) })
+                  if (window.__webclaw_toasts.length > 20) window.__webclaw_toasts.shift()
+                }
+              }
+            }
+          }
+        })
+        observer.observe(document.body, { childList: true, subtree: true })
+        window.__webclaw_toast_observer = observer
+      },
+      world: 'MAIN'
+    }).catch(() => {}) // ignore chrome:// pages
+  }
+})
+
+// --- Network Log Event Handler ---
+
+chrome.debugger.onEvent.addListener((source, method, params) => {
+  if (source.tabId === activeTabId) {
+    wsSend({ method, params })
+
+    // Buffer network events when logging is active
+    if (networkLogActive) {
+      if (method === 'Network.requestWillBeSent') {
+        networkLogEntries.push({
+          requestId: params.requestId,
+          url: params.request?.url, method: params.request?.method,
+          type: params.type, time: params.timestamp
+        })
+      } else if (method === 'Network.responseReceived') {
+        const entry = networkLogEntries.find(e => e.requestId === params.requestId)
+        if (entry) { entry.status = params.response?.status }
+      }
+    }
   }
 })
 
