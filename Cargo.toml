@@ -1,6 +1,6 @@
 [package]
 name = "tap"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Make every interface programmable by AI"
 license = "AGPL-3.0"
