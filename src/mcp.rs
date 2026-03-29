@@ -364,6 +364,25 @@ export default {{
 
 fn tools_schema() -> Value {
     json!([
+        // ===== TAP — Core tap operations (most common entry point) =====
+        {
+            "name": "tap.list",
+            "description": "List all available taps. Returns site, name, and description for each. Use this to discover what websites Tap can access.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "tap.run",
+            "description": "Run a tap and return structured data (JSON rows). This is the primary way to get data from websites. Example: tap.run({site: 'weibo', name: 'hot'}) returns trending topics.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "site": { "type": "string", "description": "Site name (e.g. 'weibo', 'bilibili')" },
+                    "name": { "type": "string", "description": "Tap name (e.g. 'hot', 'trending')" },
+                    "args": { "type": "object", "description": "Tap arguments (e.g. {limit: 10})", "additionalProperties": true }
+                },
+                "required": ["site", "name"]
+            }
+        },
         {
             "name": "tap.screenshot",
             "description": "Take a screenshot. Defaults to grayscale JPEG (smallest tokens). Action tools already return page state — only screenshot when you need visual confirmation.",
@@ -378,6 +397,57 @@ fn tools_schema() -> Value {
             }
         },
         {
+            "name": "tap.logs",
+            "description": "Read recent structured log entries (forge + run events). Returns JSONL from ~/.tap/logs/tap.jsonl. Use to analyze tap performance, find flaky taps, and review forge history.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "limit": { "type": "integer", "description": "Number of recent entries to return (default 50)", "default": 50 },
+                    "event": { "type": "string", "description": "Filter by event type: run, forge_inspect, forge_verify, forge_save" },
+                    "site": { "type": "string", "description": "Filter by site name" }
+                }
+            }
+        },
+        // ===== FORGE — Tap Creation Pipeline =====
+        {
+            "name": "forge.inspect",
+            "description": "One-shot page analysis for tap forging. Returns framework detection, SSR state (with data samples), API endpoint hints, interactive elements, auth state, and ranked strategy recommendations — all in a single call. Replaces 5-8 separate tool calls (screenshot + ax_tree + global_names + api_log + page_info). Call this FIRST when forging a new tap.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": { "type": "string", "description": "Navigate to this URL before analysis (optional — omit to analyze current page)" }
+                }
+            }
+        },
+        {
+            "name": "forge.verify",
+            "description": "One-shot test of tap extraction logic. Navigates to URL, waits, evaluates a JS expression in page context, and validates the result shape against expected columns. Combines navigate + wait + evaluate + validate into one call. Use this during forging to iterate quickly on the data extraction logic before saving.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": { "type": "string", "description": "URL to navigate to" },
+                    "wait_ms": { "type": "integer", "description": "Milliseconds to wait after navigation (default: 2000)", "default": 2000 },
+                    "expression": { "type": "string", "description": "JS expression that returns an array of objects (the tap's data extraction logic)" },
+                    "columns": { "type": "array", "items": { "type": "string" }, "description": "Expected column names — used to validate the result shape" }
+                },
+                "required": ["url", "expression"]
+            }
+        },
+        {
+            "name": "forge.save",
+            "description": "Save a .tap.js file to disk. Writes to ~/.tap/taps/{site}/{name}.tap.js. Use after verifying the tap works with forge.verify.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "site": { "type": "string", "description": "Site name (e.g. 'weibo')" },
+                    "name": { "type": "string", "description": "Tap name (e.g. 'hot')" },
+                    "code": { "type": "string", "description": "Full .tap.js source code" }
+                },
+                "required": ["site", "name", "code"]
+            }
+        },
+        // ===== PAGE — Browser interaction =====
+        {
             "name": "page.nav",
             "description": "Navigate to a URL. Returns page state (url, title) after load.",
             "inputSchema": {
@@ -386,55 +456,6 @@ fn tools_schema() -> Value {
                     "url": { "type": "string", "description": "Target URL" }
                 },
                 "required": ["url"]
-            }
-        },
-        {
-            "name": "inspect.a11y",
-            "description": "Get the accessibility tree — semantic page structure. Primary perception tool.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "depth": { "type": "integer", "description": "Max depth to traverse" }
-                }
-            }
-        },
-        {
-            "name": "inspect.dom",
-            "description": "Get a simplified DOM tree with key attributes (id, class, role, text, box).",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "selector": { "type": "string", "description": "CSS selector for subtree root (default: body)" },
-                    "depth": { "type": "integer", "description": "Max depth", "default": 10 }
-                }
-            }
-        },
-        {
-            "name": "inspect.page",
-            "description": "Get current page info: URL, title, viewport, scroll position, readyState.",
-            "inputSchema": { "type": "object", "properties": {} }
-        },
-        {
-            "name": "page.find",
-            "description": "Find elements by visible text. Returns list with tag, role, text, selector, coordinates.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "query": { "type": "string", "description": "Text to search for" },
-                    "role": { "type": "string", "description": "Filter by element role (button, link, input, etc.)" }
-                },
-                "required": ["query"]
-            }
-        },
-        {
-            "name": "inspect.element",
-            "description": "Deep probe of a single element: tag, attributes, box model, visibility, editable.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "selector": { "type": "string", "description": "CSS selector" }
-                },
-                "required": ["selector"]
             }
         },
         {
@@ -458,6 +479,29 @@ fn tools_schema() -> Value {
                     "text": { "type": "string", "description": "Text to type" }
                 },
                 "required": ["selector", "text"]
+            }
+        },
+        {
+            "name": "page.find",
+            "description": "Find elements by visible text. Returns list with tag, role, text, selector, coordinates.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Text to search for" },
+                    "role": { "type": "string", "description": "Filter by element role (button, link, input, etc.)" }
+                },
+                "required": ["query"]
+            }
+        },
+        {
+            "name": "page.eval",
+            "description": "Evaluate a JavaScript expression in the browser and return the result.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "expression": { "type": "string", "description": "JS expression to evaluate" }
+                },
+                "required": ["expression"]
             }
         },
         {
@@ -519,22 +563,6 @@ fn tools_schema() -> Value {
             }
         },
         {
-            "name": "page.eval",
-            "description": "Evaluate a JavaScript expression in the browser and return the result.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "expression": { "type": "string", "description": "JS expression to evaluate" }
-                },
-                "required": ["expression"]
-            }
-        },
-        {
-            "name": "page.cookies",
-            "description": "Get cookies for the current page.",
-            "inputSchema": { "type": "object", "properties": {} }
-        },
-        {
             "name": "page.dialog",
             "description": "Handle a JavaScript dialog (alert/confirm/prompt).",
             "inputSchema": {
@@ -546,14 +574,9 @@ fn tools_schema() -> Value {
             }
         },
         {
-            "name": "page.storage",
-            "description": "Read localStorage or sessionStorage. Many SPAs store auth tokens, API keys, and user data here.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "type": { "type": "string", "description": "Storage type: 'local' (default) or 'session'" }
-                }
-            }
+            "name": "page.cookies",
+            "description": "Get cookies for the current page.",
+            "inputSchema": { "type": "object", "properties": {} }
         },
         {
             "name": "page.setCookie",
@@ -569,7 +592,54 @@ fn tools_schema() -> Value {
                 "required": ["name", "value", "domain"]
             }
         },
+        {
+            "name": "page.storage",
+            "description": "Read localStorage or sessionStorage. Many SPAs store auth tokens, API keys, and user data here.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "type": { "type": "string", "description": "Storage type: 'local' (default) or 'session'" }
+                }
+            }
+        },
         // ===== INSPECT — Deep Inspection Tools =====
+        {
+            "name": "inspect.page",
+            "description": "Get current page info: URL, title, viewport, scroll position, readyState.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "inspect.a11y",
+            "description": "Get the accessibility tree — semantic page structure. Primary perception tool.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "depth": { "type": "integer", "description": "Max depth to traverse" }
+                }
+            }
+        },
+        {
+            "name": "inspect.dom",
+            "description": "Get a simplified DOM tree with key attributes (id, class, role, text, box).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "selector": { "type": "string", "description": "CSS selector for subtree root (default: body)" },
+                    "depth": { "type": "integer", "description": "Max depth", "default": 10 }
+                }
+            }
+        },
+        {
+            "name": "inspect.element",
+            "description": "Deep probe of a single element: tag, attributes, box model, visibility, editable.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "selector": { "type": "string", "description": "CSS selector" }
+                },
+                "required": ["selector"]
+            }
+        },
         {
             "name": "inspect.apiLog",
             "description": "Get all API calls (fetch/XHR) recorded since page load. Returns url, method, status, request_body, response_body for each call. This captures everything the page does — no manual network log needed.",
@@ -623,76 +693,6 @@ fn tools_schema() -> Value {
                     "output": { "type": "string", "description": "Output file path" }
                 },
                 "required": ["output"]
-            }
-        },
-        // ===== FORGE — Tap Creation Pipeline =====
-        {
-            "name": "forge.inspect",
-            "description": "One-shot page analysis for tap forging. Returns framework detection, SSR state (with data samples), API endpoint hints, interactive elements, auth state, and ranked strategy recommendations — all in a single call. Replaces 5-8 separate tool calls (screenshot + ax_tree + global_names + api_log + page_info). Call this FIRST when forging a new tap.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "url": { "type": "string", "description": "Navigate to this URL before analysis (optional — omit to analyze current page)" }
-                }
-            }
-        },
-        {
-            "name": "forge.verify",
-            "description": "One-shot test of tap extraction logic. Navigates to URL, waits, evaluates a JS expression in page context, and validates the result shape against expected columns. Combines navigate + wait + evaluate + validate into one call. Use this during forging to iterate quickly on the data extraction logic before saving.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "url": { "type": "string", "description": "URL to navigate to" },
-                    "wait_ms": { "type": "integer", "description": "Milliseconds to wait after navigation (default: 2000)", "default": 2000 },
-                    "expression": { "type": "string", "description": "JS expression that returns an array of objects (the tap's data extraction logic)" },
-                    "columns": { "type": "array", "items": { "type": "string" }, "description": "Expected column names — used to validate the result shape" }
-                },
-                "required": ["url", "expression"]
-            }
-        },
-        {
-            "name": "forge.save",
-            "description": "Save a .tap.js file to disk. Writes to ~/.tap/taps/{site}/{name}.tap.js. Use after verifying the tap works with forge.verify.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "site": { "type": "string", "description": "Site name (e.g. 'weibo')" },
-                    "name": { "type": "string", "description": "Tap name (e.g. 'hot')" },
-                    "code": { "type": "string", "description": "Full .tap.js source code" }
-                },
-                "required": ["site", "name", "code"]
-            }
-        },
-        // ===== TAP — Core tap operations =====
-        {
-            "name": "tap.list",
-            "description": "List all available taps. Returns site, name, and description for each. Use this to discover what websites Tap can access.",
-            "inputSchema": { "type": "object", "properties": {} }
-        },
-        {
-            "name": "tap.run",
-            "description": "Run a tap and return structured data (JSON rows). This is the primary way to get data from websites. Example: tap.run({site: 'weibo', name: 'hot'}) returns trending topics.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "site": { "type": "string", "description": "Site name (e.g. 'weibo', 'bilibili')" },
-                    "name": { "type": "string", "description": "Tap name (e.g. 'hot', 'trending')" },
-                    "args": { "type": "object", "description": "Tap arguments (e.g. {limit: 10})", "additionalProperties": true }
-                },
-                "required": ["site", "name"]
-            }
-        },
-        // ===== LOGS — Structured event log for AI analysis =====
-        {
-            "name": "tap.logs",
-            "description": "Read recent structured log entries (forge + run events). Returns JSONL from ~/.tap/logs/tap.jsonl. Use to analyze tap performance, find flaky taps, and review forge history.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "limit": { "type": "integer", "description": "Number of recent entries to return (default 50)", "default": 50 },
-                    "event": { "type": "string", "description": "Filter by event type: run, forge_inspect, forge_verify, forge_save" },
-                    "site": { "type": "string", "description": "Filter by site name" }
-                }
             }
         },
         // ===== INTERCEPT — Active Request Interception =====
@@ -755,7 +755,7 @@ fn tools_schema() -> Value {
                 "required": ["request_id"]
             }
         },
-        // --- Tab Management ---
+        // ===== TAB — Tab Management =====
         {
             "name": "tab.list",
             "description": "List all open browser tabs. Returns tabId, url, title for each tab. Use tabId in other tools to target a specific tab.",
