@@ -1,7 +1,7 @@
 /**
  * Tap Protocol — POSIX-inspired design for interface automation.
  *
- * Architecture: Kernel (8 primitives) + Standard Library (13 named operations)
+ * Architecture: Kernel (8 primitives) + Standard Library (16 named operations)
  *
  * KERNEL — irreducible primitives every runtime must implement:
  *   eval(fn, ...args)                — execute in target context (the universal escape hatch)
