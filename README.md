@@ -2,9 +2,7 @@
 
 > **Make every interface programmable by AI.**
 
-Interfaces are closing their APIs. AI agents need them more than ever.
-
-Tap is an extension + MCP server. AI agents forge `.tap.js` scripts that extract data from any interface — deterministically, with zero AI at runtime.
+Tap is a universal protocol for AI to operate any interface. It defines 8 kernel primitives + 16 stdlib operations — the minimal complete set for all human-interface interactions. AI agents forge `.tap.js` scripts once, then any agent runs them deterministically with zero AI at runtime.
 
 ```
 page_intelligence → forge_verify → forge_save → run_tap
@@ -12,6 +10,34 @@ page_intelligence → forge_verify → forge_save → run_tap
 ```
 
 One agent forges a tap, every agent benefits.
+
+## Protocol Architecture
+
+Tap follows the **POSIX design philosophy**: minimal kernel, maximal possibility.
+
+```
+┌──────────────────────────────────────────────────┐
+│ .tap.js scripts (deterministic, zero AI)          │
+└──────────────────────┬───────────────────────────┘
+┌──────────────────────▼───────────────────────────┐
+│ Stdlib — 16 named operations                      │
+│ Built on kernel. Runtime may override.            │
+│ click, type, hover, scroll, pressKey, select,    │
+│ upload, dialog, fetch, find, cookies, download,   │
+│ waitFor, waitForNetwork, getSSRState, storage     │
+└──────────────────────┬───────────────────────────┘
+┌──────────────────────▼───────────────────────────┐
+│ Kernel — 8 irreducible primitives                 │
+│ eval, pointer, keyboard, nav, wait,              │
+│ screenshot, tap, capabilities                     │
+└──────────────────────┬───────────────────────────┘
+┌──────────────────────▼───────────────────────────┐
+│ Runtime #1: Chrome Extension (current)            │
+│ Runtime #N: Android, iOS, Desktop (future)        │
+└──────────────────────────────────────────────────┘
+```
+
+A new runtime implements 8 kernel methods, gets 16 stdlib operations for free.
 
 ## Install
 
@@ -79,7 +105,7 @@ tap xiaohongshu/search?keyword=美食
 ### From CLI
 
 ```bash
-tap list                        # See all 45 taps
+tap list                        # See all taps
 tap github trending --limit 5   # Run via extension bridge
 tap check                       # Health check all taps
 ```
@@ -92,46 +118,45 @@ tap check                       # Health check all taps
 > Then forge_save to persist the new tap
 ```
 
-## 45 Taps
+## Page API
 
-| Site | Taps |
-|------|------|
-| GitHub | trending |
-| Hacker News | hot |
-| Reddit | hot |
-| Weibo | hot, search |
-| Bilibili | hot |
-| Xiaohongshu | hot, search, publish, post_detail |
-| Zhihu | hot, search |
-| Douyin | hot, search |
-| YouTube | trending |
-| X (Twitter) | trending |
-| Product Hunt | hot |
-| Stack Overflow | hot |
-| V2EX | hot |
-| Lobsters | hot |
-| Dev.to | top |
-| Bluesky | trending |
-| Baidu | hot |
-| Toutiao | hot |
-| Douban | hot |
-| 36Kr | hot |
-| Juejin | hot |
-| SSPAI | hot |
-| Xueqiu | hot-stock |
-| Wikipedia | most-read |
-| Steam | top-sellers |
-| CoinGecko | top |
-| Crates.io | popular |
-| PyPI | top |
-| Google | trends |
-| Pixiv | ranking |
-| Dictionary | search |
-| Facebook | feed |
-| Instagram | explore |
-| TikTok | trending |
-| Jimeng | generate, history |
-| Telegraph | publish |
+### Kernel — 8 irreducible primitives
+
+Every runtime must implement these. They are the universal contract.
+
+| Primitive | Description |
+|-----------|-------------|
+| `page.eval(fn, ...args)` | Execute in target context (the universal escape hatch) |
+| `page.pointer(x, y, action)` | Pointer event at coordinates (click/move/down/up) |
+| `page.keyboard(key, action, mods?)` | Keyboard event (press/down/up/type) |
+| `page.nav(url)` | Navigate to URL |
+| `page.wait(ms \| condition)` | Wait for time or condition |
+| `page.screenshot()` | Visual capture |
+| `page.tap(site, name, args?)` | Composition — call another tap |
+| `page.capabilities()` | Declare what this runtime supports |
+
+### Stdlib — 16 named operations
+
+Built on kernel primitives. Runtime may override for native performance.
+
+| Operation | Built from | Description |
+|-----------|-----------|-------------|
+| `page.click(target)` | eval + pointer | Click by selector or visible text |
+| `page.type(sel, text)` | eval + keyboard | Type into an element |
+| `page.hover(sel)` | eval + pointer | Hover over element |
+| `page.scroll(sel)` | eval | Scroll element into view |
+| `page.pressKey(key, mods?)` | keyboard | Single key press |
+| `page.select(sel, value)` | eval | Dropdown selection |
+| `page.upload(sel, files)` | runtime override | File upload |
+| `page.dialog(accept?, text?)` | runtime override | Handle alert/confirm/prompt |
+| `page.fetch(url, opts?)` | eval | API call with session cookies |
+| `page.find(query, role?)` | eval | Find elements by visible text |
+| `page.cookies()` | runtime override | Read cookies |
+| `page.download(url)` | eval | Fetch + parse response |
+| `page.waitFor(sel, ms?)` | wait | Wait for element to appear |
+| `page.waitForNetwork(ms?, idle?)` | eval | Wait for network to settle |
+| `page.getSSRState(name?)` | eval | Extract SSR globals |
+| `page.storage(type?)` | eval | Read local/session storage |
 
 ## .tap.js Format
 
@@ -140,7 +165,6 @@ export default {
   site: "github",
   name: "trending",
   description: "GitHub Trending repositories",
-  columns: ["repo", "description", "stars", "language"],
   args: { limit: { type: "int", default: 20 } },
   health: { min_rows: 5, non_empty: ["repo"] },
 
@@ -163,33 +187,17 @@ export default {
 }
 ```
 
-### Page API (11 methods)
-
-| Method | Mode | Description |
-|--------|------|-------------|
-| `page.nav(url)` | scripting | Navigate |
-| `page.wait(ms)` | scripting | Fixed delay |
-| `page.waitFor(sel, ms)` | scripting | Wait for selector |
-| `page.eval(fn)` | scripting | Run JS in page context |
-| `page.fetch(url)` | scripting | Fetch with page cookies |
-| `page.screenshot()` | scripting | Capture visible area |
-| `page.cookies()` | scripting | Read cookies |
-| `page.click(target)` | debugger | CDP native click |
-| `page.type(sel, text)` | debugger | CDP native keyboard |
-| `page.upload(sel, files)` | debugger | File upload via CDP |
-| `page.tap(site, name)` | — | Run another tap |
-
-Scripting mode = undetectable. Debugger mode = millisecond attach/detach.
-
 ## Architecture
 
 ```
 Claude Code ←→ MCP (stdin/stdout) ←→ Bridge (ws://9333) ←→ Chrome Extension
-                 Rust binary              WebSocket            background.js
-                 ~2,300 lines             auto-reconnect       page API + taps
+                 Rust binary              WebSocket            kernel + stdlib
+                 gateway (~2,300 lines)   relay                Runtime #1
 ```
 
-Rust binary = thin MCP bridge (6 dependencies). Chrome extension = sole runtime. No direct CDP.
+**Rust binary** = gateway between AI agents (MCP) and runtime (extension). No browser logic.
+**Chrome extension** = Runtime #1. Implements 8 kernel primitives via chrome.scripting + CDP.
+**.tap.js** = deterministic scripts. Zero AI at runtime.
 
 ## MCP Tools
 
@@ -211,10 +219,10 @@ cargo test               # 39 tests
 cargo clippy             # Lint (0 warnings)
 
 # Extension tests
-node extension-v2/test/tap-format.test.mjs   # 447 constraints
-node extension-v2/test/page-api.test.mjs     # 16 constraints
+node extension-v2/test/tap-format.test.mjs   # 790 constraints
+node extension-v2/test/page-api.test.mjs     # 59 constraints (kernel + stdlib)
 ```
 
 ## License
 
-MIT
+AGPL-3.0 — see [LICENSE](LICENSE). Commercial licensing available.
