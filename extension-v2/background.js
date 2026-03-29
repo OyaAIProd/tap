@@ -13,29 +13,70 @@
 import { registerClaw, listClaws, runClaw, parseClawURL } from './runtime/executor.js'
 import { gatherPageIntelligence } from './runtime/page-intelligence.js'
 
-// --- Claw Registration (dynamic from manifest) ---
+// --- Claw Registration (static imports — MV3 service workers prohibit dynamic import()) ---
+// AUTO-GENERATED: run `node scripts/gen-imports.js` to regenerate
 
-async function registerAllClaws() {
-  try {
-    const resp = await fetch(chrome.runtime.getURL('claws/manifest.json'))
-    const files = await resp.json()
-    let count = 0
-    for (const file of files) {
-      try {
-        const mod = await import(`./claws/${file}`)
-        registerClaw(mod.default)
-        count++
-      } catch (e) {
-        console.warn(`[claw] failed to load ${file}:`, e.message)
-      }
-    }
-    console.log(`[claw] registered ${count} claws`)
-  } catch (e) {
-    console.error('[claw] manifest load failed:', e.message)
-  }
-}
+import c_36kr_hot from './claws/36kr/hot.claw.js'
+import c_baidu_hot from './claws/baidu/hot.claw.js'
+import c_bilibili_hot from './claws/bilibili/hot.claw.js'
+import c_bluesky_trending from './claws/bluesky/trending.claw.js'
+import c_coingecko_top from './claws/coingecko/top.claw.js'
+import c_crates_popular from './claws/crates/popular.claw.js'
+import c_devto_top from './claws/devto/top.claw.js'
+import c_dictionary_search from './claws/dictionary/search.claw.js'
+import c_douban_hot from './claws/douban/hot.claw.js'
+import c_douyin_hot from './claws/douyin/hot.claw.js'
+import c_douyin_search from './claws/douyin/search.claw.js'
+import c_facebook_feed from './claws/facebook/feed.claw.js'
+import c_github_trending from './claws/github/trending.claw.js'
+import c_google_trends from './claws/google/trends.claw.js'
+import c_hackernews_hot from './claws/hackernews/hot.claw.js'
+import c_instagram_explore from './claws/instagram/explore.claw.js'
+import c_jimeng_generate from './claws/jimeng/generate.claw.js'
+import c_jimeng_history from './claws/jimeng/history.claw.js'
+import c_juejin_hot from './claws/juejin/hot.claw.js'
+import c_lobsters_hot from './claws/lobsters/hot.claw.js'
+import c_pixiv_ranking from './claws/pixiv/ranking.claw.js'
+import c_producthunt_hot from './claws/producthunt/hot.claw.js'
+import c_pypi_top from './claws/pypi/top.claw.js'
+import c_reddit_hot from './claws/reddit/hot.claw.js'
+import c_sspai_hot from './claws/sspai/hot.claw.js'
+import c_stackoverflow_hot from './claws/stackoverflow/hot.claw.js'
+import c_steam_top_sellers from './claws/steam/top-sellers.claw.js'
+import c_telegraph_publish from './claws/telegraph/publish.claw.js'
+import c_tiktok_trending from './claws/tiktok/trending.claw.js'
+import c_toutiao_hot from './claws/toutiao/hot.claw.js'
+import c_v2ex_hot from './claws/v2ex/hot.claw.js'
+import c_weibo_hot from './claws/weibo/hot.claw.js'
+import c_weibo_search from './claws/weibo/search.claw.js'
+import c_wikipedia_most_read from './claws/wikipedia/most-read.claw.js'
+import c_x_trending from './claws/x/trending.claw.js'
+import c_xiaohongshu_hot from './claws/xiaohongshu/hot.claw.js'
+import c_xiaohongshu_post_detail from './claws/xiaohongshu/post_detail.claw.js'
+import c_xiaohongshu_publish from './claws/xiaohongshu/publish.claw.js'
+import c_xiaohongshu_search_api from './claws/xiaohongshu/search_api.claw.js'
+import c_xiaohongshu_search_fast from './claws/xiaohongshu/search_fast.claw.js'
+import c_xiaohongshu_search from './claws/xiaohongshu/search.claw.js'
+import c_xueqiu_hot_stock from './claws/xueqiu/hot-stock.claw.js'
+import c_youtube_trending from './claws/youtube/trending.claw.js'
+import c_zhihu_hot from './claws/zhihu/hot.claw.js'
+import c_zhihu_search from './claws/zhihu/search.claw.js'
 
-registerAllClaws()
+const ALL_CLAWS = [
+  c_36kr_hot, c_baidu_hot, c_bilibili_hot, c_bluesky_trending, c_coingecko_top,
+  c_crates_popular, c_devto_top, c_dictionary_search, c_douban_hot, c_douyin_hot,
+  c_douyin_search, c_facebook_feed, c_github_trending, c_google_trends, c_hackernews_hot,
+  c_instagram_explore, c_jimeng_generate, c_jimeng_history, c_juejin_hot, c_lobsters_hot,
+  c_pixiv_ranking, c_producthunt_hot, c_pypi_top, c_reddit_hot, c_sspai_hot,
+  c_stackoverflow_hot, c_steam_top_sellers, c_telegraph_publish, c_tiktok_trending,
+  c_toutiao_hot, c_v2ex_hot, c_weibo_hot, c_weibo_search, c_wikipedia_most_read,
+  c_x_trending, c_xiaohongshu_hot, c_xiaohongshu_post_detail, c_xiaohongshu_publish,
+  c_xiaohongshu_search_api, c_xiaohongshu_search_fast, c_xiaohongshu_search,
+  c_xueqiu_hot_stock, c_youtube_trending, c_zhihu_hot, c_zhihu_search,
+]
+
+for (const mod of ALL_CLAWS) registerClaw(mod)
+console.log(`[claw] registered ${ALL_CLAWS.length} claws`)
 
 // --- State ---
 

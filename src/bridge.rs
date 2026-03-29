@@ -128,3 +128,101 @@ pub async fn try_extension_bridge() -> Result<BridgeClient, Box<dyn std::error::
     eprintln!("bridge: attached to tab {}", tab_id);
     Ok(client)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bridge_port_is_9333() {
+        assert_eq!(BRIDGE_PORT, 9333);
+    }
+
+    #[tokio::test]
+    async fn bridge_server_starts_with_no_client() {
+        // Bind to a random port to avoid conflicts
+        let server = BridgeServer {
+            client: Arc::new(Mutex::new(None)),
+        };
+        assert!(
+            server.get_client().await.is_none(),
+            "fresh server should have no client"
+        );
+    }
+
+    #[tokio::test]
+    async fn bridge_accepts_websocket_connection() {
+        // Start a listener on a random port
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        // Spawn a task that accepts one connection and does WS handshake
+        let server_task = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            BridgeClient::connect_from_stream(stream)
+                .await
+                .map(|_| true)
+                .map_err(|e| e.to_string())
+        });
+
+        // Connect as a WebSocket client
+        let url = format!("ws://{}", addr);
+        let (ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+
+        // Server should have accepted and completed handshake
+        let client_result = server_task.await.unwrap();
+        assert!(client_result.is_ok(), "handshake should succeed");
+
+        drop(ws);
+    }
+
+    #[tokio::test]
+    async fn bridge_client_send_receive_roundtrip() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        // Server side — wrap in channel to avoid Send bound on Box<dyn Error>
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let client = BridgeClient::connect_from_stream(stream).await.unwrap();
+            let _ = tx.send(client);
+        });
+
+        // Client side — echo server
+        let url = format!("ws://{}", addr);
+        let (ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+        let (mut write, mut read) = ws.split();
+
+        let echo_task = tokio::spawn(async move {
+            if let Some(Ok(Message::Text(text))) = read.next().await {
+                // Parse request, send response with matching id
+                let req: serde_json::Value = serde_json::from_str(&text).unwrap();
+                let id = req["id"].as_u64().unwrap();
+                let resp = serde_json::json!({"id": id, "result": {"pong": true}});
+                write
+                    .send(Message::Text(serde_json::to_string(&resp).unwrap().into()))
+                    .await
+                    .unwrap();
+            }
+        });
+
+        let client = rx.await.unwrap();
+
+        // Send a request and get response
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            client.send("Bridge.ping", None),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(result["pong"], true);
+
+        echo_task.await.unwrap();
+    }
+}

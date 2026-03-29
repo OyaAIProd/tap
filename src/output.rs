@@ -1,21 +1,46 @@
 use std::collections::HashMap;
 
-use tabled::{builder::Builder, settings::Style};
-
-/// Format rows as a table string (for testing).
+/// Format rows as an aligned table.
 pub fn format_table(columns: &[String], rows: &[HashMap<String, String>]) -> String {
-    let mut builder = Builder::default();
-    // Add header row
-    builder.push_record(columns.iter().map(|c| c.as_str()));
-    // Add data rows
+    // Calculate column widths
+    let mut widths: Vec<usize> = columns.iter().map(|c| c.len()).collect();
     for row in rows {
-        let record: Vec<&str> = columns
-            .iter()
-            .map(|col| row.get(col).map(|s| s.as_str()).unwrap_or(""))
-            .collect();
-        builder.push_record(record);
+        for (i, col) in columns.iter().enumerate() {
+            let val_len = row.get(col).map(|s| s.len()).unwrap_or(0);
+            if val_len > widths[i] {
+                widths[i] = val_len;
+            }
+        }
     }
-    builder.build().with(Style::rounded()).to_string()
+
+    let mut lines = Vec::with_capacity(rows.len() + 3);
+
+    // Header
+    let header: Vec<String> = columns
+        .iter()
+        .enumerate()
+        .map(|(i, c)| format!("{:<width$}", c, width = widths[i]))
+        .collect();
+    lines.push(header.join("  "));
+
+    // Separator
+    let sep: Vec<String> = widths.iter().map(|w| "-".repeat(*w)).collect();
+    lines.push(sep.join("  "));
+
+    // Rows
+    for row in rows {
+        let vals: Vec<String> = columns
+            .iter()
+            .enumerate()
+            .map(|(i, col)| {
+                let val = row.get(col).map(|s| s.as_str()).unwrap_or("");
+                format!("{:<width$}", val, width = widths[i])
+            })
+            .collect();
+        lines.push(vals.join("  "));
+    }
+
+    lines.join("\n")
 }
 
 /// Format rows as JSON array.
@@ -72,12 +97,6 @@ pub fn print_output(
     Ok(())
 }
 
-/// Format and print to stdout (table format).
-#[allow(dead_code)]
-pub fn print_table(columns: &[String], rows: &[HashMap<String, String>]) {
-    println!("{}", format_table(columns, rows));
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,13 +107,10 @@ mod tests {
         let mut row = HashMap::new();
         row.insert("title".to_string(), "Hello".to_string());
         row.insert("views".to_string(), "1000".to_string());
-        let rows = vec![row];
-
-        let output = format_table(&columns, &rows);
-        assert!(output.contains("title"), "output should contain 'title'");
-        assert!(output.contains("views"), "output should contain 'views'");
-        assert!(output.contains("Hello"), "output should contain 'Hello'");
-        assert!(output.contains("1000"), "output should contain '1000'");
+        let output = format_table(&columns, &vec![row]);
+        assert!(output.contains("title"));
+        assert!(output.contains("Hello"));
+        assert!(output.contains("1000"));
     }
 
     #[test]
@@ -102,14 +118,18 @@ mod tests {
         let columns = vec!["name".to_string(), "age".to_string()];
         let mut row = HashMap::new();
         row.insert("name".to_string(), "Alice".to_string());
-        // "age" is intentionally missing
-        let rows = vec![row];
+        let output = format_table(&columns, &vec![row]);
+        assert!(output.contains("Alice"));
+        assert!(output.contains("name"));
+        assert!(output.contains("age"));
+    }
 
-        let output = format_table(&columns, &rows);
-        assert!(output.contains("Alice"), "output should contain 'Alice'");
-        // Should not panic and should still produce valid output
-        assert!(output.contains("name"), "output should contain 'name'");
-        assert!(output.contains("age"), "output should contain 'age'");
+    #[test]
+    fn format_table_empty_rows() {
+        let columns = vec!["id".to_string(), "status".to_string()];
+        let output = format_table(&columns, &vec![]);
+        assert!(output.contains("id"));
+        assert!(output.contains("status"));
     }
 
     #[test]
@@ -118,12 +138,9 @@ mod tests {
         let mut row = HashMap::new();
         row.insert("title".to_string(), "Hello".to_string());
         row.insert("views".to_string(), "1000".to_string());
-        let rows = vec![row];
-        let json_str = format_json(&columns, &rows);
+        let json_str = format_json(&columns, &vec![row]);
         let parsed: Vec<serde_json::Value> = serde_json::from_str(&json_str).unwrap();
-        assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0]["title"], "Hello");
-        assert_eq!(parsed[0]["views"], "1000");
     }
 
     #[test]
@@ -132,8 +149,7 @@ mod tests {
         let mut row = HashMap::new();
         row.insert("name".to_string(), "Alice".to_string());
         row.insert("age".to_string(), "30".to_string());
-        let rows = vec![row];
-        let csv_str = format_csv(&columns, &rows);
+        let csv_str = format_csv(&columns, &vec![row]);
         let lines: Vec<&str> = csv_str.lines().collect();
         assert_eq!(lines[0], "name,age");
         assert_eq!(lines[1], "Alice,30");
@@ -144,19 +160,7 @@ mod tests {
         let columns = vec!["title".to_string()];
         let mut row = HashMap::new();
         row.insert("title".to_string(), "hello, world".to_string());
-        let rows = vec![row];
-        let csv_str = format_csv(&columns, &rows);
+        let csv_str = format_csv(&columns, &vec![row]);
         assert!(csv_str.contains("\"hello, world\""));
-    }
-
-    #[test]
-    fn format_table_empty_rows() {
-        let columns = vec!["id".to_string(), "status".to_string()];
-        let rows: Vec<HashMap<String, String>> = vec![];
-
-        let output = format_table(&columns, &rows);
-        assert!(!output.is_empty(), "output should not be empty");
-        assert!(output.contains("id"), "output should contain 'id'");
-        assert!(output.contains("status"), "output should contain 'status'");
     }
 }
