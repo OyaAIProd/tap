@@ -74,10 +74,7 @@ pub fn list_adapters(base_dirs: &[&str]) -> Vec<AdapterInfo> {
                 let (adapter_name, format) = if filename.ends_with(".yaml") {
                     (filename.strip_suffix(".yaml").unwrap().to_string(), "yaml")
                 } else if filename.ends_with(".claw.js") {
-                    (
-                        filename.strip_suffix(".claw.js").unwrap().to_string(),
-                        "js",
-                    )
+                    (filename.strip_suffix(".claw.js").unwrap().to_string(), "js")
                 } else {
                     continue;
                 };
@@ -145,12 +142,11 @@ fn extract_js_string_field(content: &str, field: &str) -> Option<String> {
         .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
 }
 
-/// Compute the standard adapter search directories (YAML + .claw.js).
+/// Compute the standard adapter search directories (.claw.js only).
 pub fn adapter_base_dirs() -> Vec<String> {
     let home = std::env::var("HOME").unwrap_or_default();
     vec![
-        "adapters".to_string(),
-        format!("{}/.claw/adapters", home),
+        "extension-v2/claws".to_string(),
         format!("{}/.claw/claws", home),
     ]
 }
@@ -159,10 +155,16 @@ pub fn adapter_base_dirs() -> Vec<String> {
 pub fn parse_health_contract(value: &serde_json::Value) -> Option<HealthContract> {
     let obj = value.as_object()?;
     Some(HealthContract {
-        min_rows: obj.get("min_rows").and_then(|v| v.as_u64()).map(|v| v as usize),
+        min_rows: obj
+            .get("min_rows")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize),
         non_empty: obj.get("non_empty").and_then(|v| {
-            v.as_array()
-                .map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect())
+            v.as_array().map(|a| {
+                a.iter()
+                    .filter_map(|s| s.as_str().map(String::from))
+                    .collect()
+            })
         }),
     })
 }
@@ -197,7 +199,11 @@ mod tests {
     fn adapter_base_dirs_excludes_yaml_legacy() {
         // Why: v2 uses .claw.js only; "adapters/" YAML dir is dead weight
         let dirs = adapter_base_dirs();
-        assert_eq!(dirs.len(), 2, "should only have extension claws + ~/.claw/claws");
+        assert_eq!(
+            dirs.len(),
+            2,
+            "should only have extension claws + ~/.claw/claws"
+        );
         assert!(
             !dirs.iter().any(|d| d == "adapters"),
             "must not include legacy YAML 'adapters' directory"

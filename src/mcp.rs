@@ -96,6 +96,28 @@ pub async fn serve() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Regenerate extension-v2/claws/manifest.json from the directory contents.
+fn update_claws_manifest() -> Result<(), Box<dyn std::error::Error>> {
+    let claws_dir = std::path::Path::new("extension-v2/claws");
+    let mut files = Vec::new();
+    for site_entry in std::fs::read_dir(claws_dir)?.flatten() {
+        if !site_entry.path().is_dir() {
+            continue;
+        }
+        let site = site_entry.file_name().to_string_lossy().to_string();
+        for file_entry in std::fs::read_dir(site_entry.path())?.flatten() {
+            let name = file_entry.file_name().to_string_lossy().to_string();
+            if name.ends_with(".claw.js") {
+                files.push(format!("{}/{}", site, name));
+            }
+        }
+    }
+    files.sort();
+    let json = serde_json::to_string_pretty(&files)?;
+    std::fs::write(claws_dir.join("manifest.json"), format!("{}\n", json))?;
+    Ok(())
+}
+
 async fn write_response(
     stdout: &mut tokio::io::Stdout,
     response: &Value,
@@ -660,33 +682,31 @@ async fn execute_tool(
 ) -> Result<Value, Box<dyn std::error::Error>> {
     match name {
         // --- Tools with local logic ---
-
         "page_intelligence" => {
             if let Some(url) = args["url"].as_str() {
                 client.navigate(url).await?;
             }
             client.send("Claw.pageIntelligence", Some(json!({}))).await
         }
-        "list_adapters" => {
-            let base_dirs = crate::adapter::adapter_base_dirs();
-            let refs: Vec<&str> = base_dirs.iter().map(|s| s.as_str()).collect();
-            let adapters = crate::adapter::list_adapters(&refs);
-            Ok(json!(adapters.iter().map(|a| json!({
-                "site": a.site, "name": a.name,
-                "description": a.description, "strategy": a.strategy
-            })).collect::<Vec<_>>()))
-        }
+        "list_adapters" => client.send("Claw.list", Some(json!({}))).await,
         "run_adapter" => {
             let site = args["site"].as_str().ok_or("missing site")?;
             let name_arg = args["name"].as_str().ok_or("missing name")?;
             let adapter_args = args.get("args").cloned().unwrap_or(json!({}));
             let mut result = client
-                .send("Claw.run", Some(json!({"site": site, "name": name_arg, "args": adapter_args})))
+                .send(
+                    "Claw.run",
+                    Some(json!({"site": site, "name": name_arg, "args": adapter_args})),
+                )
                 .await?;
             // Health validation
             if let Some(rows) = result.get("rows").and_then(|r| r.as_array()) {
-                if let Some(contract) = result.get("health").and_then(crate::adapter::parse_health_contract) {
-                    let report = crate::health::validate(&format!("{}/{}", site, name_arg), &contract, rows);
+                if let Some(contract) = result
+                    .get("health")
+                    .and_then(crate::adapter::parse_health_contract)
+                {
+                    let report =
+                        crate::health::validate(&format!("{}/{}", site, name_arg), &contract, rows);
                     result["health_report"] = serde_json::to_value(&report).unwrap_or_default();
                 }
             }
@@ -722,7 +742,8 @@ async fn execute_tool(
                 if !columns.is_empty() {
                     if let Some(obj) = rows.unwrap().first().and_then(|r| r.as_object()) {
                         let actual: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
-                        let missing: Vec<_> = columns.iter().filter(|c| !actual.contains(*c)).collect();
+                        let missing: Vec<_> =
+                            columns.iter().filter(|c| !actual.contains(*c)).collect();
                         if missing.is_empty() {
                             diagnostics.push(format!("OK: all {} columns present", columns.len()));
                         } else {
@@ -744,23 +765,54 @@ async fn execute_tool(
             let site = args["site"].as_str().ok_or("missing site")?;
             let claw_name = args["name"].as_str().ok_or("missing name")?;
             let code = args["code"].as_str().ok_or("missing code")?;
-            let home = std::env::var("HOME").unwrap_or_default();
-            let dir = format!("{}/.claw/claws/{}", home, site);
-            std::fs::create_dir_all(&dir)?;
-            let path = format!("{}/{}.claw.js", dir, claw_name);
-            std::fs::write(&path, code)?;
-            Ok(json!(format!("saved to {}", path)))
+
+            // Save to extension-v2/claws/ (dev) and ~/.claw/claws/ (user)
+            let dirs = vec![
+                format!("extension-v2/claws/{}", site),
+                format!(
+                    "{}/.claw/claws/{}",
+                    std::env::var("HOME").unwrap_or_default(),
+                    site
+                ),
+            ];
+            let mut saved_to = String::new();
+            for dir in &dirs {
+                if let Ok(()) = std::fs::create_dir_all(dir) {
+                    let path = format!("{}/{}.claw.js", dir, claw_name);
+                    if std::fs::write(&path, code).is_ok() {
+                        if saved_to.is_empty() {
+                            saved_to = path;
+                        }
+                    }
+                }
+            }
+
+            // Update manifest.json if extension-v2/claws/ exists
+            if std::path::Path::new("extension-v2/claws").is_dir() {
+                let _ = update_claws_manifest();
+            }
+
+            if saved_to.is_empty() {
+                Err("failed to save claw file".into())
+            } else {
+                Ok(json!(format!(
+                    "saved to {} — reload extension to activate",
+                    saved_to
+                )))
+            }
         }
 
-
         // --- CDP relay tools — forward directly to extension ---
-
         "navigate" => {
-            client.navigate(args["url"].as_str().ok_or("missing url")?).await?;
+            client
+                .navigate(args["url"].as_str().ok_or("missing url")?)
+                .await?;
             Ok(json!("navigated"))
         }
         "evaluate" => {
-            client.evaluate(args["expression"].as_str().ok_or("missing expression")?).await
+            client
+                .evaluate(args["expression"].as_str().ok_or("missing expression")?)
+                .await
         }
 
         // All other tools: relay as CDP commands to extension
@@ -778,34 +830,59 @@ async fn relay_to_extension(
     let (method, params) = match name {
         "screenshot" => ("Page.captureScreenshot", json!({"format": "png"})),
         "ax_tree" => ("Accessibility.getFullAXTree", json!({})),
-        "read_dom" => ("DOM.getDocument", json!({"depth": args["depth"].as_i64().unwrap_or(10)})),
-        "page_info" => ("Runtime.evaluate", json!({"expression": "JSON.stringify({url:location.href,title:document.title,readyState:document.readyState})", "returnByValue": true})),
-        "find" => {
-            let query = args["query"].as_str().ok_or("missing query")?;
-            let role = args["role"].as_str().unwrap_or("");
-            let expr = format!(
-                r#"JSON.stringify(Array.from(document.querySelectorAll('*')).filter(el => el.textContent.includes({}) && el.offsetParent !== null && (!{} || el.getAttribute('role') === {})).slice(0, 20).map(el => ({{tag: el.tagName, text: el.textContent.trim().substring(0,100), role: el.getAttribute('role') || ''}})))"#,
-                serde_json::to_string(query)?,
-                if role.is_empty() { "false" } else { "true" },
-                serde_json::to_string(role)?
-            );
-            ("Runtime.evaluate", json!({"expression": expr, "returnByValue": true, "awaitPromise": true}))
-        }
-        "click" => ("Input.dispatchMouseEvent", json!({"type": "mousePressed", "text": args["text"]})),
-        "click_selector" => ("Input.dispatchMouseEvent", json!({"selector": args["selector"]})),
-        "type_text" => ("Input.dispatchKeyEvent", json!({"selector": args["selector"], "text": args["text"]})),
-        "hover" | "scroll" | "press_key" | "select" | "upload"
-        | "dismiss_dialog" | "force_state" | "element_info" | "event_listeners"
-        | "cookies" | "hit_test" | "top_layer"
-        | "download" | "save_image"
-        | "network_log_start" | "network_log_dump" | "network_log_dump_bodies"
-        | "api_log" | "global_names" | "resource_tree" | "resource_content"
-        | "search_resource" | "request_replay" | "storage_items"
-        | "intercept_on" | "intercept_off" | "intercept_list"
-        | "intercept_continue" | "intercept_fulfill" | "intercept_fail"
+        "read_dom" => (
+            "DOM.getDocument",
+            json!({"depth": args["depth"].as_i64().unwrap_or(10)}),
+        ),
+        "click" => (
+            "Input.dispatchMouseEvent",
+            json!({"type": "mousePressed", "text": args["text"]}),
+        ),
+        "click_selector" => (
+            "Input.dispatchMouseEvent",
+            json!({"selector": args["selector"]}),
+        ),
+        "type_text" => (
+            "Input.dispatchKeyEvent",
+            json!({"selector": args["selector"], "text": args["text"]}),
+        ),
+        "find"
+        | "page_info"
+        | "hover"
+        | "scroll"
+        | "press_key"
+        | "select"
+        | "upload"
+        | "dismiss_dialog"
+        | "force_state"
+        | "element_info"
+        | "event_listeners"
+        | "cookies"
+        | "hit_test"
+        | "top_layer"
+        | "download"
+        | "save_image"
+        | "network_log_start"
+        | "network_log_dump"
+        | "network_log_dump_bodies"
+        | "api_log"
+        | "global_names"
+        | "resource_tree"
+        | "resource_content"
+        | "search_resource"
+        | "request_replay"
+        | "storage_items"
+        | "intercept_on"
+        | "intercept_off"
+        | "intercept_list"
+        | "intercept_continue"
+        | "intercept_fulfill"
+        | "intercept_fail"
         | "set_cookie" => {
             // Generic relay: send as Claw.{tool_name} with original args
-            let result = client.send(&format!("Claw.{}", name), Some(args.clone())).await?;
+            let result = client
+                .send(&format!("Claw.{}", name), Some(args.clone()))
+                .await?;
             return Ok(result);
         }
         _ => return Err(format!("unknown tool: {}", name).into()),

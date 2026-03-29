@@ -70,7 +70,9 @@ async fn listen_loop(client_slot: Arc<Mutex<Option<BridgeClient>>>) -> Result<()
 }
 
 /// Connect and attach in one step — isolates non-Send errors from the spawned task.
-async fn try_connect_and_attach(stream: tokio::net::TcpStream) -> Result<(BridgeClient, i64), String> {
+async fn try_connect_and_attach(
+    stream: tokio::net::TcpStream,
+) -> Result<(BridgeClient, i64), String> {
     let client = BridgeClient::connect_from_stream(stream)
         .await
         .map_err(|e| format!("handshake failed: {}", e))?;

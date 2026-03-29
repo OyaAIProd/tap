@@ -49,10 +49,7 @@ pub fn validate(adapter_name: &str, health: &HealthContract, rows: &[Value]) -> 
     // Check non_empty columns
     if let Some(ref columns) = health.non_empty {
         for col in columns {
-            let empty_count = rows
-                .iter()
-                .filter(|r| is_value_empty(r.get(col)))
-                .count();
+            let empty_count = rows.iter().filter(|r| is_value_empty(r.get(col))).count();
             let passed = empty_count == 0;
             checks.push(CheckResult {
                 name: format!("non_empty:{}", col),

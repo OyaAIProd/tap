@@ -13,29 +13,29 @@
 import { registerClaw, listClaws, runClaw, parseClawURL } from './runtime/executor.js'
 import { gatherPageIntelligence } from './runtime/page-intelligence.js'
 
-// --- Claw Registration ---
+// --- Claw Registration (dynamic from manifest) ---
 
-import hackernewsHot from './claws/hackernews/hot.claw.js'
-import weiboHot from './claws/weibo/hot.claw.js'
-import xiaohongshuHot from './claws/xiaohongshu/hot.claw.js'
-import xiaohongshuSearch from './claws/xiaohongshu/search.claw.js'
-import xiaohongshuPublish from './claws/xiaohongshu/publish.claw.js'
-import githubTrending from './claws/github/trending.claw.js'
-
-const BUNDLED_CLAWS = [
-  hackernewsHot,
-  weiboHot,
-  xiaohongshuHot,
-  xiaohongshuSearch,
-  xiaohongshuPublish,
-  githubTrending,
-]
-
-for (const mod of BUNDLED_CLAWS) {
-  registerClaw(mod)
+async function registerAllClaws() {
+  try {
+    const resp = await fetch(chrome.runtime.getURL('claws/manifest.json'))
+    const files = await resp.json()
+    let count = 0
+    for (const file of files) {
+      try {
+        const mod = await import(`./claws/${file}`)
+        registerClaw(mod.default)
+        count++
+      } catch (e) {
+        console.warn(`[claw] failed to load ${file}:`, e.message)
+      }
+    }
+    console.log(`[claw] registered ${count} claws`)
+  } catch (e) {
+    console.error('[claw] manifest load failed:', e.message)
+  }
 }
 
-console.log(`[claw] registered ${BUNDLED_CLAWS.length} claws`)
+await registerAllClaws()
 
 // --- State ---
 
@@ -182,6 +182,37 @@ async function handleClawCommand(method, params = {}) {
       return await handleClawAction({ action: 'list' })
     }
 
+    case 'Claw.find': {
+      const tabId = activeTabId
+      if (!tabId) throw new Error('No tab. Call Bridge.attach first.')
+      const query = params.query
+      const role = params.role || ''
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (q, r) => {
+          return Array.from(document.querySelectorAll('*'))
+            .filter(el => el.textContent.includes(q) && el.offsetParent !== null && (!r || el.getAttribute('role') === r))
+            .slice(0, 20)
+            .map(el => ({ tag: el.tagName, text: el.textContent.trim().substring(0, 100), role: el.getAttribute('role') || '' }))
+        },
+        args: [query, role],
+        world: 'MAIN'
+      })
+      return result?.result || []
+    }
+
+    case 'Claw.page_info': {
+      const tabId = activeTabId
+      if (!tabId) throw new Error('No tab. Call Bridge.attach first.')
+      const tab = await chrome.tabs.get(tabId)
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => ({ url: location.href, title: document.title, readyState: document.readyState }),
+        world: 'MAIN'
+      })
+      return result?.result || { url: tab.url, title: tab.title }
+    }
+
     default:
       throw new Error(`Unknown Claw command: ${method}`)
   }
@@ -212,6 +243,13 @@ async function handleClawAction(msg) {
       if (!tabId) throw new Error('no tab available')
 
       return await runClaw(site, name, args, tabId)
+    }
+
+    case 'showResults': {
+      const hash = msg.url.replace('claw://', '')
+      const resultsUrl = chrome.runtime.getURL(`results.html#${hash}`)
+      chrome.tabs.create({ url: resultsUrl })
+      return { ok: true }
     }
 
     case 'ping':
@@ -397,30 +435,6 @@ chrome.omnibox.onInputEntered.addListener((text, disposition) => {
     chrome.tabs.update({ url: resultsUrl })
   } else {
     chrome.tabs.create({ url: resultsUrl })
-  }
-})
-
-// --- showResults action (from content script) ---
-
-// Handle showResults in the message router
-const originalHandleMessage = handleMessage
-// Extend handleClawAction to support showResults
-const _origClawAction = handleClawAction
-async function handleShowResults(msg) {
-  if (msg.action === 'showResults') {
-    const hash = msg.url.replace('claw://', '')
-    const resultsUrl = chrome.runtime.getURL(`results.html#${hash}`)
-    chrome.tabs.create({ url: resultsUrl })
-    return { ok: true }
-  }
-  return null
-}
-
-// Patch message listeners to handle showResults
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg.action === 'showResults') {
-    handleShowResults(msg).then(sendResponse)
-    return true
   }
 })
 
