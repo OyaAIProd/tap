@@ -141,5 +141,94 @@ test(`exactly ${ALL_METHODS.length} methods in page API`, () => {
     `expected ${ALL_METHODS.length} page methods, found ${assignments.length}: ${assignments.join(', ')}`)
 })
 
+// --- Isolation constraints (safety / what — violation = architectural rot) ---
+
+console.log('\n  isolation constraints\n')
+
+test('kernel does not call or import stdlib (no circular dependency)', () => {
+  // Why: kernel is the primitive layer — if it calls stdlib, a new runtime can't implement kernel independently
+  const kernelSection = src.substring(src.indexOf('function createKernel'), src.indexOf('function createStdlib'))
+  assert(!kernelSection.includes('createStdlib'), 'kernel must not call createStdlib')
+  assert(!kernelSection.includes('stdlib.'), 'kernel must not call stdlib methods')
+})
+
+test('only createPageAPI is exported (implementation hiding)', () => {
+  // Why: kernel and stdlib are internal — external code should only see the merged page object
+  const exports = src.match(/export\s+(function|const|let|var|class)\s+\w+/g) || []
+  assert.equal(exports.length, 1, `expected 1 export, found ${exports.length}: ${exports.join(', ')}`)
+  assert(exports[0].includes('createPageAPI'), 'the only export must be createPageAPI')
+})
+
+// --- Cross-domain constraint (safety / what-x-what — bridge must delegate to protocol) ---
+
+console.log('\n  cross-domain: bridge → protocol delegation\n')
+
+const bgSrc = readFileSync(new URL('../../extension-v2/background.js', import.meta.url), 'utf-8')
+
+test('background.js imports createPageAPI from page-api.js', () => {
+  // Why: bridge must use the protocol layer, not reimplement operations
+  assert(bgSrc.includes("import { createPageAPI }"), 'background.js must import createPageAPI')
+})
+
+test('background.js has getPageAPI factory', () => {
+  // Why: factory binds tabId + deps, creating protocol instances for delegation
+  assert(bgSrc.includes('function getPageAPI('), 'must have getPageAPI factory')
+  assert(bgSrc.includes('createPageAPI('), 'getPageAPI must call createPageAPI')
+})
+
+const DELEGATED_HANDLERS = [
+  ['Tap.click', 'page.click'],
+  ['Tap.click_selector', 'page.click'],
+  ['Tap.type_text', 'page.type'],
+  ['Tap.hover', 'page.hover'],
+  ['Tap.scroll', 'page.scroll'],
+  ['Tap.press_key', 'page.pressKey'],
+  ['Tap.select', 'page.select'],
+  ['Tap.upload', 'page.upload'],
+  ['Tap.find', 'page.find'],
+  ['Tap.cookies', 'page.cookies'],
+  ['Tap.dismiss_dialog', 'page.dialog'],
+  ['Tap.storage_items', 'page.storage'],
+]
+
+for (const [handler, delegation] of DELEGATED_HANDLERS) {
+  test(`${handler} delegates to ${delegation}`, () => {
+    // Why: single source of truth — bridge must not reimplement what page-api provides
+    const casePattern = `case '${handler}':`
+    const caseStart = bgSrc.indexOf(casePattern)
+    assert(caseStart !== -1, `${handler} handler not found`)
+    // Find the next case statement to bound the handler section
+    const nextCase = bgSrc.indexOf("case '", caseStart + casePattern.length)
+    const handlerSection = bgSrc.substring(caseStart, nextCase !== -1 ? nextCase : caseStart + 500)
+    assert(handlerSection.includes('getPageAPI('), `${handler} must use getPageAPI()`)
+    const method = delegation.split('.')[1]
+    assert(handlerSection.includes(`.${method}(`), `${handler} must call .${method}()`)
+  })
+}
+
+// --- Capability constraint (quality / what — capabilities() must be accurate) ---
+
+console.log('\n  capability accuracy\n')
+
+test('capabilities() kernel list matches KERNEL_METHODS', () => {
+  // Why: capabilities() is the runtime's self-declaration — if stale, scripts can't negotiate
+  // Find the actual implementation (skip JSDoc), look for 'capabilities() {' pattern
+  const capImpl = src.indexOf('capabilities() {')
+  assert(capImpl !== -1, 'capabilities() implementation not found')
+  const capSection = src.substring(capImpl, capImpl + 600)
+  for (const m of KERNEL_METHODS) {
+    assert(capSection.includes(`'${m}'`), `capabilities() missing kernel method '${m}'`)
+  }
+})
+
+test('capabilities() stdlib list matches STDLIB_METHODS', () => {
+  // Why: same as above — stdlib declaration must match actual stdlib
+  const capImpl = src.indexOf('capabilities() {')
+  const capSection = src.substring(capImpl, capImpl + 600)
+  for (const m of STDLIB_METHODS) {
+    assert(capSection.includes(`'${m}'`), `capabilities() missing stdlib method '${m}'`)
+  }
+})
+
 console.log(`\n${passed + failed} constraints, ${passed} passed, ${failed} failed\n`)
 process.exit(failed > 0 ? 1 : 0)
