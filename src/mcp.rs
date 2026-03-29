@@ -8,7 +8,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use crate::bridge::BridgeServer;
 use crate::cdp::BridgeClient;
-use crate::tap::{tap_home, tap_cache};
+use crate::tap::{tap_home, tap_cache, tap_log, tap_log_read};
 
 /// Run the MCP server: read JSON-RPC from stdin, write responses to stdout.
 pub async fn serve() -> Result<(), Box<dyn std::error::Error>> {
@@ -562,6 +562,19 @@ fn tools_schema() -> Value {
                 "required": ["site", "name", "code"]
             }
         },
+        // ===== LOGS — Structured event log for AI analysis =====
+        {
+            "name": "tap_logs",
+            "description": "Read recent structured log entries (forge + run events). Returns JSONL from ~/.tap/logs/tap.jsonl. Use to analyze tap performance, find flaky taps, and review forge history.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "limit": { "type": "integer", "description": "Number of recent entries to return (default 50)", "default": 50 },
+                    "event": { "type": "string", "description": "Filter by event type: run, forge_inspect, forge_verify, forge_save" },
+                    "site": { "type": "string", "description": "Filter by site name" }
+                }
+            }
+        },
         // ===== INTERCEPT — Active Request Interception =====
         {
             "name": "intercept_on",
@@ -747,14 +760,24 @@ async fn execute_tool(
         // --- Tools with local logic ---
         "forge_inspect" => {
             let tab_id = extract_tab_id(args);
-            if let Some(url) = args["url"].as_str() {
+            let start = std::time::Instant::now();
+            let url = args["url"].as_str().unwrap_or("");
+            if !url.is_empty() {
                 client
                     .send_tap("cdp", "Page.navigate", json!({ "url": url }), tab_id)
                     .await?;
             }
-            client
+            let result = client
                 .send_tap("tool", "forge_inspect", json!({}), tab_id)
-                .await
+                .await?;
+            tap_log(&json!({
+                "event": "forge_inspect",
+                "url": url,
+                "ms": start.elapsed().as_millis() as u64,
+                "framework": result.get("framework").and_then(|v| v.as_str()).unwrap_or("unknown"),
+                "strategies": result.get("strategies").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0),
+            }));
+            Ok(result)
         }
         "list_taps" => {
             client
@@ -766,22 +789,52 @@ async fn execute_tool(
             let name_arg = args["name"].as_str().ok_or("missing name")?;
             let tap_args = args.get("args").cloned().unwrap_or(json!({}));
             let tab_id = extract_tab_id(args);
+            let start = std::time::Instant::now();
             let run_params = json!({"site": site, "name": name_arg, "args": tap_args});
-            let mut result = client
+            let result = client
                 .send_tap("tool", "run", run_params, tab_id)
-                .await?;
-            // Health validation
-            if let Some(rows) = result.get("rows").and_then(|r| r.as_array()) {
-                if let Some(contract) = result
-                    .get("health")
-                    .and_then(crate::tap::parse_health_contract)
-                {
-                    let report =
-                        crate::health::validate(&format!("{}/{}", site, name_arg), &contract, rows);
-                    result["health_report"] = serde_json::to_value(&report).unwrap_or_default();
+                .await;
+            let ms = start.elapsed().as_millis() as u64;
+
+            match result {
+                Ok(mut result) => {
+                    let rows = result.get("rows").and_then(|r| r.as_array());
+                    let row_count = rows.map(|r| r.len()).unwrap_or(0);
+                    // Health validation
+                    let health_status = if let Some(rows) = rows {
+                        if let Some(contract) = result
+                            .get("health")
+                            .and_then(crate::tap::parse_health_contract)
+                        {
+                            let report = crate::health::validate(
+                                &format!("{}/{}", site, name_arg), &contract, rows);
+                            let status = match report.status {
+                                crate::health::HealthStatus::Healthy => "pass",
+                                _ => "fail",
+                            };
+                            result["health_report"] = serde_json::to_value(&report).unwrap_or_default();
+                            status
+                        } else { "none" }
+                    } else { "none" };
+
+                    tap_log(&json!({
+                        "event": "run",
+                        "site": site, "name": name_arg,
+                        "rows": row_count, "ms": ms,
+                        "health": health_status,
+                    }));
+                    Ok(result)
+                }
+                Err(e) => {
+                    tap_log(&json!({
+                        "event": "run",
+                        "site": site, "name": name_arg,
+                        "rows": 0, "ms": ms,
+                        "health": "error", "error": e.to_string(),
+                    }));
+                    Err(e)
                 }
             }
-            Ok(result)
         }
         "forge_verify" => {
             let url = args["url"].as_str().ok_or("missing url")?;
@@ -844,13 +897,33 @@ async fn execute_tool(
                 }
             }
 
+            let status = if diagnostics.iter().any(|d| d.starts_with("FAIL")) { "fail" } else { "pass" };
+            tap_log(&json!({
+                "event": "forge_verify",
+                "url": url, "rows": row_count,
+                "ms": duration_ms, "status": status,
+            }));
             Ok(json!({
-                "status": if diagnostics.iter().any(|d| d.starts_with("FAIL")) { "fail" } else { "pass" },
+                "status": status,
                 "row_count": row_count,
                 "duration_ms": duration_ms,
                 "sample": rows.map(|r| r.iter().take(5).cloned().collect::<Vec<_>>()).unwrap_or_default(),
                 "diagnostics": diagnostics
             }))
+        }
+        "tap_logs" => {
+            let limit = args["limit"].as_u64().unwrap_or(50) as usize;
+            let event_filter = args["event"].as_str();
+            let site_filter = args["site"].as_str();
+            let mut entries = tap_log_read(limit.max(200)); // read extra for filtering
+            if let Some(ev) = event_filter {
+                entries.retain(|e| e.get("event").and_then(|v| v.as_str()) == Some(ev));
+            }
+            if let Some(s) = site_filter {
+                entries.retain(|e| e.get("site").and_then(|v| v.as_str()) == Some(s));
+            }
+            entries.truncate(limit);
+            Ok(json!({ "count": entries.len(), "entries": entries }))
         }
         "forge_save" => {
             let site = args["site"].as_str().ok_or("missing site")?;
@@ -880,6 +953,11 @@ async fn execute_tool(
             if saved_to.is_empty() {
                 Err("failed to save tap file".into())
             } else {
+                tap_log(&json!({
+                    "event": "forge_save",
+                    "site": site, "name": tap_name,
+                    "path": saved_to,
+                }));
                 Ok(json!(format!(
                     "saved to {} — reload extension to activate",
                     saved_to

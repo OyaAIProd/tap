@@ -108,6 +108,49 @@ pub fn tap_cache() -> String {
     cache
 }
 
+/// Append a structured event to ~/.tap/logs/tap.jsonl.
+/// Each line is a self-contained JSON object for AI agent analysis.
+pub fn tap_log(event: &serde_json::Value) {
+    let logs_dir = format!("{}/logs", tap_home());
+    let _ = std::fs::create_dir_all(&logs_dir);
+    let path = format!("{}/tap.jsonl", logs_dir);
+
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let mut entry = event.clone();
+    if let Some(obj) = entry.as_object_mut() {
+        obj.insert("ts".to_string(), serde_json::json!(ts));
+    }
+
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        let _ = writeln!(f, "{}", entry);
+    }
+}
+
+/// Read recent log entries. Returns last `n` lines from tap.jsonl.
+pub fn tap_log_read(n: usize) -> Vec<serde_json::Value> {
+    let path = format!("{}/logs/tap.jsonl", tap_home());
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return vec![];
+    };
+    content
+        .lines()
+        .rev()
+        .take(n)
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect()
+}
+
 /// Parse a HealthContract from a JSON value.
 pub fn parse_health_contract(value: &serde_json::Value) -> Option<HealthContract> {
     let obj = value.as_object()?;
