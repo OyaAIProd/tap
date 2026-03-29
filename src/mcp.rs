@@ -160,18 +160,20 @@ fn tools_schema() -> Value {
     json!([
         {
             "name": "screenshot",
-            "description": "Take a screenshot of the current page. Returns the file path.",
+            "description": "Take a screenshot. Defaults to grayscale JPEG (smallest tokens). Action tools already return page state — only screenshot when you need visual confirmation.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string", "description": "Output file path", "default": "/tmp/webclaw-screenshot.png" },
-                    "full_page": { "type": "boolean", "description": "Capture full page beyond viewport", "default": false }
+                    "path": { "type": "string", "description": "Output file path", "default": "/tmp/webclaw-screenshot.jpg" },
+                    "format": { "type": "string", "enum": ["jpeg", "png"], "description": "Image format", "default": "jpeg" },
+                    "quality": { "type": "integer", "description": "JPEG quality 1-100 (lower = smaller file)", "default": 50 },
+                    "grayscale": { "type": "boolean", "description": "Strip color for smaller file size", "default": true }
                 }
             }
         },
         {
             "name": "navigate",
-            "description": "Navigate the browser to a URL.",
+            "description": "Navigate to a URL. Returns page state (url, title) after load.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -231,7 +233,7 @@ fn tools_schema() -> Value {
         },
         {
             "name": "click",
-            "description": "Click on an element by visible text content. Uses CDP native mouse events.",
+            "description": "Click on an element by visible text. Returns page state (url, title) after click — no screenshot needed.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -242,7 +244,7 @@ fn tools_schema() -> Value {
         },
         {
             "name": "click_selector",
-            "description": "Click on an element by CSS selector. Uses CDP native mouse events.",
+            "description": "Click on an element by CSS selector. Returns page state after click — no screenshot needed.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -253,7 +255,7 @@ fn tools_schema() -> Value {
         },
         {
             "name": "type_text",
-            "description": "Type text into an input element. Focuses, clears, then types via CDP keyboard events.",
+            "description": "Type text into an input. Returns current value + page state after typing — no screenshot needed.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -287,7 +289,7 @@ fn tools_schema() -> Value {
         },
         {
             "name": "press_key",
-            "description": "Press a specific key (Enter, Tab, Escape, ArrowDown, etc.).",
+            "description": "Press a key (Enter, Tab, Escape, etc.). Returns page state — detects navigation from form submit.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -633,6 +635,33 @@ fn tools_schema() -> Value {
                 "required": ["name", "value", "domain"]
             }
         },
+        // --- Tab Management ---
+        {
+            "name": "tab_list",
+            "description": "List all open browser tabs. Returns tabId, url, title for each tab. Use tabId in other tools to target a specific tab.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "tab_new",
+            "description": "Open a new browser tab. Returns tabId to use with other tools. Optionally navigate to a URL.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": { "type": "string", "description": "URL to open (default: about:blank)" }
+                }
+            }
+        },
+        {
+            "name": "tab_close",
+            "description": "Close a browser tab by tabId.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "tabId": { "type": "integer", "description": "Tab ID to close" }
+                },
+                "required": ["tabId"]
+            }
+        },
     ])
 }
 
@@ -716,11 +745,20 @@ async fn execute_tool(
     match name {
         // --- Tools with local logic ---
         "page_intelligence" => {
+            let tab_id = args.get("tabId").cloned();
             if let Some(url) = args["url"].as_str() {
-                client.navigate(url).await?;
+                let mut nav_params = json!({ "url": url });
+                if let Some(tid) = &tab_id {
+                    nav_params["tabId"] = tid.clone();
+                }
+                client.send("Page.navigate", Some(nav_params)).await?;
+            }
+            let mut pi_params = json!({});
+            if let Some(tid) = tab_id {
+                pi_params["tabId"] = tid;
             }
             client
-                .send("WebClaw.pageIntelligence", Some(json!({})))
+                .send("WebClaw.pageIntelligence", Some(pi_params))
                 .await
         }
         "list_adapters" => client.send("WebClaw.list", Some(json!({}))).await,
@@ -728,11 +766,12 @@ async fn execute_tool(
             let site = args["site"].as_str().ok_or("missing site")?;
             let name_arg = args["name"].as_str().ok_or("missing name")?;
             let adapter_args = args.get("args").cloned().unwrap_or(json!({}));
+            let mut run_params = json!({"site": site, "name": name_arg, "args": adapter_args});
+            if let Some(tid) = args.get("tabId") {
+                run_params["tabId"] = tid.clone();
+            }
             let mut result = client
-                .send(
-                    "WebClaw.run",
-                    Some(json!({"site": site, "name": name_arg, "args": adapter_args})),
-                )
+                .send("WebClaw.run", Some(run_params))
                 .await?;
             // Health validation
             if let Some(rows) = result.get("rows").and_then(|r| r.as_array()) {
@@ -757,11 +796,24 @@ async fn execute_tool(
                 .unwrap_or_default();
 
             let start = std::time::Instant::now();
-            client.navigate(url).await?;
+            let mut nav_params = json!({ "url": url });
+            if let Some(tid) = args.get("tabId") {
+                nav_params["tabId"] = tid.clone();
+            }
+            client.send("Page.navigate", Some(nav_params)).await?;
             if wait_ms > 0 {
                 tokio::time::sleep(std::time::Duration::from_millis(wait_ms)).await;
             }
-            let result = client.evaluate(expression).await?;
+            let mut eval_params = json!({ "expression": expression });
+            if let Some(tid) = args.get("tabId") {
+                eval_params["tabId"] = tid.clone();
+            }
+            let eval_result = client.send("Runtime.evaluate", Some(eval_params)).await?;
+            let result = eval_result
+                .get("result")
+                .and_then(|r| r.get("value"))
+                .cloned()
+                .unwrap_or(Value::Null);
             let duration_ms = start.elapsed().as_millis();
 
             let mut diagnostics = Vec::new();
@@ -842,11 +894,22 @@ async fn execute_tool(
 
         // --- Screenshot: capture, decode base64, save to file ---
         "screenshot" => {
-            let path = args["path"]
-                .as_str()
-                .unwrap_or("/tmp/webclaw-screenshot.png");
+            let grayscale = args["grayscale"].as_bool().unwrap_or(true);
+            let format = args["format"].as_str().unwrap_or("jpeg");
+            let quality = args["quality"].as_u64().unwrap_or(50);
+            let default_ext = if format == "jpeg" { "jpg" } else { "png" };
+            let default_path = format!("/tmp/webclaw-screenshot.{}", default_ext);
+            let path = args["path"].as_str().unwrap_or(&default_path);
+
+            let mut capture_params = json!({
+                "format": format,
+                "grayscale": grayscale
+            });
+            if format == "jpeg" {
+                capture_params["quality"] = json!(quality);
+            }
             let result = client
-                .send("Page.captureScreenshot", Some(json!({"format": "png"})))
+                .send("Page.captureScreenshot", Some(capture_params))
                 .await?;
             if let Some(b64) = result["data"].as_str() {
                 use base64::Engine;
@@ -912,15 +975,44 @@ async fn execute_tool(
 
         // --- CDP relay tools — forward directly to extension ---
         "navigate" => {
-            client
-                .navigate(args["url"].as_str().ok_or("missing url")?)
-                .await?;
-            Ok(json!("navigated"))
+            let mut params = json!({ "url": args["url"].as_str().ok_or("missing url")? });
+            if let Some(tid) = args.get("tabId") {
+                params["tabId"] = tid.clone();
+            }
+            client.send("Page.navigate", Some(params)).await?;
+            // Fetch page state after navigation
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            let tab_param = if let Some(tid) = args.get("tabId") {
+                json!({ "tabId": tid })
+            } else {
+                json!({})
+            };
+            let info = client
+                .send("WebClaw.page_info", Some(tab_param))
+                .await
+                .ok();
+            let url = info
+                .as_ref()
+                .and_then(|v| v["url"].as_str())
+                .unwrap_or("?");
+            let title = info
+                .as_ref()
+                .and_then(|v| v["title"].as_str())
+                .unwrap_or("?");
+            Ok(json!(format!("navigated\n  → url: {}\n  → title: {}", url, title)))
         }
         "evaluate" => {
-            client
-                .evaluate(args["expression"].as_str().ok_or("missing expression")?)
-                .await
+            let mut params = json!({ "expression": args["expression"].as_str().ok_or("missing expression")? });
+            if let Some(tid) = args.get("tabId") {
+                params["tabId"] = tid.clone();
+            }
+            let result = client.send("Runtime.evaluate", Some(params)).await?;
+            let value = result
+                .get("result")
+                .and_then(|r| r.get("value"))
+                .cloned()
+                .unwrap_or(Value::Null);
+            Ok(value)
         }
 
         // All other tools: relay as CDP commands to extension

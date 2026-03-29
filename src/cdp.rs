@@ -149,41 +149,8 @@ impl BridgeClient {
         }
     }
 
-    /// Navigate to a URL via the extension bridge.
-    pub async fn navigate(&self, url: &str) -> Result<(), Box<dyn std::error::Error>> {
-        self.send("Page.navigate", Some(serde_json::json!({ "url": url })))
-            .await?;
-        Ok(())
-    }
-
-    /// Evaluate a JavaScript expression via the extension bridge.
-    pub async fn evaluate(&self, expression: &str) -> Result<Value, Box<dyn std::error::Error>> {
-        let result = self
-            .send(
-                "Runtime.evaluate",
-                Some(serde_json::json!({
-                    "expression": expression,
-                    "returnByValue": true,
-                    "awaitPromise": true,
-                })),
-            )
-            .await?;
-
-        // Check for exception
-        if let Some(exception) = result.get("exceptionDetails") {
-            let text = exception["exception"]["description"]
-                .as_str()
-                .or_else(|| exception["text"].as_str())
-                .unwrap_or("unknown JS error");
-            return Err(text.to_string().into());
-        }
-
-        Ok(result
-            .get("result")
-            .and_then(|r| r.get("value"))
-            .cloned()
-            .unwrap_or(Value::Null))
-    }
+    // navigate() and evaluate() removed — mcp.rs now calls client.send()
+    // directly with tabId support for multi-tab routing.
 }
 
 #[cfg(test)]

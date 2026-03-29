@@ -106,20 +106,44 @@ console.log(`[webclaw] registered ${ALL_CLAWS.length} claws`)
 
 // --- State ---
 
-let activeTabId = null
+let activeTabId = null  // default tab (backward compat — callers that don't pass tabId)
+
+// Per-tab debugger sessions: tabId → { detachTimer }
+const debuggerSessions = new Map()
+
+// Per-tab network logs: tabId → { entries: [], active: boolean }
+const networkLogs = new Map()
+
+function getNetworkLog(tabId) {
+  if (!networkLogs.has(tabId)) networkLogs.set(tabId, { entries: [], active: false })
+  return networkLogs.get(tabId)
+}
+
+// Clean up when tabs close
+chrome.tabs.onRemoved.addListener((tabId) => {
+  const session = debuggerSessions.get(tabId)
+  if (session?.detachTimer) clearTimeout(session.detachTimer)
+  debuggerSessions.delete(tabId)
+  networkLogs.delete(tabId)
+  if (tabId === activeTabId) activeTabId = null
+})
 
 // --- CDP Command Router ---
 // Speaks the same protocol as the Rust CdpClient.send(method, params).
 // Scripting mode by default, debugger only for Input/DOM/Accessibility.
 
 async function routeCDP(method, params = {}) {
+  // Extract tabId from params, fall back to activeTabId
+  let tabId = params.tabId ? Number(params.tabId) : activeTabId
+
   // Auto-recover: if no tab or tab is gone, create one
-  if (activeTabId) {
-    try { await chrome.tabs.get(activeTabId) }
-    catch { activeTabId = null }
+  if (tabId) {
+    try { await chrome.tabs.get(tabId) }
+    catch { tabId = null }
   }
-  if (!activeTabId) {
+  if (!tabId) {
     const tab = await chrome.tabs.create({ url: 'about:blank' })
+    tabId = tab.id
     activeTabId = tab.id
     console.log(`[webclaw] created new tab ${tab.id}`)
   }
@@ -129,15 +153,16 @@ async function routeCDP(method, params = {}) {
 
     case 'Page.navigate': {
       // Can't navigate chrome:// tabs — create a new one
-      const current = await chrome.tabs.get(activeTabId)
+      const current = await chrome.tabs.get(tabId)
       if (current.url?.startsWith('chrome://')) {
         const tab = await chrome.tabs.create({ url: params.url })
+        tabId = tab.id
         activeTabId = tab.id
         console.log(`[webclaw] created tab ${tab.id} (was on chrome:// page)`)
       } else {
-        await chrome.tabs.update(activeTabId, { url: params.url })
+        await chrome.tabs.update(tabId, { url: params.url })
       }
-      await waitForTabLoad(activeTabId)
+      await waitForTabLoad(tabId)
       return { frameId: 'main' }
     }
 
@@ -145,7 +170,7 @@ async function routeCDP(method, params = {}) {
       // Try scripting mode first (no timeout, undetectable)
       // Falls back to debugger for pages with strict CSP
       const [evalResult] = await chrome.scripting.executeScript({
-        target: { tabId: activeTabId },
+        target: { tabId },
         func: (expr) => {
           try {
             const result = (0, eval)(expr)
@@ -161,45 +186,65 @@ async function routeCDP(method, params = {}) {
       if (wrapped?.__ok) {
         return { result: { type: typeof wrapped.value, value: wrapped.value } }
       }
-      // CSP or eval error — fall back to debugger with no idle detach
-      if (detachTimer) { clearTimeout(detachTimer); detachTimer = null }
-      if (debuggerTabId !== activeTabId) {
-        if (debuggerTabId) await chrome.debugger.detach({ tabId: debuggerTabId }).catch(() => {})
-        await chrome.debugger.attach({ tabId: activeTabId }, '1.3')
-        debuggerTabId = activeTabId
-      }
-      try {
-        return await chrome.debugger.sendCommand(
-          { tabId: activeTabId }, 'Runtime.evaluate',
-          { expression: params.expression, returnByValue: true, awaitPromise: true }
-        )
-      } finally {
-        detachTimer = setTimeout(async () => {
-          if (debuggerTabId) {
-            await chrome.debugger.detach({ tabId: debuggerTabId }).catch(() => {})
-            debuggerTabId = null
-          }
-        }, 500)
-      }
+      // CSP or eval error — fall back to debugger via ensureDebugger
+      await ensureDebugger(tabId)
+      return await chrome.debugger.sendCommand(
+        { tabId }, 'Runtime.evaluate',
+        { expression: params.expression, returnByValue: true, awaitPromise: true }
+      )
     }
 
     case 'Page.captureScreenshot': {
+      const fmt = params.format || 'png'
+      const quality = params.quality ?? (fmt === 'jpeg' ? 50 : undefined)
+      const grayscale = params.grayscale === true
+
+      // Inject grayscale CSS filter if requested
+      if (grayscale) {
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId },
+            func: () => { document.documentElement.style.filter = 'grayscale(1)' },
+            world: 'MAIN'
+          })
+          await new Promise(r => setTimeout(r, 50))
+        } catch { /* ignore — some pages block scripting */ }
+      }
+
+      let result
       try {
-        const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' })
-        const base64 = dataUrl.replace(/^data:image\/png;base64,/, '')
-        return { data: base64 }
+        const opts = { format: fmt === 'jpeg' ? 'jpeg' : 'png' }
+        if (fmt === 'jpeg' && quality !== undefined) opts.quality = quality
+        const dataUrl = await chrome.tabs.captureVisibleTab(null, opts)
+        const prefix = fmt === 'jpeg' ? /^data:image\/jpeg;base64,/ : /^data:image\/png;base64,/
+        result = { data: dataUrl.replace(prefix, '') }
       } catch {
         // Fallback: use CDP debugger (works on GPU-rendered pages)
-        return await withDebugger(async () => {
+        const cdpOpts = { format: fmt === 'jpeg' ? 'jpeg' : 'png' }
+        if (fmt === 'jpeg' && quality !== undefined) cdpOpts.quality = quality
+        result = await withDebugger(tabId, async (tid) => {
           return await chrome.debugger.sendCommand(
-            { tabId: activeTabId }, 'Page.captureScreenshot', { format: 'png' }
+            { tabId: tid }, 'Page.captureScreenshot', cdpOpts
           )
         })
       }
+
+      // Remove grayscale filter
+      if (grayscale) {
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId },
+            func: () => { document.documentElement.style.filter = '' },
+            world: 'MAIN'
+          })
+        } catch { /* ignore */ }
+      }
+
+      return result
     }
 
     case 'Network.getCookies': {
-      const tab = await chrome.tabs.get(activeTabId)
+      const tab = await chrome.tabs.get(tabId)
       const cookies = await chrome.cookies.getAll({ url: tab.url })
       return { cookies }
     }
@@ -218,10 +263,38 @@ async function routeCDP(method, params = {}) {
     // --- Debugger mode (ms-level attach/detach) ---
 
     default:
-      return await withDebugger(async () => {
-        return await chrome.debugger.sendCommand({ tabId: activeTabId }, method, params)
+      return await withDebugger(tabId, async (tid) => {
+        return await chrome.debugger.sendCommand({ tabId: tid }, method, params)
       })
   }
+}
+
+// --- Action Feedback Helpers ---
+
+async function pageFeedback(tabId) {
+  const tab = await chrome.tabs.get(tabId)
+  return { url: tab.url, title: tab.title }
+}
+
+async function inputValue(tabId, selector) {
+  try {
+    const [r] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (sel) => {
+        const el = document.querySelector(sel)
+        if (!el) return null
+        const v = el.value ?? el.textContent ?? ''
+        return v.length > 200 ? v.slice(0, 200) + '…' : v
+      },
+      args: [selector],
+      world: 'MAIN'
+    })
+    return r?.result ?? null
+  } catch { return null }
+}
+
+function fmtFeedback(action, fb) {
+  return `${action}\n  → url: ${fb.url}\n  → title: ${fb.title}`
 }
 
 // --- Bridge Commands ---
@@ -251,8 +324,16 @@ async function handleBridgeCommand(method, params = {}) {
     }
 
     case 'Bridge.detach': {
-      activeTabId = null
-      return { detached: true }
+      const tabId = params.tabId ? Number(params.tabId) : activeTabId
+      if (tabId === activeTabId) activeTabId = null
+      const session = debuggerSessions.get(tabId)
+      if (session) {
+        if (session.detachTimer) clearTimeout(session.detachTimer)
+        await chrome.debugger.detach({ tabId }).catch(() => {})
+        debuggerSessions.delete(tabId)
+      }
+      networkLogs.delete(tabId)
+      return { detached: true, tabId }
     }
 
     case 'Bridge.newTab': {
@@ -267,13 +348,12 @@ async function handleBridgeCommand(method, params = {}) {
 
 // --- WebClaw Protocol Commands (via bridge WebSocket) ---
 
-// Network log buffer for network_log_start/dump
-let networkLogEntries = []
-let networkLogActive = false
+// Network log: per-tab, managed via networkLogs Map in State section
 
-async function requireTab() {
-  if (!activeTabId) throw new Error('No tab. Call Bridge.attach first.')
-  return activeTabId
+async function requireTab(params = {}) {
+  const tabId = params.tabId ? Number(params.tabId) : activeTabId
+  if (!tabId) throw new Error('No tab. Call Bridge.attach or pass tabId.')
+  return tabId
 }
 
 async function handleClawCommand(method, params = {}) {
@@ -293,7 +373,7 @@ async function handleClawCommand(method, params = {}) {
       return await handleClawAction({ action: 'list' })
 
     case 'WebClaw.page_info': {
-      const tabId = await requireTab()
+      const tabId = await requireTab(params)
       const tab = await chrome.tabs.get(tabId)
       const [result] = await chrome.scripting.executeScript({
         target: { tabId },
@@ -310,9 +390,10 @@ async function handleClawCommand(method, params = {}) {
     // ---- Interaction tools (CDP native events) ----
 
     case 'WebClaw.click': {
-      const tabId = await requireTab()
+      const tabId = await requireTab(params)
       const text = params.text
       if (!text) throw new Error('click: missing text param')
+      const prevUrl = (await chrome.tabs.get(tabId)).url
 
       const [result] = await chrome.scripting.executeScript({
         target: { tabId },
@@ -356,13 +437,17 @@ async function handleClawCommand(method, params = {}) {
       const pos = result?.result
       if (!pos) throw new Error(`click: "${text}" not found`)
       await cdpClick(tabId, pos.x, pos.y)
-      return `clicked "${text}" at (${Math.round(pos.x)}, ${Math.round(pos.y)})`
+      await new Promise(r => setTimeout(r, 150))
+      const fb = await pageFeedback(tabId)
+      const nav = fb.url !== prevUrl ? ' (navigated)' : ''
+      return fmtFeedback(`clicked "${text}" at (${Math.round(pos.x)}, ${Math.round(pos.y)})${nav}`, fb)
     }
 
     case 'WebClaw.click_selector': {
-      const tabId = await requireTab()
+      const tabId = await requireTab(params)
       const selector = params.selector
       if (!selector) throw new Error('click_selector: missing selector param')
+      const prevUrl = (await chrome.tabs.get(tabId)).url
 
       const [result] = await chrome.scripting.executeScript({
         target: { tabId },
@@ -390,11 +475,14 @@ async function handleClawCommand(method, params = {}) {
       const pos = result?.result
       if (!pos) throw new Error(`click_selector: "${selector}" not found`)
       await cdpClick(tabId, pos.x, pos.y)
-      return `clicked "${selector}" at (${Math.round(pos.x)}, ${Math.round(pos.y)})`
+      await new Promise(r => setTimeout(r, 150))
+      const fb = await pageFeedback(tabId)
+      const nav = fb.url !== prevUrl ? ' (navigated)' : ''
+      return fmtFeedback(`clicked "${selector}" at (${Math.round(pos.x)}, ${Math.round(pos.y)})${nav}`, fb)
     }
 
     case 'WebClaw.type_text': {
-      const tabId = await requireTab()
+      const tabId = await requireTab(params)
       const selector = params.selector
       const text = params.text
       if (!selector || text === undefined) throw new Error('type_text: missing selector or text')
@@ -424,20 +512,20 @@ async function handleClawCommand(method, params = {}) {
       await new Promise(r => setTimeout(r, 100))
 
       // Type via CDP keyboard events
-      await withDebugger(async () => {
+      await withDebugger(tabId, async (tid) => {
         // Delete selected content first
-        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Input.dispatchKeyEvent', {
+        await chrome.debugger.sendCommand({ tabId: tid }, 'Input.dispatchKeyEvent', {
           type: 'keyDown', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8
         })
-        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Input.dispatchKeyEvent', {
+        await chrome.debugger.sendCommand({ tabId: tid }, 'Input.dispatchKeyEvent', {
           type: 'keyUp', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8
         })
         // Type each character
         for (const char of text) {
-          await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Input.dispatchKeyEvent', {
+          await chrome.debugger.sendCommand({ tabId: tid }, 'Input.dispatchKeyEvent', {
             type: 'keyDown', text: char, key: char, code: `Key${char.toUpperCase()}`
           })
-          await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Input.dispatchKeyEvent', {
+          await chrome.debugger.sendCommand({ tabId: tid }, 'Input.dispatchKeyEvent', {
             type: 'keyUp', key: char, code: `Key${char.toUpperCase()}`
           })
         }
@@ -464,11 +552,15 @@ async function handleClawCommand(method, params = {}) {
         world: 'MAIN'
       })
 
-      return `typed ${text.length} chars into "${selector}"`
+      const val = await inputValue(tabId, selector)
+      const fb = await pageFeedback(tabId)
+      let msg = `typed ${text.length} chars into "${selector}"`
+      if (val !== null) msg += `\n  → value: "${val}"`
+      return fmtFeedback(msg, fb)
     }
 
     case 'WebClaw.hover': {
-      const tabId = await requireTab()
+      const tabId = await requireTab(params)
       const selector = params.selector
       if (!selector) throw new Error('hover: missing selector')
 
@@ -487,16 +579,17 @@ async function handleClawCommand(method, params = {}) {
       const pos = result?.result
       if (!pos) throw new Error(`hover: "${selector}" not found`)
 
-      await withDebugger(async () => {
-        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Input.dispatchMouseEvent', {
+      await withDebugger(tabId, async (tid) => {
+        await chrome.debugger.sendCommand({ tabId: tid }, 'Input.dispatchMouseEvent', {
           type: 'mouseMoved', x: pos.x, y: pos.y
         })
       })
-      return `hovered "${selector}"`
+      const fb = await pageFeedback(tabId)
+      return fmtFeedback(`hovered "${selector}"`, fb)
     }
 
     case 'WebClaw.scroll': {
-      const tabId = await requireTab()
+      const tabId = await requireTab(params)
       const selector = params.selector
       if (!selector) throw new Error('scroll: missing selector')
 
@@ -512,14 +605,16 @@ async function handleClawCommand(method, params = {}) {
         world: 'MAIN'
       })
       if (!result?.result) throw new Error(`scroll: "${selector}" not found`)
-      return `scrolled to "${selector}"`
+      const fb = await pageFeedback(tabId)
+      return fmtFeedback(`scrolled to "${selector}"`, fb)
     }
 
     case 'WebClaw.press_key': {
-      await requireTab()
+      const tabId = await requireTab(params)
       const key = params.key
       if (!key) throw new Error('press_key: missing key')
       const modifiers = params.modifiers || 0
+      const prevUrl = (await chrome.tabs.get(tabId)).url
 
       // Map key names to CDP key event params
       const keyMap = {
@@ -540,19 +635,22 @@ async function handleClawCommand(method, params = {}) {
       }
       const mapped = keyMap[key] || { key, code: `Key${key.toUpperCase()}`, windowsVirtualKeyCode: key.charCodeAt(0) }
 
-      await withDebugger(async () => {
-        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Input.dispatchKeyEvent', {
+      await withDebugger(tabId, async (tid) => {
+        await chrome.debugger.sendCommand({ tabId: tid }, 'Input.dispatchKeyEvent', {
           type: 'keyDown', modifiers, ...mapped
         })
-        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Input.dispatchKeyEvent', {
+        await chrome.debugger.sendCommand({ tabId: tid }, 'Input.dispatchKeyEvent', {
           type: 'keyUp', modifiers, ...mapped
         })
       })
-      return `pressed ${key}`
+      await new Promise(r => setTimeout(r, 150))
+      const fb = await pageFeedback(tabId)
+      const nav = fb.url !== prevUrl ? ' (navigated)' : ''
+      return fmtFeedback(`pressed ${key}${nav}`, fb)
     }
 
     case 'WebClaw.select': {
-      const tabId = await requireTab()
+      const tabId = await requireTab(params)
       const { selector, value } = params
       if (!selector || value === undefined) throw new Error('select: missing selector or value')
 
@@ -570,22 +668,23 @@ async function handleClawCommand(method, params = {}) {
         world: 'MAIN'
       })
       if (!result?.result) throw new Error(`select: "${selector}" not found`)
-      return `selected "${value}" in "${selector}"`
+      const fb = await pageFeedback(tabId)
+      return fmtFeedback(`selected "${value}" in "${selector}"`, fb)
     }
 
     case 'WebClaw.upload': {
-      const tabId = await requireTab()
+      const tabId = await requireTab(params)
       const { selector, files } = params
       if (!selector || !files) throw new Error('upload: missing selector or files')
       const fileList = typeof files === 'string' ? files.split(',').map(f => f.trim()) : files
 
-      await withDebugger(async () => {
-        const doc = await chrome.debugger.sendCommand({ tabId: activeTabId }, 'DOM.getDocument', {})
-        const node = await chrome.debugger.sendCommand({ tabId: activeTabId }, 'DOM.querySelector', {
+      await withDebugger(tabId, async (tid) => {
+        const doc = await chrome.debugger.sendCommand({ tabId: tid }, 'DOM.getDocument', {})
+        const node = await chrome.debugger.sendCommand({ tabId: tid }, 'DOM.querySelector', {
           nodeId: doc.root.nodeId, selector
         })
         if (!node?.nodeId) throw new Error(`upload: "${selector}" not found`)
-        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'DOM.setFileInputFiles', {
+        await chrome.debugger.sendCommand({ tabId: tid }, 'DOM.setFileInputFiles', {
           nodeId: node.nodeId, files: fileList
         })
       })
@@ -595,7 +694,7 @@ async function handleClawCommand(method, params = {}) {
     // ---- Perception tools ----
 
     case 'WebClaw.find': {
-      const tabId = await requireTab()
+      const tabId = await requireTab(params)
       const query = params.query
       const role = params.role || ''
       if (!query) throw new Error('find: missing query')
@@ -654,7 +753,7 @@ async function handleClawCommand(method, params = {}) {
     }
 
     case 'WebClaw.element_info': {
-      const tabId = await requireTab()
+      const tabId = await requireTab(params)
       const selector = params.selector
       if (!selector) throw new Error('element_info: missing selector')
 
@@ -683,7 +782,7 @@ async function handleClawCommand(method, params = {}) {
     }
 
     case 'WebClaw.hit_test': {
-      const tabId = await requireTab()
+      const tabId = await requireTab(params)
       const { x, y } = params
       if (x === undefined || y === undefined) throw new Error('hit_test: missing x or y')
 
@@ -712,7 +811,7 @@ async function handleClawCommand(method, params = {}) {
     }
 
     case 'WebClaw.top_layer': {
-      const tabId = await requireTab()
+      const tabId = await requireTab(params)
       const [result] = await chrome.scripting.executeScript({
         target: { tabId },
         func: () => {
@@ -735,7 +834,7 @@ async function handleClawCommand(method, params = {}) {
     }
 
     case 'WebClaw.ax_tree_interactive': {
-      const tabId = await requireTab()
+      const tabId = await requireTab(params)
       const [result] = await chrome.scripting.executeScript({
         target: { tabId },
         func: () => {
@@ -771,7 +870,7 @@ async function handleClawCommand(method, params = {}) {
     }
 
     case 'WebClaw.read_dom': {
-      const tabId = await requireTab()
+      const tabId = await requireTab(params)
       const selector = params.selector || 'body'
       const maxDepth = params.depth || 6
       const summary = params.summary !== false
@@ -823,14 +922,14 @@ async function handleClawCommand(method, params = {}) {
     // ---- State tools ----
 
     case 'WebClaw.cookies': {
-      const tabId = await requireTab()
+      const tabId = await requireTab(params)
       const tab = await chrome.tabs.get(tabId)
       const cookies = await chrome.cookies.getAll({ url: tab.url })
       return { cookies }
     }
 
     case 'WebClaw.set_cookie': {
-      await requireTab()
+      await requireTab(params)
       const { url, name, value, domain, path, secure, httpOnly, sameSite, expirationDate } = params
       if (!url || !name) throw new Error('set_cookie: missing url or name')
       const cookie = { url, name, value: value || '' }
@@ -845,10 +944,10 @@ async function handleClawCommand(method, params = {}) {
     }
 
     case 'WebClaw.dismiss_dialog': {
-      await requireTab()
+      const tabId = await requireTab(params)
       const accept = params.accept !== false
-      await withDebugger(async () => {
-        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Page.handleJavaScriptDialog', {
+      await withDebugger(tabId, async (tid) => {
+        await chrome.debugger.sendCommand({ tabId: tid }, 'Page.handleJavaScriptDialog', {
           accept, promptText: params.prompt_text || ''
         })
       })
@@ -856,16 +955,16 @@ async function handleClawCommand(method, params = {}) {
     }
 
     case 'WebClaw.force_state': {
-      const tabId = await requireTab()
+      const tabId = await requireTab(params)
       const { selector, state } = params
       if (!selector || !state) throw new Error('force_state: missing selector or state')
-      await withDebugger(async () => {
-        const doc = await chrome.debugger.sendCommand({ tabId: activeTabId }, 'DOM.getDocument', {})
-        const node = await chrome.debugger.sendCommand({ tabId: activeTabId }, 'DOM.querySelector', {
+      await withDebugger(tabId, async (tid) => {
+        const doc = await chrome.debugger.sendCommand({ tabId: tid }, 'DOM.getDocument', {})
+        const node = await chrome.debugger.sendCommand({ tabId: tid }, 'DOM.querySelector', {
           nodeId: doc.root.nodeId, selector
         })
         if (!node?.nodeId) throw new Error(`"${selector}" not found`)
-        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'CSS.forcePseudoState', {
+        await chrome.debugger.sendCommand({ tabId: tid }, 'CSS.forcePseudoState', {
           nodeId: node.nodeId, forcedPseudoClasses: Array.isArray(state) ? state : [state]
         })
       })
@@ -873,17 +972,17 @@ async function handleClawCommand(method, params = {}) {
     }
 
     case 'WebClaw.event_listeners': {
-      const tabId = await requireTab()
+      const tabId = await requireTab(params)
       const selector = params.selector
       if (!selector) throw new Error('event_listeners: missing selector')
       let listeners = []
-      await withDebugger(async () => {
-        const { result } = await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Runtime.evaluate', {
+      await withDebugger(tabId, async (tid) => {
+        const { result } = await chrome.debugger.sendCommand({ tabId: tid }, 'Runtime.evaluate', {
           expression: `document.querySelector(${JSON.stringify(selector)})`,
           returnByValue: false
         })
         if (result?.objectId) {
-          const res = await chrome.debugger.sendCommand({ tabId: activeTabId }, 'DOMDebugger.getEventListeners', {
+          const res = await chrome.debugger.sendCommand({ tabId: tid }, 'DOMDebugger.getEventListeners', {
             objectId: result.objectId
           })
           listeners = (res.listeners || []).map(l => ({ type: l.type, useCapture: l.useCapture, passive: l.passive, once: l.once }))
@@ -893,7 +992,7 @@ async function handleClawCommand(method, params = {}) {
     }
 
     case 'WebClaw.storage_items': {
-      const tabId = await requireTab()
+      const tabId = await requireTab(params)
       const storageType = params.type || 'local'
       const [result] = await chrome.scripting.executeScript({
         target: { tabId },
@@ -915,17 +1014,19 @@ async function handleClawCommand(method, params = {}) {
     // ---- Network tools ----
 
     case 'WebClaw.network_log_start': {
-      await requireTab()
-      networkLogEntries = []
-      networkLogActive = true
-      await withDebugger(async () => {
-        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Network.enable', {})
+      const tabId = await requireTab(params)
+      const netLog = getNetworkLog(tabId)
+      netLog.entries = []
+      netLog.active = true
+      await withDebugger(tabId, async (tid) => {
+        await chrome.debugger.sendCommand({ tabId: tid }, 'Network.enable', {})
       })
       return { started: true }
     }
 
     case 'WebClaw.network_log_dump': {
-      const entries = networkLogEntries.map(e => ({
+      const tabId = await requireTab(params)
+      const entries = getNetworkLog(tabId).entries.map(e => ({
         url: e.url, method: e.method, status: e.status,
         type: e.type, time: e.time
       }))
@@ -933,8 +1034,9 @@ async function handleClawCommand(method, params = {}) {
     }
 
     case 'WebClaw.network_log_dump_bodies': {
+      const tabId = await requireTab(params)
       // Return entries with response bodies
-      const entries = networkLogEntries.slice(-50).map(e => ({
+      const entries = getNetworkLog(tabId).entries.slice(-50).map(e => ({
         url: e.url, method: e.method, status: e.status,
         type: e.type, responseBody: e.responseBody || null
       }))
@@ -942,7 +1044,7 @@ async function handleClawCommand(method, params = {}) {
     }
 
     case 'WebClaw.api_log': {
-      const tabId = await requireTab()
+      const tabId = await requireTab(params)
       const [result] = await chrome.scripting.executeScript({
         target: { tabId },
         func: () => {
@@ -956,7 +1058,7 @@ async function handleClawCommand(method, params = {}) {
     }
 
     case 'WebClaw.download': {
-      const tabId = await requireTab()
+      const tabId = await requireTab(params)
       const { url, output } = params
       if (!url) throw new Error('download: missing url')
       const [result] = await chrome.scripting.executeScript({
@@ -977,7 +1079,7 @@ async function handleClawCommand(method, params = {}) {
     }
 
     case 'WebClaw.save_image': {
-      const tabId = await requireTab()
+      const tabId = await requireTab(params)
       const { selector, output } = params
       if (!selector || !output) throw new Error('save_image: missing selector or output')
       const [result] = await chrome.scripting.executeScript({
@@ -1002,7 +1104,7 @@ async function handleClawCommand(method, params = {}) {
     // ---- Resource inspection ----
 
     case 'WebClaw.global_names': {
-      const tabId = await requireTab()
+      const tabId = await requireTab(params)
       const [result] = await chrome.scripting.executeScript({
         target: { tabId },
         func: () => {
@@ -1020,22 +1122,22 @@ async function handleClawCommand(method, params = {}) {
     }
 
     case 'WebClaw.resource_tree': {
-      await requireTab()
+      const tabId = await requireTab(params)
       let tree = null
-      await withDebugger(async () => {
-        tree = await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Page.getResourceTree', {})
+      await withDebugger(tabId, async (tid) => {
+        tree = await chrome.debugger.sendCommand({ tabId: tid }, 'Page.getResourceTree', {})
       })
       return tree || {}
     }
 
     case 'WebClaw.resource_content': {
-      await requireTab()
+      const tabId = await requireTab(params)
       const { frameId, url } = params
       if (!url) throw new Error('resource_content: missing url')
       let content = null
-      await withDebugger(async () => {
-        content = await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Page.getResourceContent', {
-          frameId: frameId || (await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Page.getResourceTree', {}))?.frameTree?.frame?.id,
+      await withDebugger(tabId, async (tid) => {
+        content = await chrome.debugger.sendCommand({ tabId: tid }, 'Page.getResourceContent', {
+          frameId: frameId || (await chrome.debugger.sendCommand({ tabId: tid }, 'Page.getResourceTree', {}))?.frameTree?.frame?.id,
           url
         })
       })
@@ -1043,13 +1145,13 @@ async function handleClawCommand(method, params = {}) {
     }
 
     case 'WebClaw.search_resource': {
-      await requireTab()
+      const tabId = await requireTab(params)
       const { query } = params
       if (!query) throw new Error('search_resource: missing query')
       let results = []
-      await withDebugger(async () => {
-        const search = await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Page.searchInResource', {
-          frameId: (await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Page.getResourceTree', {}))?.frameTree?.frame?.id,
+      await withDebugger(tabId, async (tid) => {
+        const search = await chrome.debugger.sendCommand({ tabId: tid }, 'Page.searchInResource', {
+          frameId: (await chrome.debugger.sendCommand({ tabId: tid }, 'Page.getResourceTree', {}))?.frameTree?.frame?.id,
           ...params
         })
         results = search?.result || []
@@ -1058,11 +1160,11 @@ async function handleClawCommand(method, params = {}) {
     }
 
     case 'WebClaw.request_replay': {
-      await requireTab()
+      const tabId = await requireTab(params)
       const { requestId } = params
       if (!requestId) throw new Error('request_replay: missing requestId')
-      await withDebugger(async () => {
-        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Network.replayXHR', { requestId })
+      await withDebugger(tabId, async (tid) => {
+        await chrome.debugger.sendCommand({ tabId: tid }, 'Network.replayXHR', { requestId })
       })
       return { replayed: true, requestId }
     }
@@ -1070,18 +1172,18 @@ async function handleClawCommand(method, params = {}) {
     // ---- Intercept tools ----
 
     case 'WebClaw.intercept_on': {
-      await requireTab()
+      const tabId = await requireTab(params)
       const patterns = params.patterns || [{ urlPattern: '*' }]
-      await withDebugger(async () => {
-        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Fetch.enable', { patterns })
+      await withDebugger(tabId, async (tid) => {
+        await chrome.debugger.sendCommand({ tabId: tid }, 'Fetch.enable', { patterns })
       })
       return { enabled: true, patterns }
     }
 
     case 'WebClaw.intercept_off': {
-      await requireTab()
-      await withDebugger(async () => {
-        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Fetch.disable', {})
+      const tabId = await requireTab(params)
+      await withDebugger(tabId, async (tid) => {
+        await chrome.debugger.sendCommand({ tabId: tid }, 'Fetch.disable', {})
       })
       return { disabled: true }
     }
@@ -1091,25 +1193,25 @@ async function handleClawCommand(method, params = {}) {
     }
 
     case 'WebClaw.intercept_continue': {
-      await requireTab()
+      const tabId = await requireTab(params)
       const { requestId, url, method, headers } = params
       if (!requestId) throw new Error('intercept_continue: missing requestId')
-      await withDebugger(async () => {
+      await withDebugger(tabId, async (tid) => {
         const p = { requestId }
         if (url) p.url = url
         if (method) p.method = method
         if (headers) p.headers = headers
-        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Fetch.continueRequest', p)
+        await chrome.debugger.sendCommand({ tabId: tid }, 'Fetch.continueRequest', p)
       })
       return { continued: true }
     }
 
     case 'WebClaw.intercept_fulfill': {
-      await requireTab()
+      const tabId = await requireTab(params)
       const { requestId, responseCode, body, responseHeaders } = params
       if (!requestId) throw new Error('intercept_fulfill: missing requestId')
-      await withDebugger(async () => {
-        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Fetch.fulfillRequest', {
+      await withDebugger(tabId, async (tid) => {
+        await chrome.debugger.sendCommand({ tabId: tid }, 'Fetch.fulfillRequest', {
           requestId, responseCode: responseCode || 200,
           body: body ? btoa(body) : undefined,
           responseHeaders: responseHeaders || []
@@ -1119,11 +1221,11 @@ async function handleClawCommand(method, params = {}) {
     }
 
     case 'WebClaw.intercept_fail': {
-      await requireTab()
+      const tabId = await requireTab(params)
       const { requestId, errorReason } = params
       if (!requestId) throw new Error('intercept_fail: missing requestId')
-      await withDebugger(async () => {
-        await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Fetch.failRequest', {
+      await withDebugger(tabId, async (tid) => {
+        await chrome.debugger.sendCommand({ tabId: tid }, 'Fetch.failRequest', {
           requestId, errorReason: errorReason || 'Failed'
         })
       })
@@ -1133,10 +1235,11 @@ async function handleClawCommand(method, params = {}) {
     // ---- Toast collection ----
 
     case 'WebClaw.collect_toasts': {
-      if (!activeTabId) return []
+      const tabId = params.tabId ? Number(params.tabId) : activeTabId
+      if (!tabId) return []
       try {
         const [result] = await chrome.scripting.executeScript({
-          target: { tabId: activeTabId },
+          target: { tabId },
           func: () => {
             const toasts = window.__webclaw_toasts || []
             window.__webclaw_toasts = []
@@ -1155,10 +1258,10 @@ async function handleClawCommand(method, params = {}) {
 
 // --- CDP Click Helper ---
 async function cdpClick(tabId, x, y) {
-  await withDebugger(async () => {
+  await withDebugger(tabId, async (tid) => {
     const p = { x, y, button: 'left', clickCount: 1 }
-    await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Input.dispatchMouseEvent', { type: 'mousePressed', ...p })
-    await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...p })
+    await chrome.debugger.sendCommand({ tabId: tid }, 'Input.dispatchMouseEvent', { type: 'mousePressed', ...p })
+    await chrome.debugger.sendCommand({ tabId: tid }, 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...p })
   })
 }
 
@@ -1317,34 +1420,34 @@ function waitForTabLoad(tabId) {
   })
 }
 
-// Debugger with delayed detach — consecutive CDP commands share one session.
-// Detaches automatically after 500ms of inactivity.
-let debuggerTabId = null
-let detachTimer = null
+// Per-tab debugger with delayed detach — consecutive CDP commands share one session.
+// Detaches automatically after 500ms of inactivity per tab.
 
-async function ensureDebugger() {
-  if (detachTimer) { clearTimeout(detachTimer); detachTimer = null }
-  if (debuggerTabId !== activeTabId) {
-    if (debuggerTabId) await chrome.debugger.detach({ tabId: debuggerTabId }).catch(() => {})
-    await chrome.debugger.attach({ tabId: activeTabId }, '1.3')
-    await chrome.debugger.sendCommand({ tabId: activeTabId }, 'DOM.enable', {})
-    await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Page.enable', {})
-    debuggerTabId = activeTabId
-    console.log(`[webclaw] debugger attached to ${activeTabId}`)
+async function ensureDebugger(tabId) {
+  const session = debuggerSessions.get(tabId)
+  if (session?.detachTimer) { clearTimeout(session.detachTimer); session.detachTimer = null }
+
+  if (!session?.attached) {
+    // Attach to this tab
+    await chrome.debugger.attach({ tabId }, '1.3')
+    await chrome.debugger.sendCommand({ tabId }, 'DOM.enable', {})
+    await chrome.debugger.sendCommand({ tabId }, 'Page.enable', {})
+    debuggerSessions.set(tabId, { attached: true, detachTimer: null })
+    console.log(`[webclaw] debugger attached to ${tabId}`)
   }
+
   // Schedule auto-detach after 500ms idle
-  detachTimer = setTimeout(async () => {
-    if (debuggerTabId) {
-      await chrome.debugger.detach({ tabId: debuggerTabId }).catch(() => {})
-      console.log(`[webclaw] debugger detached (idle)`)
-      debuggerTabId = null
-    }
+  const s = debuggerSessions.get(tabId)
+  s.detachTimer = setTimeout(async () => {
+    await chrome.debugger.detach({ tabId }).catch(() => {})
+    debuggerSessions.delete(tabId)
+    console.log(`[webclaw] debugger detached from ${tabId} (idle)`)
   }, 500)
 }
 
-async function withDebugger(fn) {
-  await ensureDebugger()
-  return await fn()
+async function withDebugger(tabId, fn) {
+  await ensureDebugger(tabId)
+  return await fn(tabId)
 }
 
 // --- Omnibox: webclaw:// protocol via address bar ---
@@ -1377,7 +1480,7 @@ chrome.omnibox.onInputEntered.addListener((text, disposition) => {
 // --- Toast Observer: auto-inject on page load ---
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (tabId === activeTabId && changeInfo.status === 'complete') {
+  if ((tabId === activeTabId || debuggerSessions.has(tabId) || networkLogs.has(tabId)) && changeInfo.status === 'complete') {
     chrome.scripting.executeScript({
       target: { tabId },
       func: () => {
@@ -1416,21 +1519,20 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 // --- Network Log Event Handler ---
 
 chrome.debugger.onEvent.addListener((source, method, params) => {
-  if (source.tabId === activeTabId) {
-    wsSend({ method, params })
+  // Forward events for any managed tab
+  wsSend({ method, params, tabId: source.tabId })
 
-    // Buffer network events when logging is active
-    if (networkLogActive) {
-      if (method === 'Network.requestWillBeSent') {
-        networkLogEntries.push({
-          requestId: params.requestId,
-          url: params.request?.url, method: params.request?.method,
-          type: params.type, time: params.timestamp
-        })
-      } else if (method === 'Network.responseReceived') {
-        const entry = networkLogEntries.find(e => e.requestId === params.requestId)
-        if (entry) { entry.status = params.response?.status }
-      }
+  const netLog = networkLogs.get(source.tabId)
+  if (netLog?.active) {
+    if (method === 'Network.requestWillBeSent') {
+      netLog.entries.push({
+        requestId: params.requestId,
+        url: params.request?.url, method: params.request?.method,
+        type: params.type, time: params.timestamp
+      })
+    } else if (method === 'Network.responseReceived') {
+      const entry = netLog.entries.find(e => e.requestId === params.requestId)
+      if (entry) { entry.status = params.response?.status }
     }
   }
 })
