@@ -50,10 +50,25 @@ async fn listen_loop(client_slot: Arc<Mutex<Option<BridgeClient>>>) -> Result<()
             // Port occupied — kill the old process and retry
             eprintln!("bridge: port {} in use, killing old process...", BRIDGE_PORT);
             let _ = std::process::Command::new("sh")
-                .args(["-c", &format!("lsof -ti:{} | xargs kill", BRIDGE_PORT)])
+                .args(["-c", &format!("lsof -ti:{} | xargs kill -9", BRIDGE_PORT)])
                 .status();
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            try_bind(addr).map_err(|e| format!("bridge: cannot bind {} ({})", addr, e))?
+            let mut bound = None;
+            for i in 0..10 {
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                if let Ok(l) = try_bind(addr) {
+                    bound = Some(l);
+                    break;
+                }
+                if i == 4 {
+                    // Try killing again
+                    let _ = std::process::Command::new("sh")
+                        .args(["-c", &format!("lsof -ti:{} | xargs kill -9", BRIDGE_PORT)])
+                        .status();
+                }
+            }
+            bound.ok_or_else(|| {
+                format!("bridge: cannot bind {} after killing old process", addr)
+            })?
         }
     };
 
