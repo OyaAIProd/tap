@@ -146,6 +146,15 @@ for (const { site, name, path } of tapFiles) {
     })
   }
 
+  // requires validation (optional — declares protocol version dependency)
+  if (tap.requires) {
+    test(`  [common] requires is valid semver range`, () => {
+      // Why: taps declare minimum protocol version for runtime compatibility negotiation
+      assert.equal(typeof tap.requires, 'string', 'requires must be a semver string (e.g. ">=1.0.0")')
+      assert(/^[><=^~]*\d+\.\d+\.\d+/.test(tap.requires), `requires "${tap.requires}" must be semver range`)
+    })
+  }
+
   // No chrome.* direct access (both formats)
   const checkFn = tap.run || tap.extract
   test(`  [common] ${format}() body does not reference chrome.* directly`, () => {

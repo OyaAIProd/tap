@@ -152,11 +152,30 @@ test('kernel does not call or import stdlib (no circular dependency)', () => {
   assert(!kernelSection.includes('stdlib.'), 'kernel must not call stdlib methods')
 })
 
-test('only createPageAPI is exported (implementation hiding)', () => {
-  // Why: kernel and stdlib are internal — external code should only see the merged page object
+test('only createPageAPI and PROTOCOL_VERSION are exported', () => {
+  // Why: kernel and stdlib are internal — external code sees merged page object + version constant
   const exports = src.match(/export\s+(function|const|let|var|class)\s+\w+/g) || []
-  assert.equal(exports.length, 1, `expected 1 export, found ${exports.length}: ${exports.join(', ')}`)
-  assert(exports[0].includes('createPageAPI'), 'the only export must be createPageAPI')
+  assert.equal(exports.length, 2, `expected 2 exports, found ${exports.length}: ${exports.join(', ')}`)
+  assert(exports.some(e => e.includes('createPageAPI')), 'must export createPageAPI')
+  assert(exports.some(e => e.includes('PROTOCOL_VERSION')), 'must export PROTOCOL_VERSION')
+})
+
+// --- Protocol versioning (safety / what — mismatched versions = silent breakage across runtimes) ---
+
+console.log('\n  protocol versioning\n')
+
+test('PROTOCOL_VERSION constant exists and is semver', () => {
+  // Why: without a version, runtimes and taps can't negotiate compatibility
+  const match = src.match(/export\s+const\s+PROTOCOL_VERSION\s*=\s*'(\d+\.\d+\.\d+)'/)
+  assert(match, 'PROTOCOL_VERSION must be exported as semver string (e.g. "1.0.0")')
+})
+
+test('capabilities() includes protocol version', () => {
+  // Why: runtime self-declaration must include version so callers can check compatibility
+  const capImpl = src.indexOf('capabilities() {')
+  assert(capImpl !== -1, 'capabilities() not found')
+  const capSection = src.substring(capImpl, capImpl + 800)
+  assert(capSection.includes('PROTOCOL_VERSION'), 'capabilities() must include PROTOCOL_VERSION')
 })
 
 // --- Cross-domain constraint (safety / what-x-what — bridge must delegate to protocol) ---

@@ -32,6 +32,8 @@
  *   storage(type?)      — read local/session storage
  */
 
+export const PROTOCOL_VERSION = '1.0.0'
+
 // ============================================================================
 // KERNEL — 8 irreducible primitives (Chrome Extension runtime implementation)
 // ============================================================================
@@ -186,6 +188,7 @@ function createKernel(tabId, { cdpClick, withDebugger } = {}) {
     /** Declare runtime capabilities. */
     capabilities() {
       return {
+        protocol: PROTOCOL_VERSION,
         runtime: 'chrome-extension',
         kernel: ['eval', 'pointer', 'keyboard', 'nav', 'wait', 'screenshot', 'tap', 'capabilities'],
         stdlib: ['click', 'type', 'hover', 'scroll', 'pressKey', 'select', 'upload', 'dialog',
