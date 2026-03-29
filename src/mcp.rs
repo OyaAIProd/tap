@@ -203,6 +203,7 @@ fn handle_resources_list(id: &Value) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "result": { "resources": resources } })
 }
 
+#[allow(dead_code)]
 async fn handle_resources_read(id: &Value, params: &Value) -> Value {
     let uri = params["uri"].as_str().unwrap_or("");
 
@@ -245,6 +246,7 @@ async fn handle_resources_read(id: &Value, params: &Value) -> Value {
 // PROMPTS — guided workflows (replaces FORGING.md)
 // ============================================================================
 
+#[allow(dead_code)] // called via string dispatch in serve()
 fn handle_prompts_list(id: &Value) -> Value {
     json!({
         "jsonrpc": "2.0", "id": id,
@@ -269,6 +271,7 @@ fn handle_prompts_list(id: &Value) -> Value {
     })
 }
 
+#[allow(dead_code)]
 fn handle_prompts_get(id: &Value, params: &Value) -> Value {
     let prompt_name = params["name"].as_str().unwrap_or("");
     let args = &params["arguments"];

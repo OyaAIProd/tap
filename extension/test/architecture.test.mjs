@@ -106,17 +106,16 @@ test('protocol.js click uses elementFromPoint to verify target is reachable', ()
     'click() must verify coordinates via elementFromPoint before dispatching CDP click')
 })
 
-test('background.js click handlers delegate to protocol (no inline elementFromPoint)', () => {
+test('background.js click handler delegates to protocol (no inline elementFromPoint)', () => {
   // Why: after protocol unification, click safety lives in protocol.js stdlib.click()
   // background.js must delegate via getPage(), not reimplement element finding
-  const clickSection = BACKGROUND_SRC.substring(
-    BACKGROUND_SRC.indexOf("case 'click'"),
-    BACKGROUND_SRC.indexOf("case 'type_text'")
-  )
+  const clickStart = BACKGROUND_SRC.indexOf("case 'click'")
+  const nextCase = BACKGROUND_SRC.indexOf("case '", clickStart + 12)
+  const clickSection = BACKGROUND_SRC.substring(clickStart, nextCase)
   assert(clickSection.includes('getPage('),
-    'Tap.click handlers must delegate to protocol via getPage()')
+    'click handler must delegate to protocol via getPage()')
   assert(!clickSection.includes('chrome.scripting.executeScript'),
-    'Tap.click handlers must NOT have inline scripting — delegate to protocol')
+    'click handler must NOT have inline scripting — delegate to protocol')
 })
 
 test('no unconditional scrollIntoView in protocol click', () => {
