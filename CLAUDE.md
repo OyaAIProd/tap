@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Make every interface programmable by AI.** Tap is a universal protocol for AI to operate any interface. It defines 8 kernel primitives + 16 stdlib operations that abstract all human-interface interaction. AI agents forge taps (via `page_intelligence` → `forge_verify` → `forge_save`), then any agent can run them with zero AI at runtime.
+**Make every interface programmable by AI.** Tap is a universal protocol for AI to operate any interface. It defines 8 kernel primitives + 16 stdlib operations that abstract all human-interface interaction. AI agents forge taps (via `forge_inspect` → `forge_verify` → `forge_save`), then any agent can run them with zero AI at runtime.
 
 ## Engineering Philosophy
 
@@ -113,7 +113,7 @@ extension-v2/
 ### Forge Pipeline
 
 ```
-page_intelligence(url)  → framework, SSR state, APIs, strategy templates
+forge_inspect(url)  → framework, SSR state, APIs, strategy templates
 forge_verify(url, expr) → test extraction logic, validate columns
 forge_save(site, name)  → persist to ~/.tap/taps/ + extension-v2/taps/
 ```

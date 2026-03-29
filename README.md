@@ -5,7 +5,7 @@
 Tap is a universal protocol for AI to operate any interface. It defines 8 kernel primitives + 16 stdlib operations — the minimal complete set for all human-interface interactions. AI agents forge `.tap.js` scripts once, then any agent runs them deterministically with zero AI at runtime.
 
 ```
-page_intelligence → forge_verify → forge_save → run_tap
+forge_inspect → forge_verify → forge_save → run_tap
      (1 call)        (1 call)       (1 call)      (forever)
 ```
 
@@ -113,7 +113,7 @@ tap check                       # Health check all taps
 ### From AI agents (MCP)
 
 ```
-> Use page_intelligence to analyze https://example.com
+> Use forge_inspect to analyze https://example.com
 > Then forge_verify to test the extraction logic
 > Then forge_save to persist the new tap
 ```
@@ -203,7 +203,7 @@ Claude Code ←→ MCP (stdin/stdout) ←→ Bridge (ws://9333) ←→ Chrome Ex
 
 | Category | Tools |
 |----------|-------|
-| **Forge** | `page_intelligence`, `forge_verify`, `forge_save` |
+| **Forge** | `forge_inspect`, `forge_verify`, `forge_save` |
 | **Run** | `run_tap`, `list_taps` |
 | **See** | `screenshot`, `ax_tree`, `read_dom`, `page_info` |
 | **Probe** | `find`, `element_info`, `evaluate`, `cookies` |

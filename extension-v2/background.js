@@ -12,7 +12,7 @@
 
 import { registerTap, listTaps, runTap, parseTapURL } from './runtime/executor.js'
 import { createPage } from './runtime/protocol.js'
-import { gatherPageIntelligence } from './runtime/page-intelligence.js'
+import { gatherForgeInspection } from './runtime/page-intelligence.js'
 
 // --- Tap Registration (static imports — MV3 service workers prohibit dynamic import()) ---
 // AUTO-GENERATED: run `node scripts/gen-imports.js` to regenerate
@@ -369,10 +369,10 @@ async function handleTapCommand(method, params = {}) {
   switch (method) {
     // ---- Core ----
 
-    case 'page_intelligence': {
+    case 'forge_inspect': {
       const tabId = params.tabId || activeTabId
       if (!tabId) throw new Error('No tab. Call Bridge.attach first.')
-      return await gatherPageIntelligence(tabId)
+      return await gatherForgeInspection(tabId)
     }
 
     case 'run':

@@ -5,7 +5,7 @@ How to create .tap.js files. For AI agents, not humans.
 ## 1. Forge Workflow
 
 ```
-page_intelligence(url)     → framework, SSR state, APIs, strategies + templates
+forge_inspect(url)     → framework, SSR state, APIs, strategies + templates
                            ↓
 pick strategy template     → SSR > API > DOM (in priority order)
                            ↓
@@ -16,7 +16,7 @@ iterate if needed          → tweak expression, re-verify
 forge_save(site, name, code) → persist to ~/.tap/taps/
 ```
 
-3-4 MCP calls total. `page_intelligence` returns ready-to-use templates — pick one, fill TODOs, verify, save.
+3-4 MCP calls total. `forge_inspect` returns ready-to-use templates — pick one, fill TODOs, verify, save.
 
 ## 2. .tap.js Format
 
@@ -67,7 +67,7 @@ Scripting mode = undetectable. Debugger mode = ms-level attach/detach.
 ## 4. Strategy Decision Tree
 
 ```
-page_intelligence returned strategies?
+forge_inspect returned strategies?
   Has SSR state (__NEXT_DATA__, __pinia, etc.)?
     → SSR strategy: page.eval(() => window.__STATE__) — zero requests
   Has API endpoints in api_hints?

@@ -1,16 +1,16 @@
 /**
- * Page Intelligence — one-shot page analysis for tap forging.
+ * Forge Inspection — one-shot page analysis for tap creation.
  *
  * Replaces 5-8 MCP round-trips (screenshot + ax_tree + global_names + api_log + page_info)
  * with a single call that returns everything an agent needs to decide strategy and write a tap.
  */
 
 /**
- * Gather complete page intelligence in one call.
+ * Inspect a page for tap forging. Returns framework, SSR state, APIs, auth, strategies.
  * @param {number} tabId - Chrome tab ID
- * @returns {object} Full intelligence report
+ * @returns {object} Page inspection report
  */
-export async function gatherPageIntelligence(tabId) {
+export async function gatherForgeInspection(tabId) {
   const tab = await chrome.tabs.get(tabId)
 
   // Single executeScript call gathers everything from the page context

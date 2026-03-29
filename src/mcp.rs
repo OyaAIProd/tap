@@ -439,7 +439,7 @@ fn tools_schema() -> Value {
             }
         },
         {
-            "name": "page_intelligence",
+            "name": "forge_inspect",
             "description": "One-shot page analysis for tap forging. Returns framework detection, SSR state (with data samples), API endpoint hints, interactive elements, auth state, and ranked strategy recommendations — all in a single call. Replaces 5-8 separate tool calls (screenshot + ax_tree + global_names + api_log + page_info). Call this FIRST when forging a new tap.",
             "inputSchema": {
                 "type": "object",
@@ -744,7 +744,7 @@ async fn execute_tool(
 ) -> Result<Value, Box<dyn std::error::Error>> {
     match name {
         // --- Tools with local logic ---
-        "page_intelligence" => {
+        "forge_inspect" => {
             let tab_id = extract_tab_id(args);
             if let Some(url) = args["url"].as_str() {
                 client
@@ -752,7 +752,7 @@ async fn execute_tool(
                     .await?;
             }
             client
-                .send_tap("tool", "page_intelligence", json!({}), tab_id)
+                .send_tap("tool", "forge_inspect", json!({}), tab_id)
                 .await
         }
         "list_taps" => {
