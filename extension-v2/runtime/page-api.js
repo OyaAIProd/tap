@@ -1,8 +1,8 @@
 /**
- * page API — the 10 system calls a .tap.js can use (Tap runtime).
+ * page API — the 17 system calls a .tap.js can use (Tap runtime).
  *
- * Scripting mode (undetectable): nav, wait, waitFor, eval, fetch, screenshot, cookies
- * Debugger mode (ms-level attach/detach): click, type, upload
+ * Scripting mode (undetectable): nav, wait, waitFor, eval, fetch, screenshot, cookies, scroll, select, download
+ * Debugger mode (ms-level attach/detach): click, type, upload, hover, pressKey, dialog
  */
 
 /**
@@ -212,6 +212,142 @@ export function createPageAPI(tabId, { cdpClick, cdpType, withDebugger } = {}) {
     /** Read cookies for the current page's domain. */
     async cookies() {
       return await chrome.cookies.getAll({ url: currentUrl })
+    },
+
+    /** Scroll an element into view. */
+    async scroll(selector) {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (sel) => {
+          const el = document.querySelector(sel)
+          if (!el) return false
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          return true
+        },
+        args: [selector],
+        world: 'MAIN'
+      })
+      if (!results?.[0]?.result) throw new Error(`scroll: "${selector}" not found`)
+    },
+
+    /**
+     * Hover over an element. Triggers CSS :hover, tooltips, dropdown menus.
+     * Uses CDP native Input.dispatchMouseEvent (isTrusted=true).
+     */
+    async hover(selector) {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (sel) => {
+          const el = document.querySelector(sel)
+          if (!el) return null
+          el.scrollIntoView({ block: 'center', behavior: 'instant' })
+          const rect = el.getBoundingClientRect()
+          return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+        },
+        args: [selector],
+        world: 'MAIN'
+      })
+      const pos = results?.[0]?.result
+      if (!pos) throw new Error(`hover: "${selector}" not found`)
+
+      const wd = withDebugger || _fallbackWithDebugger
+      await wd(async () => {
+        await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
+          type: 'mouseMoved', x: pos.x, y: pos.y
+        })
+      })
+    },
+
+    /**
+     * Press a key (Enter, Tab, Escape, arrows, etc.).
+     * Uses CDP native Input.dispatchKeyEvent (isTrusted=true).
+     * @param {string} key - Key name (e.g. 'Enter', 'Tab', 'Escape', 'ArrowDown')
+     * @param {number} [modifiers=0] - Modifier bitmask: Alt=1, Ctrl=2, Meta=4, Shift=8
+     */
+    async pressKey(key, modifiers = 0) {
+      const keyMap = {
+        Enter: { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 },
+        Tab: { key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 },
+        Escape: { key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 },
+        Backspace: { key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 },
+        Delete: { key: 'Delete', code: 'Delete', windowsVirtualKeyCode: 46 },
+        ArrowUp: { key: 'ArrowUp', code: 'ArrowUp', windowsVirtualKeyCode: 38 },
+        ArrowDown: { key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 },
+        ArrowLeft: { key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37 },
+        ArrowRight: { key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39 },
+        Home: { key: 'Home', code: 'Home', windowsVirtualKeyCode: 36 },
+        End: { key: 'End', code: 'End', windowsVirtualKeyCode: 35 },
+        PageUp: { key: 'PageUp', code: 'PageUp', windowsVirtualKeyCode: 33 },
+        PageDown: { key: 'PageDown', code: 'PageDown', windowsVirtualKeyCode: 34 },
+        Space: { key: ' ', code: 'Space', windowsVirtualKeyCode: 32 },
+      }
+      const mapped = keyMap[key] || { key, code: `Key${key.toUpperCase()}`, windowsVirtualKeyCode: key.charCodeAt(0) }
+
+      const wd = withDebugger || _fallbackWithDebugger
+      await wd(async () => {
+        await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
+          type: 'keyDown', modifiers, ...mapped
+        })
+        await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
+          type: 'keyUp', modifiers, ...mapped
+        })
+      })
+    },
+
+    /**
+     * Select an option in a <select> dropdown.
+     * @param {string} selector - CSS selector of the <select> element
+     * @param {string} value - Value to select
+     */
+    async select(selector, value) {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (sel, val) => {
+          const el = document.querySelector(sel)
+          if (!el) return false
+          el.value = val
+          el.dispatchEvent(new Event('change', { bubbles: true }))
+          el.dispatchEvent(new Event('input', { bubbles: true }))
+          return true
+        },
+        args: [selector, value],
+        world: 'MAIN'
+      })
+      if (!results?.[0]?.result) throw new Error(`select: "${selector}" not found`)
+    },
+
+    /**
+     * Download a URL using the page's session (cookies, auth).
+     * @param {string} url - URL to download
+     * @returns {any} Parsed response (JSON if possible, otherwise text)
+     */
+    async download(url) {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: async (u) => {
+          const res = await fetch(u, { credentials: 'include' })
+          const ct = res.headers.get('content-type') || ''
+          if (ct.includes('json')) return res.json()
+          return res.text()
+        },
+        args: [url],
+        world: 'MAIN'
+      })
+      return results?.[0]?.result
+    },
+
+    /**
+     * Handle a JavaScript dialog (alert/confirm/prompt).
+     * @param {boolean} [accept=true] - Accept or dismiss the dialog
+     * @param {string} [promptText] - Text to enter for prompt dialogs
+     */
+    async dialog(accept = true, promptText) {
+      const wd = withDebugger || _fallbackWithDebugger
+      await wd(async () => {
+        const params = { accept }
+        if (promptText !== undefined) params.promptText = promptText
+        await chrome.debugger.sendCommand({ tabId }, 'Page.handleJavaScriptDialog', params)
+      })
     },
 
     /**
