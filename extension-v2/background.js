@@ -11,7 +11,7 @@
  */
 
 import { registerTap, listTaps, runTap, parseTapURL } from './runtime/executor.js'
-import { createPageAPI } from './runtime/protocol.js'
+import { createPage } from './runtime/protocol.js'
 import { gatherPageIntelligence } from './runtime/page-intelligence.js'
 
 // --- Tap Registration (static imports — MV3 service workers prohibit dynamic import()) ---
@@ -294,7 +294,7 @@ async function inputValue(tabId, selector) {
   } catch { return null }
 }
 
-function fmtFeedback(action, fb) {
+function formatFeedback(action, fb) {
   return `${action}\n  → url: ${fb.url}\n  → title: ${fb.title}`
 }
 
@@ -358,8 +358,8 @@ async function requireTab(params = {}) {
 }
 
 /** Create a page API instance for a tab. protocol.js is the single protocol implementation. */
-function getPageAPI(tabId) {
-  return createPageAPI(tabId, {
+function getPage(tabId) {
+  return createPage(tabId, {
     cdpClick,
     withDebugger: (fn) => withDebugger(tabId, fn)
   })
@@ -369,19 +369,19 @@ async function handleTapCommand(method, params = {}) {
   switch (method) {
     // ---- Core ----
 
-    case 'Tap.pageIntelligence': {
+    case 'page_intelligence': {
       const tabId = params.tabId || activeTabId
       if (!tabId) throw new Error('No tab. Call Bridge.attach first.')
       return await gatherPageIntelligence(tabId)
     }
 
-    case 'Tap.run':
+    case 'run':
       return await handleTapAction({ action: 'run', ...params })
 
-    case 'Tap.list':
+    case 'list':
       return await handleTapAction({ action: 'list' })
 
-    case 'Tap.page_info': {
+    case 'page_info': {
       const tabId = await requireTab(params)
       const tab = await chrome.tabs.get(tabId)
       const [result] = await chrome.scripting.executeScript({
@@ -398,87 +398,87 @@ async function handleTapCommand(method, params = {}) {
 
     // ---- Interaction tools — delegate to protocol.js (single protocol implementation) ----
 
-    case 'Tap.click': {
+    case 'click': {
       const tabId = await requireTab(params)
       if (!params.text) throw new Error('click: missing text param')
       const prevUrl = (await chrome.tabs.get(tabId)).url
-      const page = getPageAPI(tabId)
+      const page = getPage(tabId)
       await page.click(params.text)
       await new Promise(r => setTimeout(r, 150))
       const fb = await pageFeedback(tabId)
       const nav = fb.url !== prevUrl ? ' (navigated)' : ''
-      return fmtFeedback(`clicked "${params.text}"${nav}`, fb)
+      return formatFeedback(`clicked "${params.text}"${nav}`, fb)
     }
 
-    case 'Tap.click_selector': {
+    case 'click_selector': {
       const tabId = await requireTab(params)
       if (!params.selector) throw new Error('click_selector: missing selector param')
       const prevUrl = (await chrome.tabs.get(tabId)).url
-      const page = getPageAPI(tabId)
+      const page = getPage(tabId)
       await page.click(params.selector)
       await new Promise(r => setTimeout(r, 150))
       const fb = await pageFeedback(tabId)
       const nav = fb.url !== prevUrl ? ' (navigated)' : ''
-      return fmtFeedback(`clicked "${params.selector}"${nav}`, fb)
+      return formatFeedback(`clicked "${params.selector}"${nav}`, fb)
     }
 
-    case 'Tap.type_text': {
+    case 'type_text': {
       const tabId = await requireTab(params)
       if (!params.selector || params.text === undefined) throw new Error('type_text: missing selector or text')
-      const page = getPageAPI(tabId)
+      const page = getPage(tabId)
       await page.type(params.selector, params.text)
       const val = await inputValue(tabId, params.selector)
       const fb = await pageFeedback(tabId)
       let msg = `typed ${params.text.length} chars into "${params.selector}"`
       if (val !== null) msg += `\n  → value: "${val}"`
-      return fmtFeedback(msg, fb)
+      return formatFeedback(msg, fb)
     }
 
-    case 'Tap.hover': {
+    case 'hover': {
       const tabId = await requireTab(params)
       if (!params.selector) throw new Error('hover: missing selector')
-      const page = getPageAPI(tabId)
+      const page = getPage(tabId)
       await page.hover(params.selector)
       const fb = await pageFeedback(tabId)
-      return fmtFeedback(`hovered "${params.selector}"`, fb)
+      return formatFeedback(`hovered "${params.selector}"`, fb)
     }
 
-    case 'Tap.scroll': {
+    case 'scroll': {
       const tabId = await requireTab(params)
       if (!params.selector) throw new Error('scroll: missing selector')
-      const page = getPageAPI(tabId)
+      const page = getPage(tabId)
       await page.scroll(params.selector)
       const fb = await pageFeedback(tabId)
-      return fmtFeedback(`scrolled to "${params.selector}"`, fb)
+      return formatFeedback(`scrolled to "${params.selector}"`, fb)
     }
 
-    case 'Tap.press_key': {
+    case 'press_key': {
       const tabId = await requireTab(params)
       if (!params.key) throw new Error('press_key: missing key')
       const prevUrl = (await chrome.tabs.get(tabId)).url
-      const page = getPageAPI(tabId)
+      const page = getPage(tabId)
       await page.pressKey(params.key, params.modifiers || 0)
       await new Promise(r => setTimeout(r, 150))
       const fb = await pageFeedback(tabId)
       const nav = fb.url !== prevUrl ? ' (navigated)' : ''
-      return fmtFeedback(`pressed ${params.key}${nav}`, fb)
+      return formatFeedback(`pressed ${params.key}${nav}`, fb)
     }
 
-    case 'Tap.select': {
+    case 'select': {
       const tabId = await requireTab(params)
       const { selector, value } = params
       if (!selector || value === undefined) throw new Error('select: missing selector or value')
-      const page = getPageAPI(tabId)
+      const page = getPage(tabId)
       await page.select(selector, value)
       const fb = await pageFeedback(tabId)
-      return fmtFeedback(`selected "${value}" in "${selector}"`, fb)
+      return formatFeedback(`selected "${value}" in "${selector}"`, fb)
     }
 
-    case 'Tap.upload': {
+    case 'upload': {
       const tabId = await requireTab(params)
       const { selector, files } = params
       if (!selector || !files) throw new Error('upload: missing selector or files')
-      const page = getPageAPI(tabId)
+      const page = getPage(tabId)
       await page.upload(selector, files)
       const fileList = typeof files === 'string' ? files.split(',').map(f => f.trim()) : files
       return `uploaded ${fileList.length} file(s) to "${selector}"`
@@ -486,14 +486,14 @@ async function handleTapCommand(method, params = {}) {
 
     // ---- Perception tools — find delegates to protocol, rest are forge-only ----
 
-    case 'Tap.find': {
+    case 'find': {
       const tabId = await requireTab(params)
       if (!params.query) throw new Error('find: missing query')
-      const page = getPageAPI(tabId)
+      const page = getPage(tabId)
       return await page.find(params.query, params.role)
     }
 
-    case 'Tap.element_info': {
+    case 'element_info': {
       const tabId = await requireTab(params)
       const selector = params.selector
       if (!selector) throw new Error('element_info: missing selector')
@@ -522,7 +522,7 @@ async function handleTapCommand(method, params = {}) {
       return result?.result || { error: `"${selector}" not found` }
     }
 
-    case 'Tap.hit_test': {
+    case 'hit_test': {
       const tabId = await requireTab(params)
       const { x, y } = params
       if (x === undefined || y === undefined) throw new Error('hit_test: missing x or y')
@@ -551,7 +551,7 @@ async function handleTapCommand(method, params = {}) {
       return result?.result || { error: `nothing at (${x}, ${y})` }
     }
 
-    case 'Tap.top_layer': {
+    case 'top_layer': {
       const tabId = await requireTab(params)
       const [result] = await chrome.scripting.executeScript({
         target: { tabId },
@@ -574,7 +574,7 @@ async function handleTapCommand(method, params = {}) {
       return result?.result || []
     }
 
-    case 'Tap.ax_tree_interactive': {
+    case 'ax_tree_interactive': {
       const tabId = await requireTab(params)
       const [result] = await chrome.scripting.executeScript({
         target: { tabId },
@@ -610,7 +610,7 @@ async function handleTapCommand(method, params = {}) {
       return { interactive: result?.result || [] }
     }
 
-    case 'Tap.read_dom': {
+    case 'read_dom': {
       const tabId = await requireTab(params)
       const selector = params.selector || 'body'
       const maxDepth = params.depth || 6
@@ -662,13 +662,13 @@ async function handleTapCommand(method, params = {}) {
 
     // ---- State tools ----
 
-    case 'Tap.cookies': {
+    case 'cookies': {
       const tabId = await requireTab(params)
-      const page = getPageAPI(tabId)
+      const page = getPage(tabId)
       return { cookies: await page.cookies() }
     }
 
-    case 'Tap.set_cookie': {
+    case 'set_cookie': {
       await requireTab(params)
       const { url, name, value, domain, path, secure, httpOnly, sameSite, expirationDate } = params
       if (!url || !name) throw new Error('set_cookie: missing url or name')
@@ -683,15 +683,15 @@ async function handleTapCommand(method, params = {}) {
       return { set: true, name }
     }
 
-    case 'Tap.dismiss_dialog': {
+    case 'dismiss_dialog': {
       const tabId = await requireTab(params)
       const accept = params.accept !== false
-      const page = getPageAPI(tabId)
+      const page = getPage(tabId)
       await page.dialog(accept, params.prompt_text)
       return { dismissed: true, accepted: accept }
     }
 
-    case 'Tap.force_state': {
+    case 'force_state': {
       const tabId = await requireTab(params)
       const { selector, state } = params
       if (!selector || !state) throw new Error('force_state: missing selector or state')
@@ -708,7 +708,7 @@ async function handleTapCommand(method, params = {}) {
       return { forced: true, selector, state }
     }
 
-    case 'Tap.event_listeners': {
+    case 'event_listeners': {
       const tabId = await requireTab(params)
       const selector = params.selector
       if (!selector) throw new Error('event_listeners: missing selector')
@@ -728,17 +728,17 @@ async function handleTapCommand(method, params = {}) {
       return listeners
     }
 
-    case 'Tap.storage_items': {
+    case 'storage_items': {
       const tabId = await requireTab(params)
       const type = params.type || 'local'
-      const page = getPageAPI(tabId)
+      const page = getPage(tabId)
       const items = await page.storage(type)
       return { type, count: Object.keys(items).length, items }
     }
 
     // ---- Network tools ----
 
-    case 'Tap.network_log_start': {
+    case 'network_log_start': {
       const tabId = await requireTab(params)
       const netLog = getNetworkLog(tabId)
       netLog.entries = []
@@ -749,7 +749,7 @@ async function handleTapCommand(method, params = {}) {
       return { started: true }
     }
 
-    case 'Tap.network_log_dump': {
+    case 'network_log_dump': {
       const tabId = await requireTab(params)
       const entries = getNetworkLog(tabId).entries.map(e => ({
         url: e.url, method: e.method, status: e.status,
@@ -758,7 +758,7 @@ async function handleTapCommand(method, params = {}) {
       return { count: entries.length, entries }
     }
 
-    case 'Tap.network_log_dump_bodies': {
+    case 'network_log_dump_bodies': {
       const tabId = await requireTab(params)
       // Return entries with response bodies
       const entries = getNetworkLog(tabId).entries.slice(-50).map(e => ({
@@ -768,7 +768,7 @@ async function handleTapCommand(method, params = {}) {
       return { count: entries.length, entries }
     }
 
-    case 'Tap.api_log': {
+    case 'api_log': {
       const tabId = await requireTab(params)
       const [result] = await chrome.scripting.executeScript({
         target: { tabId },
@@ -782,7 +782,7 @@ async function handleTapCommand(method, params = {}) {
       return result?.result || []
     }
 
-    case 'Tap.download': {
+    case 'download': {
       const tabId = await requireTab(params)
       const { url, output } = params
       if (!url) throw new Error('download: missing url')
@@ -803,7 +803,7 @@ async function handleTapCommand(method, params = {}) {
       return { data: result?.result, output: output || '/tmp/tap-download' }
     }
 
-    case 'Tap.save_image': {
+    case 'save_image': {
       const tabId = await requireTab(params)
       const { selector, output } = params
       if (!selector || !output) throw new Error('save_image: missing selector or output')
@@ -828,7 +828,7 @@ async function handleTapCommand(method, params = {}) {
 
     // ---- Resource inspection ----
 
-    case 'Tap.global_names': {
+    case 'global_names': {
       const tabId = await requireTab(params)
       const [result] = await chrome.scripting.executeScript({
         target: { tabId },
@@ -846,7 +846,7 @@ async function handleTapCommand(method, params = {}) {
       return result?.result || []
     }
 
-    case 'Tap.resource_tree': {
+    case 'resource_tree': {
       const tabId = await requireTab(params)
       let tree = null
       await withDebugger(tabId, async (tid) => {
@@ -855,7 +855,7 @@ async function handleTapCommand(method, params = {}) {
       return tree || {}
     }
 
-    case 'Tap.resource_content': {
+    case 'resource_content': {
       const tabId = await requireTab(params)
       const { frameId, url } = params
       if (!url) throw new Error('resource_content: missing url')
@@ -869,7 +869,7 @@ async function handleTapCommand(method, params = {}) {
       return content || {}
     }
 
-    case 'Tap.search_resource': {
+    case 'search_resource': {
       const tabId = await requireTab(params)
       const { query } = params
       if (!query) throw new Error('search_resource: missing query')
@@ -884,7 +884,7 @@ async function handleTapCommand(method, params = {}) {
       return results
     }
 
-    case 'Tap.request_replay': {
+    case 'request_replay': {
       const tabId = await requireTab(params)
       const { requestId } = params
       if (!requestId) throw new Error('request_replay: missing requestId')
@@ -896,7 +896,7 @@ async function handleTapCommand(method, params = {}) {
 
     // ---- Intercept tools ----
 
-    case 'Tap.intercept_on': {
+    case 'intercept_on': {
       const tabId = await requireTab(params)
       const patterns = params.patterns || [{ urlPattern: '*' }]
       await withDebugger(tabId, async (tid) => {
@@ -905,7 +905,7 @@ async function handleTapCommand(method, params = {}) {
       return { enabled: true, patterns }
     }
 
-    case 'Tap.intercept_off': {
+    case 'intercept_off': {
       const tabId = await requireTab(params)
       await withDebugger(tabId, async (tid) => {
         await chrome.debugger.sendCommand({ tabId: tid }, 'Fetch.disable', {})
@@ -913,11 +913,11 @@ async function handleTapCommand(method, params = {}) {
       return { disabled: true }
     }
 
-    case 'Tap.intercept_list': {
+    case 'intercept_list': {
       return { note: 'Intercept patterns are managed via intercept_on. No persistent list.' }
     }
 
-    case 'Tap.intercept_continue': {
+    case 'intercept_continue': {
       const tabId = await requireTab(params)
       const { requestId, url, method, headers } = params
       if (!requestId) throw new Error('intercept_continue: missing requestId')
@@ -931,7 +931,7 @@ async function handleTapCommand(method, params = {}) {
       return { continued: true }
     }
 
-    case 'Tap.intercept_fulfill': {
+    case 'intercept_fulfill': {
       const tabId = await requireTab(params)
       const { requestId, responseCode, body, responseHeaders } = params
       if (!requestId) throw new Error('intercept_fulfill: missing requestId')
@@ -945,7 +945,7 @@ async function handleTapCommand(method, params = {}) {
       return { fulfilled: true }
     }
 
-    case 'Tap.intercept_fail': {
+    case 'intercept_fail': {
       const tabId = await requireTab(params)
       const { requestId, errorReason } = params
       if (!requestId) throw new Error('intercept_fail: missing requestId')
@@ -959,7 +959,7 @@ async function handleTapCommand(method, params = {}) {
 
     // ---- Toast collection ----
 
-    case 'Tap.collect_toasts': {
+    case 'collect_toasts': {
       const tabId = params.tabId ? Number(params.tabId) : activeTabId
       if (!tabId) return []
       try {
@@ -978,17 +978,17 @@ async function handleTapCommand(method, params = {}) {
 
     // --- Tab Management ---
 
-    case 'Tap.tab_list': {
+    case 'tab_list': {
       const tabs = await chrome.tabs.query({})
       return tabs.map(t => ({ tabId: t.id, url: t.url || '', title: t.title || '' }))
     }
 
-    case 'Tap.tab_new': {
+    case 'tab_new': {
       const tab = await chrome.tabs.create({ url: params.url || 'about:blank' })
       return { tabId: tab.id, url: tab.url || params.url || 'about:blank' }
     }
 
-    case 'Tap.tab_close': {
+    case 'tab_close': {
       const tabId = Number(params.tabId)
       if (!tabId) throw new Error('tab_close: missing tabId')
       const session = debuggerSessions.get(tabId)
@@ -1063,63 +1063,25 @@ async function handleTapAction(msg) {
 // Handles both CDP commands and tap actions from any source.
 
 async function handleMessage(msg) {
-  // --- Tap Protocol envelope (formal): {"protocol":"tap/1.0","type":"...","method":"...","params":{...},"tabId":N} ---
+  // --- Tap Protocol envelope: {"protocol":"tap/1.0","type":"...","method":"...","params":{...},"tabId":N} ---
   if (msg.protocol && msg.protocol.startsWith('tap/')) {
-    return await handleProtocol(msg)
+    const { type: msgType, method, params = {}, tabId } = msg
+    if (tabId !== undefined && tabId >= 0) params.tabId = tabId
+
+    switch (msgType) {
+      case 'tool':   return await handleTapCommand(method, params)
+      case 'cdp':    return await routeCDP(method, params, tabId >= 0 ? tabId : undefined)
+      case 'bridge': return await handleBridgeCommand(`Bridge.${method}`, params)
+      default: throw new Error(`unknown protocol type: ${msgType}`)
+    }
   }
 
-  // --- Legacy formats (chrome.runtime, popup, omnibox) ---
-  const { method, params, action } = msg
-
-  if (action) {
+  // --- Internal messages (chrome.runtime: popup, omnibox, content-script) ---
+  if (msg.action) {
     return await handleTapAction(msg)
   }
 
-  if (method && method.startsWith('Bridge.')) {
-    return await handleBridgeCommand(method, params || {})
-  }
-
-  if (method && method.startsWith('Tap.')) {
-    return await handleTapCommand(method, params || {})
-  }
-
-  if (method) {
-    return await routeCDP(method, params || {})
-  }
-
-  throw new Error('invalid message: need "protocol", "action", or "method"')
-}
-
-/**
- * Handle Tap protocol envelope — formal bridge communication.
- * Routes by type: tool (Tap.* handlers), cdp (passthrough), bridge (meta).
- */
-async function handleProtocol(msg) {
-  const { type: msgType, method, params = {}, tabId } = msg
-
-  // Inject tabId into params for handlers that use requireTab()
-  if (tabId !== undefined && tabId >= 0) {
-    params.tabId = tabId
-  }
-
-  switch (msgType) {
-    case 'tool':
-      // Delegate to existing Tap command handlers
-      return await handleTapCommand(`Tap.${method}`, params)
-
-    case 'cdp':
-      // CDP passthrough with tabId routing
-      if (tabId !== undefined && tabId >= 0) {
-        return await routeCDP(method, params, tabId)
-      }
-      return await routeCDP(method, params)
-
-    case 'bridge':
-      return await handleBridgeCommand(`Bridge.${method}`, params)
-
-    default:
-      throw new Error(`unknown protocol type: ${msgType}`)
-  }
+  throw new Error('invalid message: need "protocol" or "action"')
 }
 
 // --- chrome.runtime listeners ---
@@ -1141,41 +1103,41 @@ chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
 // --- WebSocket Bridge (for Rust MCP server) ---
 
 const BRIDGE_PORT = 9333
-let ws = null
+let bridgeSocket = null
 let reconnectDelay = 1000
 
 function connectBridge() {
   try {
-    ws = new WebSocket(`ws://127.0.0.1:${BRIDGE_PORT}`)
+    bridgeSocket = new WebSocket(`ws://127.0.0.1:${BRIDGE_PORT}`)
   } catch {
     scheduleBridgeReconnect()
     return
   }
 
-  ws.onopen = () => {
+  bridgeSocket.onopen = () => {
     console.log('[tap] bridge connected')
     reconnectDelay = 1000
   }
 
-  ws.onmessage = async (event) => {
+  bridgeSocket.onmessage = async (event) => {
     let msg
     try { msg = JSON.parse(event.data) } catch { return }
 
     const { id } = msg
     try {
       const result = await handleMessage(msg)
-      if (id !== undefined) wsSend({ id, result: result || {} })
+      if (id !== undefined) bridgeSend({ id, result: result || {} })
     } catch (err) {
-      if (id !== undefined) wsSend({ id, error: { code: -32000, message: err.message } })
+      if (id !== undefined) bridgeSend({ id, error: { code: -32000, message: err.message } })
     }
   }
 
-  ws.onclose = () => {
+  bridgeSocket.onclose = () => {
     console.log('[tap] bridge disconnected')
     scheduleBridgeReconnect()
   }
 
-  ws.onerror = () => scheduleBridgeReconnect()
+  bridgeSocket.onerror = () => scheduleBridgeReconnect()
 }
 
 function scheduleBridgeReconnect() {
@@ -1185,9 +1147,9 @@ function scheduleBridgeReconnect() {
   }, reconnectDelay)
 }
 
-function wsSend(msg) {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(msg))
+function bridgeSend(msg) {
+  if (bridgeSocket && bridgeSocket.readyState === WebSocket.OPEN) {
+    bridgeSocket.send(JSON.stringify(msg))
   }
 }
 
@@ -1306,7 +1268,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 
 chrome.debugger.onEvent.addListener((source, method, params) => {
   // Forward events for any managed tab
-  wsSend({ method, params, tabId: source.tabId })
+  bridgeSend({ method, params, tabId: source.tabId })
 
   const netLog = networkLogs.get(source.tabId)
   if (netLog?.active) {
@@ -1329,7 +1291,7 @@ connectBridge()
 
 chrome.alarms.create('keepalive', { periodInMinutes: 0.4 })
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'keepalive' && (!ws || ws.readyState !== WebSocket.OPEN)) {
+  if (alarm.name === 'keepalive' && (!bridgeSocket || bridgeSocket.readyState !== WebSocket.OPEN)) {
     connectBridge()
   }
 })

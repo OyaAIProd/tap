@@ -752,7 +752,7 @@ async fn execute_tool(
                     .await?;
             }
             client
-                .send_tap("tool", "pageIntelligence", json!({}), tab_id)
+                .send_tap("tool", "page_intelligence", json!({}), tab_id)
                 .await
         }
         "list_taps" => {
@@ -1096,18 +1096,31 @@ mod tests {
     fn relay_has_no_inline_js() {
         // Why: Rust binary must be zero-JS — all page logic belongs in the extension
         let source = include_str!("mcp.rs");
-        // relay_to_extension should not contain JS expression construction
         let relay_section = source
             .split("fn relay_to_extension")
             .nth(1)
             .expect("relay_to_extension must exist");
         assert!(
-            !relay_section.contains("Runtime.evaluate"),
-            "relay_to_extension must not construct Runtime.evaluate calls — move JS to extension"
+            !relay_section.contains("JSON.stringify"),
+            "relay_to_extension must not contain inline JS — move to extension"
+        );
+    }
+
+    #[test]
+    fn no_legacy_tap_prefix_in_send_calls() {
+        // Why: all bridge communication uses send_tap() protocol envelope now
+        let source = include_str!("mcp.rs");
+        let execute_section = source
+            .split("async fn execute_tool")
+            .nth(1)
+            .expect("execute_tool must exist");
+        assert!(
+            !execute_section.contains(r#"send("Tap."#),
+            "execute_tool must not use legacy client.send(\"Tap.*\") — use send_tap()"
         );
         assert!(
-            !relay_section.contains("JSON.stringify"),
-            "relay_to_extension must not contain inline JS — move to Tap.* extension methods"
+            !execute_section.contains(r#""Tap.{}"#),
+            "execute_tool must not format Tap.* prefixes — use send_tap()"
         );
     }
 

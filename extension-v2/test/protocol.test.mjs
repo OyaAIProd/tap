@@ -18,7 +18,7 @@ const KERNEL_METHODS = ['eval', 'pointer', 'keyboard', 'nav', 'wait', 'screensho
 
 // Stdlib: named operations built on kernel, runtime may override
 const STDLIB_METHODS = ['click', 'type', 'hover', 'scroll', 'pressKey', 'select', 'upload', 'dialog',
-  'fetch', 'find', 'cookies', 'download', 'waitFor', 'waitForNetwork', 'getSSRState', 'storage']
+  'fetch', 'find', 'cookies', 'download', 'waitFor', 'waitForNetwork', 'ssrState', 'storage']
 
 const ALL_METHODS = [...KERNEL_METHODS, ...STDLIB_METHODS]
 
@@ -45,8 +45,8 @@ test('protocol.js exists and is non-empty', () => {
   assert(src.length > 0)
 })
 
-test('exports createPageAPI function', () => {
-  assert(src.includes('export function createPageAPI'))
+test('exports createPage function', () => {
+  assert(src.includes('export function createPage'))
 })
 
 // --- Architecture constraints ---
@@ -62,7 +62,7 @@ test('createStdlib function exists (built on kernel)', () => {
 })
 
 test('stdlib receives kernel as dependency (dependency inversion)', () => {
-  assert(src.includes('createStdlib(kernel)'), 'createPageAPI must pass kernel to createStdlib')
+  assert(src.includes('createStdlib(kernel)'), 'createPage must pass kernel to createStdlib')
 })
 
 // --- Kernel primitives ---
@@ -85,7 +85,7 @@ console.log('\n  stdlib operations (16)\n')
 for (const method of STDLIB_METHODS) {
   test(`stdlib.${method} is defined`, () => {
     const patterns = [`async ${method}(`, `${method}(`]
-    const stdlibSection = src.substring(src.indexOf('function createStdlib'), src.indexOf('export function createPageAPI'))
+    const stdlibSection = src.substring(src.indexOf('function createStdlib'), src.indexOf('export function createPage'))
     const found = patterns.some(p => stdlibSection.includes(p))
     assert(found, `stdlib.${method} not found in createStdlib`)
   })
@@ -98,7 +98,7 @@ console.log('\n  public API (flat merge)\n')
 for (const method of ALL_METHODS) {
   test(`page.${method} is exposed`, () => {
     const pageSection = src.substring(src.indexOf('const page = {'), src.indexOf('return page'))
-    assert(pageSection.includes(`${method}:`), `page.${method} not exposed in createPageAPI`)
+    assert(pageSection.includes(`${method}:`), `page.${method} not exposed in createPage`)
   })
 }
 
@@ -106,24 +106,24 @@ for (const method of ALL_METHODS) {
 
 console.log('\n  structural constraints\n')
 
-test('createPageAPI returns page object', () => {
-  const apiSection = src.substring(src.indexOf('export function createPageAPI'))
+test('createPage returns page object', () => {
+  const apiSection = src.substring(src.indexOf('export function createPage'))
   assert(apiSection.includes('return page'))
 })
 
 test('stdlib uses kernel.eval (not chrome.scripting directly)', () => {
-  const stdlibSection = src.substring(src.indexOf('function createStdlib'), src.indexOf('export function createPageAPI'))
+  const stdlibSection = src.substring(src.indexOf('function createStdlib'), src.indexOf('export function createPage'))
   assert(stdlibSection.includes('kernel.eval'), 'stdlib should call kernel.eval')
   assert(!stdlibSection.includes('chrome.scripting'), 'stdlib must NOT use chrome.scripting directly — use kernel.eval')
 })
 
 test('stdlib uses kernel.pointer (not chrome.debugger directly for mouse)', () => {
-  const stdlibSection = src.substring(src.indexOf('function createStdlib'), src.indexOf('export function createPageAPI'))
+  const stdlibSection = src.substring(src.indexOf('function createStdlib'), src.indexOf('export function createPage'))
   assert(stdlibSection.includes('kernel.pointer'), 'stdlib should call kernel.pointer for mouse operations')
 })
 
 test('stdlib uses kernel.keyboard (not chrome.debugger directly for keys)', () => {
-  const stdlibSection = src.substring(src.indexOf('function createStdlib'), src.indexOf('export function createPageAPI'))
+  const stdlibSection = src.substring(src.indexOf('function createStdlib'), src.indexOf('export function createPage'))
   assert(stdlibSection.includes('kernel.keyboard'), 'stdlib should call kernel.keyboard for key operations')
 })
 
@@ -152,11 +152,11 @@ test('kernel does not call or import stdlib (no circular dependency)', () => {
   assert(!kernelSection.includes('stdlib.'), 'kernel must not call stdlib methods')
 })
 
-test('only createPageAPI and PROTOCOL_VERSION are exported', () => {
+test('only createPage and PROTOCOL_VERSION are exported', () => {
   // Why: kernel and stdlib are internal — external code sees merged page object + version constant
   const exports = src.match(/export\s+(function|const|let|var|class)\s+\w+/g) || []
   assert.equal(exports.length, 2, `expected 2 exports, found ${exports.length}: ${exports.join(', ')}`)
-  assert(exports.some(e => e.includes('createPageAPI')), 'must export createPageAPI')
+  assert(exports.some(e => e.includes('createPage')), 'must export createPage')
   assert(exports.some(e => e.includes('PROTOCOL_VERSION')), 'must export PROTOCOL_VERSION')
 })
 
@@ -184,46 +184,67 @@ console.log('\n  cross-domain: bridge → protocol delegation\n')
 
 const bgSrc = readFileSync(new URL('../../extension-v2/background.js', import.meta.url), 'utf-8')
 
-test('background.js imports createPageAPI from protocol.js', () => {
+test('background.js imports createPage from protocol.js', () => {
   // Why: bridge must use the protocol layer, not reimplement operations
-  assert(bgSrc.includes("import { createPageAPI }"), 'background.js must import createPageAPI')
+  assert(bgSrc.includes("import { createPage }"), 'background.js must import createPage')
 })
 
-test('background.js has getPageAPI factory', () => {
+test('background.js has getPage factory', () => {
   // Why: factory binds tabId + deps, creating protocol instances for delegation
-  assert(bgSrc.includes('function getPageAPI('), 'must have getPageAPI factory')
-  assert(bgSrc.includes('createPageAPI('), 'getPageAPI must call createPageAPI')
+  assert(bgSrc.includes('function getPage('), 'must have getPage factory')
+  assert(bgSrc.includes('createPage('), 'getPage must call createPage')
 })
 
 const DELEGATED_HANDLERS = [
-  ['Tap.click', 'page.click'],
-  ['Tap.click_selector', 'page.click'],
-  ['Tap.type_text', 'page.type'],
-  ['Tap.hover', 'page.hover'],
-  ['Tap.scroll', 'page.scroll'],
-  ['Tap.press_key', 'page.pressKey'],
-  ['Tap.select', 'page.select'],
-  ['Tap.upload', 'page.upload'],
-  ['Tap.find', 'page.find'],
-  ['Tap.cookies', 'page.cookies'],
-  ['Tap.dismiss_dialog', 'page.dialog'],
-  ['Tap.storage_items', 'page.storage'],
+  ['click', 'page.click'],
+  ['click_selector', 'page.click'],
+  ['type_text', 'page.type'],
+  ['hover', 'page.hover'],
+  ['scroll', 'page.scroll'],
+  ['press_key', 'page.pressKey'],
+  ['select', 'page.select'],
+  ['upload', 'page.upload'],
+  ['find', 'page.find'],
+  ['cookies', 'page.cookies'],
+  ['dismiss_dialog', 'page.dialog'],
+  ['storage_items', 'page.storage'],
 ]
 
 for (const [handler, delegation] of DELEGATED_HANDLERS) {
   test(`${handler} delegates to ${delegation}`, () => {
-    // Why: single source of truth — bridge must not reimplement what page-api provides
+    // Why: single source of truth — bridge must not reimplement what protocol provides
     const casePattern = `case '${handler}':`
     const caseStart = bgSrc.indexOf(casePattern)
     assert(caseStart !== -1, `${handler} handler not found`)
-    // Find the next case statement to bound the handler section
     const nextCase = bgSrc.indexOf("case '", caseStart + casePattern.length)
     const handlerSection = bgSrc.substring(caseStart, nextCase !== -1 ? nextCase : caseStart + 500)
-    assert(handlerSection.includes('getPageAPI('), `${handler} must use getPageAPI()`)
+    assert(handlerSection.includes('getPage('), `${handler} must use getPage()`)
     const method = delegation.split('.')[1]
     assert(handlerSection.includes(`.${method}(`), `${handler} must call .${method}()`)
   })
 }
+
+test('no legacy Tap.* prefix in case statements', () => {
+  // Why: protocol envelope routes by method name directly, Tap. prefix is dead code
+  const tapCases = bgSrc.match(/case\s+'Tap\./g) || []
+  assert.equal(tapCases.length, 0, `found ${tapCases.length} legacy Tap.* case statements — remove prefix`)
+})
+
+test('handleMessage does not route by Tap.* or Bridge.* prefix', () => {
+  // Why: all bridge communication uses protocol envelope now, prefix routing is legacy
+  const handleMsgSection = bgSrc.substring(bgSrc.indexOf('async function handleMessage('), bgSrc.indexOf('async function handleMessage(') + 800)
+  assert(!handleMsgSection.includes("startsWith('Tap.')"), 'handleMessage must not route by Tap.* prefix')
+  assert(!handleMsgSection.includes("startsWith('Bridge.')"), 'handleMessage must not route by Bridge.* prefix')
+})
+
+test('WebSocket bridge routes through handleMessage', () => {
+  // Why: all Rust→Extension communication must go through the unified message handler
+  const onMessageIdx = bgSrc.indexOf('.onmessage')
+  assert(onMessageIdx !== -1, 'WebSocket onmessage handler must exist')
+  const onCloseIdx = bgSrc.indexOf('.onclose', onMessageIdx)
+  const wsHandler = bgSrc.substring(onMessageIdx, onCloseIdx !== -1 ? onCloseIdx : onMessageIdx + 500)
+  assert(wsHandler.includes('handleMessage'), 'WebSocket must route through handleMessage')
+})
 
 // --- Capability constraint (quality / what — capabilities() must be accurate) ---
 
