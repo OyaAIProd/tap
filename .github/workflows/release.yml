@@ -30,15 +30,15 @@ jobs:
       - run: cargo build --release --target ${{ matrix.target }}
       - name: Package (unix)
         if: runner.os != 'Windows'
-        run: tar -czf claw-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release claw
+        run: tar -czf webclaw-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release webclaw
       - name: Package (windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path target/${{ matrix.target }}/release/claw.exe -DestinationPath claw-${{ matrix.target }}.zip
+        run: Compress-Archive -Path target/${{ matrix.target }}/release/webclaw.exe -DestinationPath webclaw-${{ matrix.target }}.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: claw-${{ matrix.target }}
-          path: claw-${{ matrix.target }}.*
+          name: webclaw-${{ matrix.target }}
+          path: webclaw-${{ matrix.target }}.*
 
   extension:
     runs-on: ubuntu-latest
@@ -47,14 +47,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Validate claws
-        run: node extension-v2/test/claw-format.test.mjs
+      - name: Validate webclaws
+        run: node extension-v2/test/webclaw-format.test.mjs
       - name: Package extension
-        run: cd extension-v2 && zip -r ../claw-extension.zip . -x "test/*" -x "*.test.*"
+        run: cd extension-v2 && zip -r ../webclaw-extension.zip . -x "test/*" -x "*.test.*"
       - uses: actions/upload-artifact@v4
         with:
-          name: claw-extension
-          path: claw-extension.zip
+          name: webclaw-extension
+          path: webclaw-extension.zip
 
   release:
     needs: [build, extension]
@@ -66,9 +66,10 @@ jobs:
           merge-multiple: true
       - run: |
           gh release create ${{ github.ref_name }} \
-            --title "Claw ${{ github.ref_name }}" \
+            --title "WebClaw ${{ github.ref_name }}" \
             --generate-notes \
-            claw-*.tar.gz \
-            claw-extension.zip
+            webclaw-*.tar.gz \
+            webclaw-*.zip \
+            webclaw-extension.zip
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,66 +1,66 @@
 /**
- * Claw v2 — Background Service Worker
+ * WebClaw v2 — Background Service Worker
  *
  * One extension, three interfaces:
- *   1. WebSocket bridge — Rust MCP server sends CDP commands + claw actions
+ *   1. WebSocket bridge — Rust MCP server sends CDP commands + webclaw actions
  *   2. chrome.runtime.onMessage — popup UI
  *   3. chrome.runtime.onMessageExternal — web pages, other extensions
  *
  * Handles both CDP protocol (Page.navigate, Runtime.evaluate, Input.*)
- * and claw protocol (action: "list", action: "run").
+ * and webclaw protocol (action: "list", action: "run").
  */
 
 import { registerClaw, listClaws, runClaw, parseClawURL } from './runtime/executor.js'
 import { gatherPageIntelligence } from './runtime/page-intelligence.js'
 
-// --- Claw Registration (static imports — MV3 service workers prohibit dynamic import()) ---
+// --- WebClaw Registration (static imports — MV3 service workers prohibit dynamic import()) ---
 // AUTO-GENERATED: run `node scripts/gen-imports.js` to regenerate
 
-import c_36kr_hot from './claws/36kr/hot.claw.js'
-import c_baidu_hot from './claws/baidu/hot.claw.js'
-import c_bilibili_hot from './claws/bilibili/hot.claw.js'
-import c_bluesky_trending from './claws/bluesky/trending.claw.js'
-import c_coingecko_top from './claws/coingecko/top.claw.js'
-import c_crates_popular from './claws/crates/popular.claw.js'
-import c_devto_top from './claws/devto/top.claw.js'
-import c_dictionary_search from './claws/dictionary/search.claw.js'
-import c_douban_hot from './claws/douban/hot.claw.js'
-import c_douyin_hot from './claws/douyin/hot.claw.js'
-import c_douyin_search from './claws/douyin/search.claw.js'
-import c_facebook_feed from './claws/facebook/feed.claw.js'
-import c_github_trending from './claws/github/trending.claw.js'
-import c_google_trends from './claws/google/trends.claw.js'
-import c_hackernews_hot from './claws/hackernews/hot.claw.js'
-import c_instagram_explore from './claws/instagram/explore.claw.js'
-import c_jimeng_generate from './claws/jimeng/generate.claw.js'
-import c_jimeng_history from './claws/jimeng/history.claw.js'
-import c_juejin_hot from './claws/juejin/hot.claw.js'
-import c_lobsters_hot from './claws/lobsters/hot.claw.js'
-import c_pixiv_ranking from './claws/pixiv/ranking.claw.js'
-import c_producthunt_hot from './claws/producthunt/hot.claw.js'
-import c_pypi_top from './claws/pypi/top.claw.js'
-import c_reddit_hot from './claws/reddit/hot.claw.js'
-import c_sspai_hot from './claws/sspai/hot.claw.js'
-import c_stackoverflow_hot from './claws/stackoverflow/hot.claw.js'
-import c_steam_top_sellers from './claws/steam/top-sellers.claw.js'
-import c_telegraph_publish from './claws/telegraph/publish.claw.js'
-import c_tiktok_trending from './claws/tiktok/trending.claw.js'
-import c_toutiao_hot from './claws/toutiao/hot.claw.js'
-import c_v2ex_hot from './claws/v2ex/hot.claw.js'
-import c_weibo_hot from './claws/weibo/hot.claw.js'
-import c_weibo_search from './claws/weibo/search.claw.js'
-import c_wikipedia_most_read from './claws/wikipedia/most-read.claw.js'
-import c_x_trending from './claws/x/trending.claw.js'
-import c_xiaohongshu_hot from './claws/xiaohongshu/hot.claw.js'
-import c_xiaohongshu_post_detail from './claws/xiaohongshu/post_detail.claw.js'
-import c_xiaohongshu_publish from './claws/xiaohongshu/publish.claw.js'
-import c_xiaohongshu_search_api from './claws/xiaohongshu/search_api.claw.js'
-import c_xiaohongshu_search_fast from './claws/xiaohongshu/search_fast.claw.js'
-import c_xiaohongshu_search from './claws/xiaohongshu/search.claw.js'
-import c_xueqiu_hot_stock from './claws/xueqiu/hot-stock.claw.js'
-import c_youtube_trending from './claws/youtube/trending.claw.js'
-import c_zhihu_hot from './claws/zhihu/hot.claw.js'
-import c_zhihu_search from './claws/zhihu/search.claw.js'
+import c_36kr_hot from './webclaws/36kr/hot.claw.js'
+import c_baidu_hot from './webclaws/baidu/hot.claw.js'
+import c_bilibili_hot from './webclaws/bilibili/hot.claw.js'
+import c_bluesky_trending from './webclaws/bluesky/trending.claw.js'
+import c_coingecko_top from './webclaws/coingecko/top.claw.js'
+import c_crates_popular from './webclaws/crates/popular.claw.js'
+import c_devto_top from './webclaws/devto/top.claw.js'
+import c_dictionary_search from './webclaws/dictionary/search.claw.js'
+import c_douban_hot from './webclaws/douban/hot.claw.js'
+import c_douyin_hot from './webclaws/douyin/hot.claw.js'
+import c_douyin_search from './webclaws/douyin/search.claw.js'
+import c_facebook_feed from './webclaws/facebook/feed.claw.js'
+import c_github_trending from './webclaws/github/trending.claw.js'
+import c_google_trends from './webclaws/google/trends.claw.js'
+import c_hackernews_hot from './webclaws/hackernews/hot.claw.js'
+import c_instagram_explore from './webclaws/instagram/explore.claw.js'
+import c_jimeng_generate from './webclaws/jimeng/generate.claw.js'
+import c_jimeng_history from './webclaws/jimeng/history.claw.js'
+import c_juejin_hot from './webclaws/juejin/hot.claw.js'
+import c_lobsters_hot from './webclaws/lobsters/hot.claw.js'
+import c_pixiv_ranking from './webclaws/pixiv/ranking.claw.js'
+import c_producthunt_hot from './webclaws/producthunt/hot.claw.js'
+import c_pypi_top from './webclaws/pypi/top.claw.js'
+import c_reddit_hot from './webclaws/reddit/hot.claw.js'
+import c_sspai_hot from './webclaws/sspai/hot.claw.js'
+import c_stackoverflow_hot from './webclaws/stackoverflow/hot.claw.js'
+import c_steam_top_sellers from './webclaws/steam/top-sellers.claw.js'
+import c_telegraph_publish from './webclaws/telegraph/publish.claw.js'
+import c_tiktok_trending from './webclaws/tiktok/trending.claw.js'
+import c_toutiao_hot from './webclaws/toutiao/hot.claw.js'
+import c_v2ex_hot from './webclaws/v2ex/hot.claw.js'
+import c_weibo_hot from './webclaws/weibo/hot.claw.js'
+import c_weibo_search from './webclaws/weibo/search.claw.js'
+import c_wikipedia_most_read from './webclaws/wikipedia/most-read.claw.js'
+import c_x_trending from './webclaws/x/trending.claw.js'
+import c_xiaohongshu_hot from './webclaws/xiaohongshu/hot.claw.js'
+import c_xiaohongshu_post_detail from './webclaws/xiaohongshu/post_detail.claw.js'
+import c_xiaohongshu_publish from './webclaws/xiaohongshu/publish.claw.js'
+import c_xiaohongshu_search_api from './webclaws/xiaohongshu/search_api.claw.js'
+import c_xiaohongshu_search_fast from './webclaws/xiaohongshu/search_fast.claw.js'
+import c_xiaohongshu_search from './webclaws/xiaohongshu/search.claw.js'
+import c_xueqiu_hot_stock from './webclaws/xueqiu/hot-stock.claw.js'
+import c_youtube_trending from './webclaws/youtube/trending.claw.js'
+import c_zhihu_hot from './webclaws/zhihu/hot.claw.js'
+import c_zhihu_search from './webclaws/zhihu/search.claw.js'
 
 const ALL_CLAWS = [
   c_36kr_hot, c_baidu_hot, c_bilibili_hot, c_bluesky_trending, c_coingecko_top,
@@ -76,7 +76,7 @@ const ALL_CLAWS = [
 ]
 
 for (const mod of ALL_CLAWS) registerClaw(mod)
-console.log(`[claw] registered ${ALL_CLAWS.length} claws`)
+console.log(`[webclaw] registered ${ALL_CLAWS.length} claws`)
 
 // --- State ---
 
@@ -95,7 +95,7 @@ async function routeCDP(method, params = {}) {
   if (!activeTabId) {
     const tab = await chrome.tabs.create({ url: 'about:blank' })
     activeTabId = tab.id
-    console.log(`[claw] created new tab ${tab.id}`)
+    console.log(`[webclaw] created new tab ${tab.id}`)
   }
 
   switch (method) {
@@ -107,7 +107,7 @@ async function routeCDP(method, params = {}) {
       if (current.url?.startsWith('chrome://')) {
         const tab = await chrome.tabs.create({ url: params.url })
         activeTabId = tab.id
-        console.log(`[claw] created tab ${tab.id} (was on chrome:// page)`)
+        console.log(`[webclaw] created tab ${tab.id} (was on chrome:// page)`)
       } else {
         await chrome.tabs.update(activeTabId, { url: params.url })
       }
@@ -186,7 +186,7 @@ async function handleBridgeCommand(method, params = {}) {
 
       if (!tabId) return { error: 'No tab to attach' }
       activeTabId = tabId
-      console.log(`[claw] attached to tab ${tabId}`)
+      console.log(`[webclaw] attached to tab ${tabId}`)
       return { tabId, attached: true, mode: 'scripting' }
     }
 
@@ -205,25 +205,25 @@ async function handleBridgeCommand(method, params = {}) {
   }
 }
 
-// --- Claw Protocol Commands (via bridge WebSocket) ---
+// --- WebClaw Protocol Commands (via bridge WebSocket) ---
 
 async function handleClawCommand(method, params = {}) {
   switch (method) {
-    case 'Claw.pageIntelligence': {
+    case 'WebClaw.pageIntelligence': {
       const tabId = params.tabId || activeTabId
       if (!tabId) throw new Error('No tab. Call Bridge.attach first.')
       return await gatherPageIntelligence(tabId)
     }
 
-    case 'Claw.run': {
+    case 'WebClaw.run': {
       return await handleClawAction({ action: 'run', ...params })
     }
 
-    case 'Claw.list': {
+    case 'WebClaw.list': {
       return await handleClawAction({ action: 'list' })
     }
 
-    case 'Claw.find': {
+    case 'WebClaw.find': {
       const tabId = activeTabId
       if (!tabId) throw new Error('No tab. Call Bridge.attach first.')
       const query = params.query
@@ -242,7 +242,7 @@ async function handleClawCommand(method, params = {}) {
       return result?.result || []
     }
 
-    case 'Claw.page_info': {
+    case 'WebClaw.page_info': {
       const tabId = activeTabId
       if (!tabId) throw new Error('No tab. Call Bridge.attach first.')
       const tab = await chrome.tabs.get(tabId)
@@ -255,11 +255,11 @@ async function handleClawCommand(method, params = {}) {
     }
 
     default:
-      throw new Error(`Unknown Claw command: ${method}`)
+      throw new Error(`Unknown WebClaw command: ${method}`)
   }
 }
 
-// --- Claw Action Handler ---
+// --- WebClaw Action Handler ---
 
 async function handleClawAction(msg) {
   switch (msg.action) {
@@ -287,7 +287,7 @@ async function handleClawAction(msg) {
     }
 
     case 'showResults': {
-      const hash = msg.url.replace('claw://', '')
+      const hash = msg.url.replace('webclaw://', '')
       const resultsUrl = chrome.runtime.getURL(`results.html#${hash}`)
       chrome.tabs.create({ url: resultsUrl })
       return { ok: true }
@@ -302,12 +302,12 @@ async function handleClawAction(msg) {
 }
 
 // --- Unified Message Router ---
-// Handles both CDP commands and claw actions from any source.
+// Handles both CDP commands and webclaw actions from any source.
 
 async function handleMessage(msg) {
   const { method, params, action } = msg
 
-  // Claw actions: { action: "list" } or { action: "run", site, name }
+  // WebClaw actions: { action: "list" } or { action: "run", site, name }
   if (action) {
     return await handleClawAction(msg)
   }
@@ -317,8 +317,8 @@ async function handleMessage(msg) {
     return await handleBridgeCommand(method, params || {})
   }
 
-  // Claw commands: { method: "Claw.pageIntelligence" }, { method: "Claw.run" }
-  if (method && method.startsWith('Claw.')) {
+  // WebClaw commands: { method: "WebClaw.pageIntelligence" }, { method: "WebClaw.run" }
+  if (method && method.startsWith('WebClaw.')) {
     return await handleClawCommand(method, params || {})
   }
 
@@ -361,7 +361,7 @@ function connectBridge() {
   }
 
   ws.onopen = () => {
-    console.log('[claw] bridge connected')
+    console.log('[webclaw] bridge connected')
     reconnectDelay = 1000
   }
 
@@ -379,7 +379,7 @@ function connectBridge() {
   }
 
   ws.onclose = () => {
-    console.log('[claw] bridge disconnected')
+    console.log('[webclaw] bridge disconnected')
     scheduleBridgeReconnect()
   }
 
@@ -435,13 +435,13 @@ async function ensureDebugger() {
     await chrome.debugger.sendCommand({ tabId: activeTabId }, 'DOM.enable', {})
     await chrome.debugger.sendCommand({ tabId: activeTabId }, 'Page.enable', {})
     debuggerTabId = activeTabId
-    console.log(`[claw] debugger attached to ${activeTabId}`)
+    console.log(`[webclaw] debugger attached to ${activeTabId}`)
   }
   // Schedule auto-detach after 500ms idle
   detachTimer = setTimeout(async () => {
     if (debuggerTabId) {
       await chrome.debugger.detach({ tabId: debuggerTabId }).catch(() => {})
-      console.log(`[claw] debugger detached (idle)`)
+      console.log(`[webclaw] debugger detached (idle)`)
       debuggerTabId = null
     }
   }, 500)
@@ -452,7 +452,7 @@ async function withDebugger(fn) {
   return await fn()
 }
 
-// --- Omnibox: claw:// protocol via address bar ---
+// --- Omnibox: webclaw:// protocol via address bar ---
 
 chrome.omnibox.onInputSuggestion = undefined // suppress default
 
@@ -490,4 +490,4 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
 })
 
-console.log('[claw] v2 ready — claw:// protocol active')
+console.log('[webclaw] v2 ready — webclaw:// protocol active')

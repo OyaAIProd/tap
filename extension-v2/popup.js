@@ -21,7 +21,7 @@ chrome.runtime.sendMessage({ action: 'list' }, (response) => {
     li.innerHTML = `<span class="site">${claw.site}</span>/<span class="name">${claw.name}</span><span class="desc">${claw.description}</span>`
     li.addEventListener('click', () => {
       chrome.runtime.sendMessage({ action: 'run', site: claw.site, name: claw.name }, (result) => {
-        console.log(`claw://${claw.site}/${claw.name}`, result)
+        console.log(`webclaw://${claw.site}/${claw.name}`, result)
       })
     })
     clawsEl.appendChild(li)

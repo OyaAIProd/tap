@@ -1,5 +1,5 @@
 /**
- * Results page — renders claw output as a table.
+ * Results page — renders webclaw output as a table.
  * Data arrives via URL hash: #site/name or via chrome.storage.local
  */
 
@@ -10,11 +10,11 @@ async function render() {
   const contentEl = document.getElementById('content')
 
   if (!hash) {
-    contentEl.innerHTML = '<div class="empty">No claw specified. Usage: results.html#site/name?args</div>'
+    contentEl.innerHTML = '<div class="empty">No webclaw specified. Usage: results.html#site/name?args</div>'
     return
   }
 
-  // Parse claw URL from hash
+  // Parse webclaw URL from hash
   const [path, queryString] = hash.split('?')
   const [site, name] = path.split('/')
   const args = {}
@@ -25,7 +25,7 @@ async function render() {
     }
   }
 
-  titleEl.textContent = `claw://${site}/${name}`
+  titleEl.textContent = `webclaw://${site}/${name}`
   metaEl.textContent = 'Running...'
 
   try {

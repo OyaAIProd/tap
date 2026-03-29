@@ -1,10 +1,10 @@
 [package]
-name = "claw"
+name = "webclaw"
 version = "2.0.0"
 edition = "2021"
 description = "Make every website programmable by AI"
 license = "MIT"
-repository = "https://github.com/LeonTing1010/claw"
+repository = "https://github.com/LeonTing1010/webclaw"
 
 [dependencies]
 tokio = { version = "1.50", features = ["full"] }

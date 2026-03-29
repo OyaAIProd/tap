@@ -1,27 +1,27 @@
-# Claw
+# Webclaw
 
 > **Make every website programmable by AI.**
 
 Websites are closing their APIs. AI agents need them more than ever.
 
-Claw is a Chrome extension + MCP server. AI agents forge `.claw.js` scripts that extract data from any website — deterministically, with zero AI at runtime.
+Webclaw is a Chrome extension + MCP server. AI agents forge `.webclaw.js` scripts that extract data from any website — deterministically, with zero AI at runtime.
 
 ```
 page_intelligence → forge_verify → forge_save → run_adapter
      (1 call)        (1 call)       (1 call)      (forever)
 ```
 
-One agent forges a claw, every agent benefits.
+One agent forges a webclaw, every agent benefits.
 
 ## Install
 
-**Chrome Extension** — download `claw-extension.zip` from [Releases](https://github.com/LeonTing1010/claw/releases), unzip, load in `chrome://extensions/` (developer mode).
+**Chrome Extension** — download `webclaw-extension.zip` from [Releases](https://github.com/LeonTing1010/webclaw/releases), unzip, load in `chrome://extensions/` (developer mode).
 
 **MCP Server** (for Claude Code / AI agents):
 
 ```bash
 # Download binary from GitHub Releases
-# https://github.com/LeonTing1010/claw/releases
+# https://github.com/LeonTing1010/webclaw/releases
 
 # Or build from source
 cargo install --path .
@@ -32,8 +32,8 @@ Configure in your AI client:
 ```json
 {
   "mcpServers": {
-    "claw": {
-      "command": "claw",
+    "webclaw": {
+      "command": "webclaw",
       "args": ["mcp"]
     }
   }
@@ -45,28 +45,28 @@ Configure in your AI client:
 ### From any webpage console
 
 ```js
-// List available claws
-await claw.list()
+// List available webclaws
+await webclaw.list()
 
-// Run a claw
-const data = await claw("github/trending", {limit: 5})
+// Run a webclaw
+const data = await webclaw("github/trending", {limit: 5})
 console.table(data.rows)
 ```
 
 ### From Chrome address bar
 
 ```
-claw github/trending
-claw weibo/hot
-claw xiaohongshu/search?keyword=美食
+webclaw github/trending
+webclaw weibo/hot
+webclaw xiaohongshu/search?keyword=美食
 ```
 
 ### From CLI
 
 ```bash
-claw list                        # See all 45 claws
-claw github trending --limit 5   # Run via extension bridge
-claw check                       # Health check all claws
+webclaw list                        # See all 45 webclaws
+webclaw github trending --limit 5   # Run via extension bridge
+webclaw check                       # Health check all webclaws
 ```
 
 ### From AI agents (MCP)
@@ -74,13 +74,13 @@ claw check                       # Health check all claws
 ```
 > Use page_intelligence to analyze https://example.com
 > Then forge_verify to test the extraction logic
-> Then forge_save to persist the new claw
+> Then forge_save to persist the new webclaw
 ```
 
-## 45 Claws
+## 45 Webclaws
 
-| Site | Claws |
-|------|-------|
+| Site | Webclaws |
+|------|----------|
 | GitHub | trending |
 | Hacker News | hot |
 | Reddit | hot |
@@ -118,7 +118,7 @@ claw check                       # Health check all claws
 | Jimeng | generate, history |
 | Telegraph | publish |
 
-## .claw.js Format
+## .webclaw.js Format
 
 ```js
 export default {
@@ -162,7 +162,7 @@ export default {
 | `page.click(target)` | debugger | CDP native click |
 | `page.type(sel, text)` | debugger | CDP native keyboard |
 | `page.upload(sel, files)` | debugger | File upload via CDP |
-| `page.claw(site, name)` | - | Run another claw |
+| `page.webclaw(site, name)` | - | Run another webclaw |
 
 Scripting mode = undetectable. Debugger mode = millisecond attach/detach.
 
@@ -171,7 +171,7 @@ Scripting mode = undetectable. Debugger mode = millisecond attach/detach.
 ```
 Claude Code ←→ MCP (stdin/stdout) ←→ Bridge (ws://9333) ←→ Chrome Extension
                  Rust binary              WebSocket            background.js
-                 2,341 lines              auto-reconnect       page API + claws
+                 2,341 lines              auto-reconnect       page API + webclaws
 ```
 
 Rust binary = thin MCP bridge (6 dependencies). Chrome extension = sole runtime. No direct CDP.
@@ -196,8 +196,8 @@ cargo test               # 39 tests
 cargo clippy             # Lint (0 warnings)
 
 # Extension tests
-node extension-v2/test/claw-format.test.mjs   # 447 constraints
-node extension-v2/test/page-api.test.mjs       # 16 constraints
+node extension-v2/test/webclaw-format.test.mjs   # 447 constraints
+node extension-v2/test/page-api.test.mjs          # 16 constraints
 ```
 
 ## License

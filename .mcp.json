@@ -1,7 +1,7 @@
 {
   "mcpServers": {
-    "claw": {
-      "command": "claw",
+    "webclaw": {
+      "command": "webclaw",
       "args": ["mcp"],
       "cwd": "/Users/leo/Documents/claw"
     }

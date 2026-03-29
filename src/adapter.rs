@@ -1,6 +1,6 @@
 use std::path::Path;
 
-/// Health contract: output quality assertions for a claw.
+/// Health contract: output quality assertions for a webclaw.
 #[derive(Debug, Clone, Default)]
 pub struct HealthContract {
     pub min_rows: Option<usize>,
@@ -14,7 +14,7 @@ pub struct AdapterInfo {
     pub description: String,
 }
 
-/// Scan directories for .claw.js files and return metadata.
+/// Scan directories for .webclaw.js files and return metadata.
 pub fn list_adapters(base_dirs: &[&str]) -> Vec<AdapterInfo> {
     let mut adapters = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -41,7 +41,7 @@ pub fn list_adapters(base_dirs: &[&str]) -> Vec<AdapterInfo> {
                 let path = file_entry.path();
                 let filename = path.file_name().and_then(|f| f.to_str()).unwrap_or("");
 
-                let Some(adapter_name) = filename.strip_suffix(".claw.js") else {
+                let Some(adapter_name) = filename.strip_suffix(".webclaw.js") else {
                     continue;
                 };
 
@@ -68,7 +68,7 @@ pub fn list_adapters(base_dirs: &[&str]) -> Vec<AdapterInfo> {
     adapters
 }
 
-/// Extract a quoted string field from .claw.js source.
+/// Extract a quoted string field from .webclaw.js source.
 /// Matches: description: "some text" or description: 'some text'
 fn extract_js_string(content: &str, field: &str) -> Option<String> {
     let needle = format!("{}:", field);
@@ -84,12 +84,12 @@ fn extract_js_string(content: &str, field: &str) -> Option<String> {
     Some(rest[start..start + end].to_string())
 }
 
-/// Standard claw search directories.
+/// Standard webclaw search directories.
 pub fn adapter_base_dirs() -> Vec<String> {
     let home = std::env::var("HOME").unwrap_or_default();
     vec![
-        "extension-v2/claws".to_string(),
-        format!("{}/.claw/claws", home),
+        "extension-v2/webclaws".to_string(),
+        format!("{}/.webclaw/webclaws", home),
     ]
 }
 
@@ -118,10 +118,10 @@ mod tests {
 
     #[test]
     fn list_adapters_finds_clawjs() {
-        let adapters = list_adapters(&["extension-v2/claws"]);
+        let adapters = list_adapters(&["extension-v2/webclaws"]);
         assert!(
             adapters.len() >= 40,
-            "should have 40+ claws, got {}",
+            "should have 40+ webclaws, got {}",
             adapters.len()
         );
     }
@@ -136,8 +136,8 @@ mod tests {
     fn adapter_base_dirs_v2_only() {
         let dirs = adapter_base_dirs();
         assert_eq!(dirs.len(), 2);
-        assert!(dirs[0].contains("extension-v2/claws"));
-        assert!(dirs[1].contains(".claw/claws"));
+        assert!(dirs[0].contains("extension-v2/webclaws"));
+        assert!(dirs[1].contains(".webclaw/webclaws"));
     }
 
     #[test]
@@ -182,7 +182,7 @@ mod tests {
 
     #[test]
     fn claws_no_js_click_injection() {
-        let claws_dir = std::path::Path::new("extension-v2/claws");
+        let claws_dir = std::path::Path::new("extension-v2/webclaws");
         let mut violations = Vec::new();
         for site in std::fs::read_dir(claws_dir).unwrap().flatten() {
             if !site.path().is_dir() {

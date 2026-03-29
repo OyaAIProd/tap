@@ -1,7 +1,7 @@
 //! MCP (Model Context Protocol) server implementation.
 //!
-//! Exposes claw's forge toolkit as MCP tools over stdin/stdout JSON-RPC.
-//! This lets AI agents (Claude Code, etc.) use claw's scalpels natively.
+//! Exposes webclaw's forge toolkit as MCP tools over stdin/stdout JSON-RPC.
+//! This lets AI agents (Claude Code, etc.) use webclaw's scalpels natively.
 
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -71,7 +71,7 @@ pub async fn serve() -> Result<(), Box<dyn std::error::Error>> {
                                     "jsonrpc": "2.0",
                                     "id": id,
                                     "result": {
-                                        "content": [{"type": "text", "text": "error: Chrome extension not connected. Install Claw extension and reload it."}],
+                                        "content": [{"type": "text", "text": "error: Chrome extension not connected. Install Webclaw extension and reload it."}],
                                         "isError": true
                                     }
                                 });
@@ -96,9 +96,9 @@ pub async fn serve() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Regenerate extension-v2/claws/manifest.json from the directory contents.
+/// Regenerate extension-v2/webclaws/manifest.json from the directory contents.
 fn update_claws_manifest() -> Result<(), Box<dyn std::error::Error>> {
-    let claws_dir = std::path::Path::new("extension-v2/claws");
+    let claws_dir = std::path::Path::new("extension-v2/webclaws");
     let mut files = Vec::new();
     for site_entry in std::fs::read_dir(claws_dir)?.flatten() {
         if !site_entry.path().is_dir() {
@@ -107,7 +107,7 @@ fn update_claws_manifest() -> Result<(), Box<dyn std::error::Error>> {
         let site = site_entry.file_name().to_string_lossy().to_string();
         for file_entry in std::fs::read_dir(site_entry.path())?.flatten() {
             let name = file_entry.file_name().to_string_lossy().to_string();
-            if name.ends_with(".claw.js") {
+            if name.ends_with(".webclaw.js") {
                 files.push(format!("{}/{}", site, name));
             }
         }
@@ -139,7 +139,7 @@ fn handle_initialize(id: &Value) -> Value {
                 "tools": {}
             },
             "serverInfo": {
-                "name": "claw",
+                "name": "webclaw",
                 "version": env!("CARGO_PKG_VERSION")
             }
         }
@@ -164,7 +164,7 @@ fn tools_schema() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string", "description": "Output file path", "default": "/tmp/claw-screenshot.png" },
+                    "path": { "type": "string", "description": "Output file path", "default": "/tmp/webclaw-screenshot.png" },
                     "full_page": { "type": "boolean", "description": "Capture full page beyond viewport", "default": false }
                 }
             }
@@ -438,7 +438,7 @@ fn tools_schema() -> Value {
         },
         {
             "name": "page_intelligence",
-            "description": "One-shot page analysis for claw forging. Returns framework detection, SSR state (with data samples), API endpoint hints, interactive elements, auth state, and ranked strategy recommendations — all in a single call. Replaces 5-8 separate tool calls (screenshot + ax_tree + global_names + api_log + page_info). Call this FIRST when forging a new claw.",
+            "description": "One-shot page analysis for webclaw forging. Returns framework detection, SSR state (with data samples), API endpoint hints, interactive elements, auth state, and ranked strategy recommendations — all in a single call. Replaces 5-8 separate tool calls (screenshot + ax_tree + global_names + api_log + page_info). Call this FIRST when forging a new webclaw.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -448,12 +448,12 @@ fn tools_schema() -> Value {
         },
         {
             "name": "list_adapters",
-            "description": "List all available claws. Returns site, name, and description for each. Use this to discover what websites Claw can access.",
+            "description": "List all available webclaws. Returns site, name, and description for each. Use this to discover what websites Webclaw can access.",
             "inputSchema": { "type": "object", "properties": {} }
         },
         {
             "name": "run_adapter",
-            "description": "Run a claw and return structured data (JSON rows). This is the primary way to get data from websites. Example: run_adapter({site: 'weibo', name: 'hot'}) returns trending topics.",
+            "description": "Run a webclaw and return structured data (JSON rows). This is the primary way to get data from websites. Example: run_adapter({site: 'weibo', name: 'hot'}) returns trending topics.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -531,16 +531,16 @@ fn tools_schema() -> Value {
                 }
             }
         },
-        // ===== FORGE — Claw Creation Pipeline =====
+        // ===== FORGE — Webclaw Creation Pipeline =====
         {
             "name": "forge_verify",
-            "description": "One-shot test of claw extraction logic. Navigates to URL, waits, evaluates a JS expression in page context, and validates the result shape against expected columns. Combines navigate + wait + evaluate + validate into one call. Use this during forging to iterate quickly on the data extraction logic before saving.",
+            "description": "One-shot test of webclaw extraction logic. Navigates to URL, waits, evaluates a JS expression in page context, and validates the result shape against expected columns. Combines navigate + wait + evaluate + validate into one call. Use this during forging to iterate quickly on the data extraction logic before saving.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "url": { "type": "string", "description": "URL to navigate to" },
                     "wait_ms": { "type": "integer", "description": "Milliseconds to wait after navigation (default: 2000)", "default": 2000 },
-                    "expression": { "type": "string", "description": "JS expression that returns an array of objects (the claw's data extraction logic)" },
+                    "expression": { "type": "string", "description": "JS expression that returns an array of objects (the webclaw's data extraction logic)" },
                     "columns": { "type": "array", "items": { "type": "string" }, "description": "Expected column names — used to validate the result shape" }
                 },
                 "required": ["url", "expression"]
@@ -548,13 +548,13 @@ fn tools_schema() -> Value {
         },
         {
             "name": "forge_save",
-            "description": "Save a .claw.js file to disk. Writes to ~/.claw/claws/{site}/{name}.claw.js. Use after verifying the claw works with forge_verify.",
+            "description": "Save a .webclaw.js file to disk. Writes to ~/.webclaw/webclaws/{site}/{name}.webclaw.js. Use after verifying the webclaw works with forge_verify.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "site": { "type": "string", "description": "Site name (e.g. 'weibo')" },
-                    "name": { "type": "string", "description": "Claw name (e.g. 'hot')" },
-                    "code": { "type": "string", "description": "Full .claw.js source code" }
+                    "name": { "type": "string", "description": "Webclaw name (e.g. 'hot')" },
+                    "code": { "type": "string", "description": "Full .webclaw.js source code" }
                 },
                 "required": ["site", "name", "code"]
             }
@@ -686,16 +686,18 @@ async fn execute_tool(
             if let Some(url) = args["url"].as_str() {
                 client.navigate(url).await?;
             }
-            client.send("Claw.pageIntelligence", Some(json!({}))).await
+            client
+                .send("WebClaw.pageIntelligence", Some(json!({})))
+                .await
         }
-        "list_adapters" => client.send("Claw.list", Some(json!({}))).await,
+        "list_adapters" => client.send("WebClaw.list", Some(json!({}))).await,
         "run_adapter" => {
             let site = args["site"].as_str().ok_or("missing site")?;
             let name_arg = args["name"].as_str().ok_or("missing name")?;
             let adapter_args = args.get("args").cloned().unwrap_or(json!({}));
             let mut result = client
                 .send(
-                    "Claw.run",
+                    "WebClaw.run",
                     Some(json!({"site": site, "name": name_arg, "args": adapter_args})),
                 )
                 .await?;
@@ -771,11 +773,11 @@ async fn execute_tool(
             let claw_name = args["name"].as_str().ok_or("missing name")?;
             let code = args["code"].as_str().ok_or("missing code")?;
 
-            // Save to extension-v2/claws/ (dev) and ~/.claw/claws/ (user)
+            // Save to extension-v2/webclaws/ (dev) and ~/.webclaw/webclaws/ (user)
             let dirs = vec![
-                format!("extension-v2/claws/{}", site),
+                format!("extension-v2/webclaws/{}", site),
                 format!(
-                    "{}/.claw/claws/{}",
+                    "{}/.webclaw/webclaws/{}",
                     std::env::var("HOME").unwrap_or_default(),
                     site
                 ),
@@ -783,20 +785,20 @@ async fn execute_tool(
             let mut saved_to = String::new();
             for dir in &dirs {
                 if let Ok(()) = std::fs::create_dir_all(dir) {
-                    let path = format!("{}/{}.claw.js", dir, claw_name);
+                    let path = format!("{}/{}.webclaw.js", dir, claw_name);
                     if std::fs::write(&path, code).is_ok() && saved_to.is_empty() {
                         saved_to = path;
                     }
                 }
             }
 
-            // Update manifest.json if extension-v2/claws/ exists
-            if std::path::Path::new("extension-v2/claws").is_dir() {
+            // Update manifest.json if extension-v2/webclaws/ exists
+            if std::path::Path::new("extension-v2/webclaws").is_dir() {
                 let _ = update_claws_manifest();
             }
 
             if saved_to.is_empty() {
-                Err("failed to save claw file".into())
+                Err("failed to save webclaw file".into())
             } else {
                 Ok(json!(format!(
                     "saved to {} — reload extension to activate",
@@ -882,9 +884,9 @@ async fn relay_to_extension(
         | "intercept_fulfill"
         | "intercept_fail"
         | "set_cookie" => {
-            // Generic relay: send as Claw.{tool_name} with original args
+            // Generic relay: send as WebClaw.{tool_name} with original args
             let result = client
-                .send(&format!("Claw.{}", name), Some(args.clone()))
+                .send(&format!("WebClaw.{}", name), Some(args.clone()))
                 .await?;
             return Ok(result);
         }
@@ -960,7 +962,7 @@ mod tests {
         );
         assert!(
             !relay_section.contains("JSON.stringify"),
-            "relay_to_extension must not contain inline JS — move to Claw.* extension methods"
+            "relay_to_extension must not contain inline JS — move to WebClaw.* extension methods"
         );
     }
 

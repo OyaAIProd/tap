@@ -12,7 +12,7 @@ use serde_json::Value;
 
 #[derive(Parser)]
 #[command(
-    name = "claw",
+    name = "webclaw",
     about = "Make every website programmable by AI",
     version
 )]
@@ -28,7 +28,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// List available claws (website API specs)
+    /// List available webclaws (website API specs)
     List,
     /// Generate shell completions
     Completions {
@@ -36,14 +36,14 @@ enum Command {
         shell: Shell,
     },
 
-    /// Health check all claws via extension bridge
+    /// Health check all webclaws via extension bridge
     Check,
 
     // ---- MCP SERVER (primary interface for AI agents) ----
     /// Run as MCP server (stdin/stdout JSON-RPC) for AI agent integration
     Mcp,
 
-    /// Run a claw via extension bridge (claw <site> <name> [--arg value ...])
+    /// Run a webclaw via extension bridge (webclaw <site> <name> [--arg value ...])
     #[command(external_subcommand)]
     Adapter(Vec<String>),
 }
@@ -69,7 +69,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let adapters = adapter::list_adapters(&refs);
             if adapters.is_empty() {
                 println!(
-                    "No claws found. Add .claw.js files to extension-v2/claws/ or ~/.claw/claws/"
+                    "No webclaws found. Add .webclaw.js files to extension-v2/webclaws/ or ~/.webclaw/webclaws/"
                 );
             } else {
                 let columns = vec!["site".into(), "name".into(), "description".into()];
@@ -90,9 +90,9 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             // Connect to extension bridge
             let client = bridge::try_extension_bridge().await?;
 
-            // Get claw list from extension
+            // Get webclaw list from extension
             let list_result = client
-                .send("Claw.list", Some(serde_json::json!({})))
+                .send("Webclaw.list", Some(serde_json::json!({})))
                 .await?;
 
             let claws = list_result
@@ -102,7 +102,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 .unwrap_or_default();
 
             if claws.is_empty() {
-                println!("No claws registered in extension.");
+                println!("No webclaws registered in extension.");
                 return Ok(());
             }
 
@@ -116,10 +116,10 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 let name = claw["name"].as_str().unwrap_or("?");
                 let adapter_name = format!("{}/{}", site, name);
 
-                // Run the claw
+                // Run the webclaw
                 let run_result = client
                     .send(
-                        "Claw.run",
+                        "Webclaw.run",
                         Some(serde_json::json!({
                             "site": site,
                             "name": name,
@@ -197,7 +197,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             }
 
             println!(
-                "\n{} claws: {} healthy, {} degraded, {} broken, {} errors",
+                "\n{} webclaws: {} healthy, {} degraded, {} broken, {} errors",
                 claws.len(),
                 healthy,
                 degraded,
@@ -214,12 +214,12 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::Completions { shell } => {
             let mut cmd = Cli::command();
-            generate(shell, &mut cmd, "claw", &mut std::io::stdout());
+            generate(shell, &mut cmd, "webclaw", &mut std::io::stdout());
         }
 
         Command::Adapter(raw_args) => {
             if raw_args.len() < 2 {
-                return Err("usage: claw <site> <name> [--arg value ...]".into());
+                return Err("usage: webclaw <site> <name> [--arg value ...]".into());
             }
 
             let site = &raw_args[0];
@@ -230,7 +230,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let client = bridge::try_extension_bridge().await?;
             let result = client
                 .send(
-                    "Claw.run",
+                    "Webclaw.run",
                     Some(serde_json::json!({
                         "site": site,
                         "name": name,

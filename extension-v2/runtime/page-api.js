@@ -1,5 +1,5 @@
 /**
- * page API — the 10 system calls a .claw.js can use.
+ * page API — the 10 system calls a .claw.js can use (WebClaw runtime).
  *
  * Scripting mode (undetectable): nav, wait, waitFor, eval, fetch, screenshot, cookies
  * Debugger mode (ms-level attach/detach): click, type, upload

@@ -28,7 +28,7 @@ pub struct HealthReport {
 }
 
 /// Validate adapter output rows against a health contract.
-/// Rows are JSON objects (from .claw.js or YAML pipeline output).
+/// Rows are JSON objects (from .webclaw.js or YAML pipeline output).
 pub fn validate(adapter_name: &str, health: &HealthContract, rows: &[Value]) -> HealthReport {
     let mut checks = Vec::new();
 

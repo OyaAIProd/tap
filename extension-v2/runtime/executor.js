@@ -1,5 +1,5 @@
 /**
- * Claw executor — loads .claw.js files and runs them.
+ * WebClaw executor — loads .claw.js files and runs them.
  *
  * The executor's only job:
  *   1. Load a .claw.js module
@@ -91,12 +91,12 @@ function coerceArg(value, type) {
 }
 
 /**
- * Parse a claw:// URL into { site, name, args }.
- * Format: claw://site/name?arg1=val1&arg2=val2
+ * Parse a webclaw:// URL into { site, name, args }.
+ * Format: webclaw://site/name?arg1=val1&arg2=val2
  */
 export function parseClawURL(url) {
-  const match = url.match(/^claw:\/\/([^/]+)\/([^?]+)(?:\?(.*))?$/)
-  if (!match) throw new Error(`invalid claw URL: ${url}`)
+  const match = url.match(/^webclaw:\/\/([^/]+)\/([^?]+)(?:\?(.*))?$/)
+  if (!match) throw new Error(`invalid webclaw URL: ${url}`)
 
   const [, site, name, queryString] = match
   const args = {}

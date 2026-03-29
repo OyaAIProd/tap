@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Claw",
+  "name": "WebClaw",
   "version": "2.0.0",
-  "description": "Make every website programmable by AI — claw:// protocol for the web",
+  "description": "Make every website programmable by AI — webclaw:// protocol for the web",
   "permissions": [
     "debugger",
     "activeTab",
@@ -21,7 +21,7 @@
     "type": "module"
   },
   "omnibox": {
-    "keyword": "claw"
+    "keyword": "webclaw"
   },
   "action": {
     "default_popup": "popup.html",
@@ -47,7 +47,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["results.html"],
+      "resources": ["results.html", "webclaw-page-api.js"],
       "matches": ["<all_urls>"]
     }
   ],

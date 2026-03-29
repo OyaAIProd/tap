@@ -1,79 +1,40 @@
 /**
- * Claw Content Script — injects claw:// protocol support into every page.
+ * WebClaw Content Script — webclaw:// protocol support for every page.
  *
- * 1. window.claw("site/name", {args}) — programmatic API for any webpage/script
- * 2. <a href="claw://site/name?args"> — clickable claw links
+ * 1. window.webclaw("site/name", {args}) — programmatic API via CustomEvent bridge
+ * 2. <a href="webclaw://site/name?args"> — clickable webclaw links
+ *
+ * Uses CustomEvent bridge instead of inline script injection to avoid CSP violations.
  */
 
-// --- 1. window.claw() API ---
+// --- 1. window.webclaw() API via MAIN world script ---
 
-const script = document.createElement('script')
-script.textContent = `
-(function() {
-  const EXTENSION_ID = '${chrome.runtime.id}';
+// Inject API into page world via a file URL (avoids CSP inline script blocks)
+const s = document.createElement('script')
+s.src = chrome.runtime.getURL('webclaw-page-api.js')
+s.onload = () => s.remove()
+document.documentElement.appendChild(s)
 
-  /**
-   * Run a claw and return structured data.
-   * @param {string} path - "site/name" (e.g. "github/trending")
-   * @param {object} args - Arguments (e.g. {limit: 5})
-   * @returns {Promise<{columns: string[], rows: object[], count: number}>}
-   *
-   * Usage:
-   *   const result = await claw("github/trending", {limit: 5})
-   *   console.table(result.rows)
-   */
-  window.claw = function(path, args = {}) {
-    return new Promise((resolve, reject) => {
-      const [site, name] = path.split('/')
-      if (!site || !name) {
-        reject(new Error('claw: usage: claw("site/name", {args})'))
-        return
+// Bridge: page world sends CustomEvent → content script forwards to extension
+window.addEventListener('webclaw-request', (e) => {
+  const { id, action, site, name, args } = e.detail
+  const msg = action === 'list' ? { action: 'list' } : { action: 'run', site, name, args }
+
+  chrome.runtime.sendMessage(msg, (response) => {
+    window.dispatchEvent(new CustomEvent('webclaw-response', {
+      detail: {
+        id,
+        error: chrome.runtime.lastError?.message || response?.error || null,
+        data: response
       }
-      chrome.runtime.sendMessage(EXTENSION_ID, {
-        action: 'run', site, name, args
-      }, response => {
-        if (chrome.runtime.lastError) {
-          reject(new Error('claw: extension not available — ' + chrome.runtime.lastError.message))
-        } else if (response?.error) {
-          reject(new Error('claw: ' + response.error))
-        } else {
-          resolve(response)
-        }
-      })
-    })
-  }
+    }))
+  })
+})
 
-  /**
-   * List all available claws.
-   * @returns {Promise<Array<{site, name, description, columns}>>}
-   */
-  window.claw.list = function() {
-    return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage(EXTENSION_ID, {
-        action: 'list'
-      }, response => {
-        if (chrome.runtime.lastError) {
-          reject(new Error('claw: ' + chrome.runtime.lastError.message))
-        } else {
-          resolve(response?.claws || response)
-        }
-      })
-    })
-  }
-
-  // Mark protocol as available
-  window.claw.version = '2.0.0'
-
-  console.log('[claw] protocol ready — try: claw("github/trending", {limit: 5})')
-})()
-`
-document.documentElement.appendChild(script)
-script.remove()
-
-// --- 2. Intercept claw:// link clicks ---
+// --- 2. Intercept webclaw:// link clicks ---
 
 document.addEventListener('click', (e) => {
-  const link = e.target.closest('a[href^="claw://"]')
+  const link = e.target.closest('a[href^="webclaw://"]')
   if (!link) return
 
   e.preventDefault()
@@ -81,14 +42,9 @@ document.addEventListener('click', (e) => {
 
   chrome.runtime.sendMessage({ action: 'run', url }, (response) => {
     if (response?.error) {
-      console.error('[claw]', response.error)
+      console.error('[webclaw]', response.error)
     } else {
-      // Open results in extension page
-      chrome.runtime.sendMessage({
-        action: 'showResults',
-        url,
-        data: response
-      })
+      chrome.runtime.sendMessage({ action: 'showResults', url, data: response })
     }
   })
 }, true)
