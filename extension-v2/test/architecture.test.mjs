@@ -52,10 +52,10 @@ test('protocol.js must NOT have module-level debugger state variables', () => {
     'found module-level detach timer — debugger lifecycle belongs to background.js')
 })
 
-test('createPageAPI accepts cdpClick via dependency injection', () => {
+test('createPage accepts cdpClick via dependency injection', () => {
   // Why: page.click() must use background.js's cdpClick to share debugger state
   assert(PAGE_API_SRC.includes('cdpClick'),
-    'createPageAPI must accept cdpClick dependency')
+    'createPage must accept cdpClick dependency')
 })
 
 test('stdlib click delegates to kernel.pointer (which uses injected cdpClick)', () => {
@@ -75,10 +75,10 @@ test('stdlib click delegates to kernel.pointer (which uses injected cdpClick)', 
     'kernel.pointer() must use injected cdpClick')
 })
 
-test('executor passes deps to createPageAPI', () => {
+test('executor passes deps to createPage', () => {
   // Why: without DI wiring, page API falls back to broken standalone debugger
-  assert(EXECUTOR_SRC.includes('createPageAPI(tabId, deps'),
-    'runTap must pass deps to createPageAPI')
+  assert(EXECUTOR_SRC.includes('createPage(tabId, deps'),
+    'runTap must pass deps to createPage')
 })
 
 test('background.js injects cdpClick into runTap', () => {
@@ -108,13 +108,13 @@ test('protocol.js click uses elementFromPoint to verify target is reachable', ()
 
 test('background.js click handlers delegate to protocol (no inline elementFromPoint)', () => {
   // Why: after protocol unification, click safety lives in protocol.js stdlib.click()
-  // background.js must delegate via getPageAPI(), not reimplement element finding
+  // background.js must delegate via getPage(), not reimplement element finding
   const clickSection = BACKGROUND_SRC.substring(
-    BACKGROUND_SRC.indexOf("case 'Tap.click'"),
-    BACKGROUND_SRC.indexOf("case 'Tap.type_text'")
+    BACKGROUND_SRC.indexOf("case 'click'"),
+    BACKGROUND_SRC.indexOf("case 'type_text'")
   )
-  assert(clickSection.includes('getPageAPI('),
-    'Tap.click handlers must delegate to protocol via getPageAPI()')
+  assert(clickSection.includes('getPage('),
+    'Tap.click handlers must delegate to protocol via getPage()')
   assert(!clickSection.includes('chrome.scripting.executeScript'),
     'Tap.click handlers must NOT have inline scripting — delegate to protocol')
 })

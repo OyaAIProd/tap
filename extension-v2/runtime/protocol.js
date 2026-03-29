@@ -28,7 +28,7 @@
  *   download(url)       — fetch + parse response
  *   waitFor(sel, ms?)   — wait for element
  *   waitForNetwork(ms?, idle?) — wait for network settle
- *   getSSRState(name?)  — extract SSR globals
+ *   ssrState(name?)  — extract SSR globals
  *   storage(type?)      — read local/session storage
  */
 
@@ -192,7 +192,7 @@ function createKernel(tabId, { cdpClick, withDebugger } = {}) {
         runtime: 'chrome-extension',
         kernel: ['eval', 'pointer', 'keyboard', 'nav', 'wait', 'screenshot', 'tap', 'capabilities'],
         stdlib: ['click', 'type', 'hover', 'scroll', 'pressKey', 'select', 'upload', 'dialog',
-          'fetch', 'find', 'cookies', 'download', 'waitFor', 'waitForNetwork', 'getSSRState', 'storage'],
+          'fetch', 'find', 'cookies', 'download', 'waitFor', 'waitForNetwork', 'ssrState', 'storage'],
       }
     },
 
@@ -498,7 +498,7 @@ function createStdlib(kernel) {
      * Extract SSR state from window globals.
      * Stdlib: eval(read window globals)
      */
-    async getSSRState(name) {
+    async ssrState(name) {
       return await kernel.eval((target) => {
         const sanitize = (obj) => JSON.parse(JSON.stringify(obj, (_, v) => v === undefined ? null : v))
 
@@ -556,7 +556,7 @@ function createStdlib(kernel) {
  * @param {function} opts.withDebugger - Debugger wrapper (fn) => Promise from background.js
  * @returns {object} page API object — kernel + stdlib merged into a flat namespace
  */
-export function createPageAPI(tabId, { cdpClick, withDebugger } = {}) {
+export function createPage(tabId, { cdpClick, withDebugger } = {}) {
   const kernel = createKernel(tabId, { cdpClick, withDebugger })
   const stdlib = createStdlib(kernel)
 
@@ -588,7 +588,7 @@ export function createPageAPI(tabId, { cdpClick, withDebugger } = {}) {
     download: stdlib.download,
     waitFor: stdlib.waitFor,
     waitForNetwork: stdlib.waitForNetwork,
-    getSSRState: stdlib.getSSRState,
+    ssrState: stdlib.ssrState,
     storage: stdlib.storage,
   }
 

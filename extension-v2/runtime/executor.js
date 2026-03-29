@@ -7,7 +7,7 @@
  *   3. Call run(page, args) and return structured data
  */
 
-import { createPageAPI } from './protocol.js'
+import { createPage } from './protocol.js'
 
 /** Registry of loaded tap modules, keyed by "site/name" */
 const tapRegistry = new Map()
@@ -71,7 +71,7 @@ export async function runTap(site, name, userArgs = {}, tabId, deps = {}) {
   }
 
   // Create page API for this tab, injecting background.js debugger functions
-  const page = createPageAPI(tabId, deps)
+  const page = createPage(tabId, deps)
 
   // Wire up page.tap() for composition
   page.tap = async (s, n, a = {}) => {
