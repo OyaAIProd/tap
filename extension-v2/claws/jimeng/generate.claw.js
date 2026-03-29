@@ -8,46 +8,29 @@ export default {
   },
 
   async run(page, args) {
-    await page.nav("https://jimeng.jianying.com/ai-tool/home")
-    await page.waitFor(".tiptap", 20000)
+    await page.nav("https://jimeng.jianying.com/ai-tool/image/generate")
+    await page.waitFor('[role="textbox"], .tiptap', 20000)
     await page.wait(1000)
 
-    // 切换到图片生成模式
-    await page.click("图片生成")
-    await page.wait(500)
-    await page.click("图片生成")
-    await page.wait(1000)
-
-    // 找到主输入框 (最大的textbox) and type prompt
-    const target = await page.eval(() => {
-      const inputs = document.querySelectorAll('[role="textbox"], .tiptap')
-      let best = '.tiptap'
-      let maxArea = 0
-      inputs.forEach(el => {
-        const rect = el.getBoundingClientRect()
-        const area = rect.width * rect.height
-        if (area > maxArea) {
-          maxArea = area
-          best = el.className ? '.' + el.className.split(' ').join('.') : el.tagName.toLowerCase()
-        }
-      })
-      return best
-    })
-
-    await page.type(target, args.prompt)
+    // Type prompt into the main input
+    await page.type('[role="textbox"]', args.prompt)
     await page.wait(500)
 
-    // 找最近的按钮点击
-    await page.eval(() => {
-      const buttons = document.querySelectorAll('button')
-      if (buttons.length > 0) {
-        buttons[buttons.length - 1].click()
-      }
-    })
+    // Click the generate button via CDP native click (never JS .click())
+    await page.click("立即生成")
     await page.wait(3000)
 
+    // Verify generation started by checking for progress indicators
+    const status = await page.eval(() => {
+      const loading = document.querySelector('[class*="loading"], [class*="progress"], [class*="generating"]')
+      const result = document.querySelector('[class*="result"], [class*="image-item"], [class*="output"]')
+      if (result) return 'generating'
+      if (loading) return 'generating'
+      return 'submitted'
+    })
+
     return [{
-      status: "submitted",
+      status,
       prompt: args.prompt.substring(0, 80)
     }]
   }

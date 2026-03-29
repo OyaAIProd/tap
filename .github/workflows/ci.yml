@@ -28,3 +28,5 @@ jobs:
           node-version: 20
       - name: Validate .claw.js format
         run: node extension-v2/test/claw-format.test.mjs
+      - name: Validate page API contract
+        run: node extension-v2/test/page-api.test.mjs

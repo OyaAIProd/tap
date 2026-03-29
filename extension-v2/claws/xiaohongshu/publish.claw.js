@@ -17,7 +17,29 @@ export default {
     await page.wait(2000)
 
     await page.upload("input.upload-input", args.images)
-    await page.wait(20000)
+
+    // Wait for upload to complete — poll for thumbnail/preview instead of fixed 20s
+    const uploaded = await page.eval(() => {
+      return new Promise((resolve) => {
+        let attempts = 0
+        const check = () => {
+          const preview = document.querySelector('.upload-item img, .coverImg, [class*="cover"] img, [class*="preview"] img')
+          if (preview || attempts > 60) {
+            resolve(!!preview)
+            return
+          }
+          attempts++
+          setTimeout(check, 500)
+        }
+        check()
+      })
+    })
+
+    if (!uploaded) {
+      return [{ status: 'upload-timeout', url: '' }]
+    }
+
+    await page.wait(1000)
 
     if (args.title) {
       await page.type("input.d-text", args.title)
