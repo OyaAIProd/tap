@@ -1,6 +1,6 @@
 # Forging Spec (v2)
 
-How to create .webclaw.js files. For AI agents, not humans.
+How to create .tap.js files. For AI agents, not humans.
 
 ## 1. Forge Workflow
 
@@ -13,18 +13,18 @@ forge_verify(url, expr)    → test extraction logic, see sample data
                            ↓
 iterate if needed          → tweak expression, re-verify
                            ↓
-forge_save(site, name, code) → persist to ~/.webclaw/webclaws/
+forge_save(site, name, code) → persist to ~/.tap/taps/
 ```
 
 3-4 MCP calls total. `page_intelligence` returns ready-to-use templates — pick one, fill TODOs, verify, save.
 
-## 2. .webclaw.js Format
+## 2. .tap.js Format
 
 ```js
 export default {
   // Required
   site: "weibo",                       // Site identifier
-  name: "hot",                         // Webclaw name
+  name: "hot",                         // Tap name
   description: "微博热搜榜",            // What it does
   columns: ["rank", "title", "hot"],   // Output column names
 
@@ -60,7 +60,7 @@ export default {
 | `page.click(target)` | debugger | Click by selector or visible text |
 | `page.type(selector, text)` | debugger | Type into input |
 | `page.upload(selector, files)` | debugger | Upload files |
-| `page.webclaw(site, name, args)` | — | Run another webclaw (composition) |
+| `page.tap(site, name, args)` | — | Run another tap (composition) |
 
 Scripting mode = undetectable. Debugger mode = ms-level attach/detach.
 

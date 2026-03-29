@@ -1,5 +1,5 @@
 /**
- * page API — the 10 system calls a .claw.js can use (WebClaw runtime).
+ * page API — the 10 system calls a .tap.js can use (Tap runtime).
  *
  * Scripting mode (undetectable): nav, wait, waitFor, eval, fetch, screenshot, cookies
  * Debugger mode (ms-level attach/detach): click, type, upload
@@ -215,15 +215,15 @@ export function createPageAPI(tabId, { cdpClick, cdpType, withDebugger } = {}) {
     },
 
     /**
-     * Run another claw (composition).
+     * Run another tap (composition).
      * @param {string} site - Site name
-     * @param {string} name - Claw name
+     * @param {string} name - Tap name
      * @param {object} args - Arguments
-     * @returns {Array} Rows from the claw
+     * @returns {Array} Rows from the tap
      */
-    async claw(site, name, args = {}) {
+    async tap(site, name, args = {}) {
       // This is wired up by the executor — placeholder here
-      throw new Error('page.claw() not wired — must be set by executor')
+      throw new Error('page.tap() not wired — must be set by executor')
     }
   }
 

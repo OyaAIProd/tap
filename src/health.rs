@@ -1,9 +1,9 @@
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::adapter::HealthContract;
+use crate::tap::HealthContract;
 
-/// Overall health status of an adapter's output.
+/// Overall health status of a tap's output.
 #[derive(Debug, Serialize, Clone, PartialEq)]
 pub enum HealthStatus {
     Healthy,
@@ -19,17 +19,17 @@ pub struct CheckResult {
     pub message: String,
 }
 
-/// Full health report for an adapter run.
+/// Full health report for a tap run.
 #[derive(Debug, Serialize)]
 pub struct HealthReport {
-    pub adapter: String,
+    pub tap: String,
     pub status: HealthStatus,
     pub checks: Vec<CheckResult>,
 }
 
-/// Validate adapter output rows against a health contract.
-/// Rows are JSON objects (from .webclaw.js or YAML pipeline output).
-pub fn validate(adapter_name: &str, health: &HealthContract, rows: &[Value]) -> HealthReport {
+/// Validate tap output rows against a health contract.
+/// Rows are JSON objects (from .tap.js output).
+pub fn validate(tap_name: &str, health: &HealthContract, rows: &[Value]) -> HealthReport {
     let mut checks = Vec::new();
 
     // Check min_rows
@@ -74,7 +74,7 @@ pub fn validate(adapter_name: &str, health: &HealthContract, rows: &[Value]) -> 
     };
 
     HealthReport {
-        adapter: adapter_name.to_string(),
+        tap: tap_name.to_string(),
         status,
         checks,
     }

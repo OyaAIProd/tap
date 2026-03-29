@@ -30,15 +30,15 @@ jobs:
       - run: cargo build --release --target ${{ matrix.target }}
       - name: Package (unix)
         if: runner.os != 'Windows'
-        run: tar -czf webclaw-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release webclaw
+        run: tar -czf tap-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release tap
       - name: Package (windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path target/${{ matrix.target }}/release/webclaw.exe -DestinationPath webclaw-${{ matrix.target }}.zip
+        run: Compress-Archive -Path target/${{ matrix.target }}/release/tap.exe -DestinationPath tap-${{ matrix.target }}.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: webclaw-${{ matrix.target }}
-          path: webclaw-${{ matrix.target }}.*
+          name: tap-${{ matrix.target }}
+          path: tap-${{ matrix.target }}.*
 
   extension:
     runs-on: ubuntu-latest
@@ -47,14 +47,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Validate webclaws
-        run: node extension-v2/test/webclaw-format.test.mjs
+      - name: Validate taps
+        run: node extension-v2/test/tap-format.test.mjs
       - name: Package extension
-        run: cd extension-v2 && zip -r ../webclaw-extension.zip . -x "test/*" -x "*.test.*"
+        run: cd extension-v2 && zip -r ../tap-extension.zip . -x "test/*" -x "*.test.*"
       - uses: actions/upload-artifact@v4
         with:
-          name: webclaw-extension
-          path: webclaw-extension.zip
+          name: tap-extension
+          path: tap-extension.zip
 
   release:
     needs: [build, extension]
@@ -65,12 +65,12 @@ jobs:
         with:
           merge-multiple: true
       - run: |
-          ls -la webclaw-*
+          ls -la tap-*
           gh release create ${{ github.ref_name }} \
-            --title "WebClaw ${{ github.ref_name }}" \
+            --title "Tap ${{ github.ref_name }}" \
             --generate-notes \
-            webclaw-*.tar.gz \
-            webclaw-*-pc-windows-msvc.zip \
-            webclaw-extension.zip
+            tap-*.tar.gz \
+            tap-*-pc-windows-msvc.zip \
+            tap-extension.zip
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

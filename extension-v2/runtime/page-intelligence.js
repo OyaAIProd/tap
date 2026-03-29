@@ -1,8 +1,8 @@
 /**
- * Page Intelligence — one-shot page analysis for webclaw forging.
+ * Page Intelligence — one-shot page analysis for tap forging.
  *
  * Replaces 5-8 MCP round-trips (screenshot + ax_tree + global_names + api_log + page_info)
- * with a single call that returns everything an agent needs to decide strategy and write a webclaw.
+ * with a single call that returns everything an agent needs to decide strategy and write a tap.
  */
 
 /**

@@ -1,9 +1,9 @@
 /**
  * Constraint: page API contract
- * Classification: safety / what — missing method = claw runtime crash
+ * Classification: safety / what — missing method = tap runtime crash
  *
- * Why: page API is the only interface between .claw.js and the browser.
- * If a method is missing or misnamed, claws fail silently.
+ * Why: page API is the only interface between .tap.js and the browser.
+ * If a method is missing or misnamed, taps fail silently.
  *
  * Run: node extension-v2/test/page-api.test.mjs
  */
@@ -11,7 +11,7 @@
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
 
-const REQUIRED_METHODS = ['nav', 'wait', 'waitFor', 'click', 'type', 'upload', 'eval', 'fetch', 'screenshot', 'cookies', 'claw']
+const REQUIRED_METHODS = ['nav', 'wait', 'waitFor', 'click', 'type', 'upload', 'eval', 'fetch', 'screenshot', 'cookies', 'tap']
 
 let passed = 0
 let failed = 0

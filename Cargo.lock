@@ -538,6 +538,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "tap"
+version = "0.2.0"
+dependencies = [
+ "base64",
+ "clap",
+ "clap_complete",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+]
+
+[[package]]
 name = "thiserror"
 version = "2.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -650,20 +664,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9517f9239f02c069db75e65f174b3da828fe5f5b945c4dd26bd25d89c03ebcf5"
 dependencies = [
  "wit-bindgen",
-]
-
-[[package]]
-name = "webclaw"
-version = "0.2.0"
-dependencies = [
- "base64",
- "clap",
- "clap_complete",
- "futures-util",
- "serde",
- "serde_json",
- "tokio",
- "tokio-tungstenite",
 ]
 
 [[package]]

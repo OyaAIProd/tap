@@ -1,7 +1,7 @@
 {
   "mcpServers": {
-    "webclaw": {
-      "command": "webclaw",
+    "tap": {
+      "command": "tap",
       "args": ["mcp"]
     }
   }

@@ -62,11 +62,11 @@ test('requireTab accepts params and extracts tabId', () => {
 
 test('all requireTab() calls pass params', () => {
   // Why: requireTab() without params always returns activeTabId — defeats multi-tab
-  const handleClawSection = BG_SRC.substring(
-    BG_SRC.indexOf('async function handleClawCommand'),
+  const handleTapSection = BG_SRC.substring(
+    BG_SRC.indexOf('async function handleTapCommand'),
     BG_SRC.indexOf('// --- CDP Click Helper ---')
   )
-  const bareCallCount = (handleClawSection.match(/requireTab\(\)/g) || []).length
+  const bareCallCount = (handleTapSection.match(/requireTab\(\)/g) || []).length
   assert.equal(bareCallCount, 0,
     `found ${bareCallCount} bare requireTab() calls without params — must pass params for tabId routing`)
 })
@@ -139,13 +139,13 @@ test('withDebugger callbacks do not reference activeTabId', () => {
 test('chrome.debugger.sendCommand never uses activeTabId directly', () => {
   // Why: debugger commands with activeTabId go to wrong tab during multi-tab execution
   // Exception: ensureDebugger which manages the session itself
-  const handleClawSection = BG_SRC.substring(
-    BG_SRC.indexOf('async function handleClawCommand'),
+  const handleTapSection = BG_SRC.substring(
+    BG_SRC.indexOf('async function handleTapCommand'),
     BG_SRC.indexOf('// --- CDP Click Helper ---')
   )
-  const badRefs = (handleClawSection.match(/sendCommand\(\s*\{\s*tabId:\s*activeTabId/g) || [])
+  const badRefs = (handleTapSection.match(/sendCommand\(\s*\{\s*tabId:\s*activeTabId/g) || [])
   assert.equal(badRefs.length, 0,
-    `found ${badRefs.length} chrome.debugger.sendCommand using activeTabId in handleClawCommand`)
+    `found ${badRefs.length} chrome.debugger.sendCommand using activeTabId in handleTapCommand`)
 })
 
 // ═══════════════════════════════════════════════════════════
@@ -221,12 +221,12 @@ test('Bridge.attach still sets activeTabId', () => {
     'Bridge.attach must set activeTabId for backward compatibility')
 })
 
-test('executor runClaw accepts tabId parameter', () => {
-  // Why: claw execution must support multi-tab from executor level
-  assert(EXECUTOR_SRC.includes('export async function runClaw(site, name, userArgs'),
-    'runClaw must be exported')
+test('executor runTap accepts tabId parameter', () => {
+  // Why: tap execution must support multi-tab from executor level
+  assert(EXECUTOR_SRC.includes('export async function runTap(site, name, userArgs'),
+    'runTap must be exported')
   assert(EXECUTOR_SRC.includes('tabId'),
-    'runClaw must accept tabId parameter')
+    'runTap must accept tabId parameter')
 })
 
 // ═══════════════════════════════════════════════════════════
@@ -240,13 +240,13 @@ console.log('\n  ── Rule 7: Tab Management Tools ──\n')
 const MCP_SRC = readFileSync(new URL('../../src/mcp.rs', import.meta.url), 'utf-8')
 
 test('MCP exposes tab_list tool', () => {
-  // Why: agent must see which tabs are open to decide where to run claws
+  // Why: agent must see which tabs are open to decide where to run taps
   assert(MCP_SRC.includes('"tab_list"'),
     'MCP must expose a tab_list tool')
 })
 
 test('MCP exposes tab_new tool', () => {
-  // Why: agent must be able to create tabs to run claws in parallel on different sites
+  // Why: agent must be able to create tabs to run taps in parallel on different sites
   assert(MCP_SRC.includes('"tab_new"'),
     'MCP must expose a tab_new tool')
 })
@@ -257,29 +257,29 @@ test('MCP exposes tab_close tool', () => {
     'MCP must expose a tab_close tool')
 })
 
-test('extension handles WebClaw.tab_list command', () => {
+test('extension handles Tap.tab_list command', () => {
   // Why: MCP tool relays to extension — extension must handle it
-  assert(BG_SRC.includes("'WebClaw.tab_list'"),
-    'background.js must handle WebClaw.tab_list command')
+  assert(BG_SRC.includes("'Tap.tab_list'"),
+    'background.js must handle Tap.tab_list command')
 })
 
-test('extension handles WebClaw.tab_new command', () => {
+test('extension handles Tap.tab_new command', () => {
   // Why: MCP tool relays to extension — extension must handle it
-  assert(BG_SRC.includes("'WebClaw.tab_new'"),
-    'background.js must handle WebClaw.tab_new command')
+  assert(BG_SRC.includes("'Tap.tab_new'"),
+    'background.js must handle Tap.tab_new command')
 })
 
-test('extension handles WebClaw.tab_close command', () => {
+test('extension handles Tap.tab_close command', () => {
   // Why: MCP tool relays to extension — extension must handle it
-  assert(BG_SRC.includes("'WebClaw.tab_close'"),
-    'background.js must handle WebClaw.tab_close command')
+  assert(BG_SRC.includes("'Tap.tab_close'"),
+    'background.js must handle Tap.tab_close command')
 })
 
 test('tab_new returns tabId in response', () => {
   // Why: agent needs the tabId to pass to subsequent commands
   const tabNewSection = BG_SRC.substring(
-    BG_SRC.indexOf("'WebClaw.tab_new'"),
-    Math.min(BG_SRC.indexOf("'WebClaw.tab_new'") + 500, BG_SRC.length)
+    BG_SRC.indexOf("'Tap.tab_new'"),
+    Math.min(BG_SRC.indexOf("'Tap.tab_new'") + 500, BG_SRC.length)
   )
   assert(tabNewSection.includes('tabId') && tabNewSection.includes('tab.id'),
     'tab_new must return tabId so agent can use it for subsequent commands')

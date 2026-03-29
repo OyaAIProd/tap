@@ -1,28 +1,28 @@
-# WebClaw
+# Tap
 
-> **Make every website programmable by AI.**
+> **Make every interface programmable by AI.**
 
-Websites are closing their APIs. AI agents need them more than ever.
+Interfaces are closing their APIs. AI agents need them more than ever.
 
-WebClaw is a Chrome extension + MCP server. AI agents forge `.webclaw.js` scripts that extract data from any website — deterministically, with zero AI at runtime.
+Tap is an extension + MCP server. AI agents forge `.tap.js` scripts that extract data from any interface — deterministically, with zero AI at runtime.
 
 ```
-page_intelligence → forge_verify → forge_save → run_adapter
+page_intelligence → forge_verify → forge_save → run_tap
      (1 call)        (1 call)       (1 call)      (forever)
 ```
 
-One agent forges a webclaw, every agent benefits.
+One agent forges a tap, every agent benefits.
 
 ## Install
 
 ```bash
 # One-line install (macOS / Linux)
-curl -fsSL https://raw.githubusercontent.com/LeonTing1010/webclaw/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/LeonTing1010/tap/master/install.sh | sh
 ```
 
 Then install the Chrome extension:
 
-1. Download `webclaw-extension.zip` from [Releases](https://github.com/LeonTing1010/webclaw/releases/latest)
+1. Download `tap-extension.zip` from [Releases](https://github.com/LeonTing1010/tap/releases/latest)
 2. Unzip, open `chrome://extensions/`, enable Developer mode
 3. Click "Load unpacked" → select the unzipped folder
 
@@ -31,8 +31,8 @@ Configure for AI agents (Claude Code, etc.):
 ```json
 {
   "mcpServers": {
-    "webclaw": {
-      "command": "webclaw",
+    "tap": {
+      "command": "tap",
       "args": ["mcp"]
     }
   }
@@ -44,13 +44,13 @@ Configure for AI agents (Claude Code, etc.):
 
 ```bash
 # From source
-cargo install --git https://github.com/LeonTing1010/webclaw
+cargo install --git https://github.com/LeonTing1010/tap
 
 # Or build locally
-git clone https://github.com/LeonTing1010/webclaw && cd webclaw
+git clone https://github.com/LeonTing1010/tap && cd tap
 cargo install --path .
 
-# Windows — download webclaw-x86_64-pc-windows-msvc.zip from Releases
+# Windows — download tap-x86_64-pc-windows-msvc.zip from Releases
 ```
 
 </details>
@@ -60,28 +60,28 @@ cargo install --path .
 ### From any webpage console
 
 ```js
-const data = await webclaw("github/trending", {limit: 5})
+const data = await tap("github/trending", {limit: 5})
 console.table(data.rows)
 
-await webclaw.list()  // see all available webclaws
+await tap.list()  // see all available taps
 ```
 
 ### From Chrome address bar
 
-Type `webclaw` then Tab:
+Type `tap` then Tab:
 
 ```
-webclaw github/trending
-webclaw weibo/hot
-webclaw xiaohongshu/search?keyword=美食
+tap github/trending
+tap weibo/hot
+tap xiaohongshu/search?keyword=美食
 ```
 
 ### From CLI
 
 ```bash
-webclaw list                        # See all 45 webclaws
-webclaw github trending --limit 5   # Run via extension bridge
-webclaw check                       # Health check all webclaws
+tap list                        # See all 45 taps
+tap github trending --limit 5   # Run via extension bridge
+tap check                       # Health check all taps
 ```
 
 ### From AI agents (MCP)
@@ -89,13 +89,13 @@ webclaw check                       # Health check all webclaws
 ```
 > Use page_intelligence to analyze https://example.com
 > Then forge_verify to test the extraction logic
-> Then forge_save to persist the new webclaw
+> Then forge_save to persist the new tap
 ```
 
-## 45 Webclaws
+## 45 Taps
 
-| Site | Webclaws |
-|------|----------|
+| Site | Taps |
+|------|------|
 | GitHub | trending |
 | Hacker News | hot |
 | Reddit | hot |
@@ -133,7 +133,7 @@ webclaw check                       # Health check all webclaws
 | Jimeng | generate, history |
 | Telegraph | publish |
 
-## .webclaw.js Format
+## .tap.js Format
 
 ```js
 export default {
@@ -177,7 +177,7 @@ export default {
 | `page.click(target)` | debugger | CDP native click |
 | `page.type(sel, text)` | debugger | CDP native keyboard |
 | `page.upload(sel, files)` | debugger | File upload via CDP |
-| `page.webclaw(site, name)` | — | Run another webclaw |
+| `page.tap(site, name)` | — | Run another tap |
 
 Scripting mode = undetectable. Debugger mode = millisecond attach/detach.
 
@@ -186,7 +186,7 @@ Scripting mode = undetectable. Debugger mode = millisecond attach/detach.
 ```
 Claude Code ←→ MCP (stdin/stdout) ←→ Bridge (ws://9333) ←→ Chrome Extension
                  Rust binary              WebSocket            background.js
-                 ~2,300 lines             auto-reconnect       page API + webclaws
+                 ~2,300 lines             auto-reconnect       page API + taps
 ```
 
 Rust binary = thin MCP bridge (6 dependencies). Chrome extension = sole runtime. No direct CDP.
@@ -196,7 +196,7 @@ Rust binary = thin MCP bridge (6 dependencies). Chrome extension = sole runtime.
 | Category | Tools |
 |----------|-------|
 | **Forge** | `page_intelligence`, `forge_verify`, `forge_save` |
-| **Run** | `run_adapter`, `list_adapters` |
+| **Run** | `run_tap`, `list_taps` |
 | **See** | `screenshot`, `ax_tree`, `read_dom`, `page_info` |
 | **Probe** | `find`, `element_info`, `evaluate`, `cookies` |
 | **Act** | `click`, `type_text`, `navigate`, `hover`, `scroll`, `press_key` |
@@ -211,8 +211,8 @@ cargo test               # 39 tests
 cargo clippy             # Lint (0 warnings)
 
 # Extension tests
-node extension-v2/test/webclaw-format.test.mjs   # 447 constraints
-node extension-v2/test/page-api.test.mjs          # 16 constraints
+node extension-v2/test/tap-format.test.mjs   # 447 constraints
+node extension-v2/test/page-api.test.mjs     # 16 constraints
 ```
 
 ## License

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "WebClaw",
+  "name": "Tap",
   "version": "0.2.0",
-  "description": "Make every website programmable by AI — webclaw:// protocol for the web",
+  "description": "Make every website programmable by AI — tap:// protocol for the web",
   "permissions": [
     "debugger",
     "activeTab",
@@ -21,7 +21,7 @@
     "type": "module"
   },
   "omnibox": {
-    "keyword": "webclaw"
+    "keyword": "tap"
   },
   "action": {
     "default_popup": "popup.html",
@@ -47,7 +47,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["results.html", "webclaw-page-api.js"],
+      "resources": ["results.html", "tap-page-api.js"],
       "matches": ["<all_urls>"]
     }
   ],

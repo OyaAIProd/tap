@@ -26,7 +26,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Validate .webclaw.js format
-        run: node extension-v2/test/webclaw-format.test.mjs
+      - name: Validate .tap.js format
+        run: node extension-v2/test/tap-format.test.mjs
       - name: Validate page API contract
         run: node extension-v2/test/page-api.test.mjs

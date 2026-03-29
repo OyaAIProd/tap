@@ -1,47 +1,47 @@
 /**
- * WebClaw executor — loads .claw.js files and runs them.
+ * Tap executor — loads .tap.js files and runs them.
  *
  * The executor's only job:
- *   1. Load a .claw.js module
+ *   1. Load a .tap.js module
  *   2. Create a page API for the active tab
  *   3. Call run(page, args) and return structured data
  */
 
 import { createPageAPI } from './page-api.js'
 
-/** Registry of loaded claw modules, keyed by "site/name" */
-const clawRegistry = new Map()
+/** Registry of loaded tap modules, keyed by "site/name" */
+const tapRegistry = new Map()
 
 /**
- * Register a claw module in the registry.
- * Called during extension startup to load all bundled claws.
+ * Register a tap module in the registry.
+ * Called during extension startup to load all bundled taps.
  */
-export function registerClaw(mod) {
+export function registerTap(mod) {
   const key = `${mod.site}/${mod.name}`
-  clawRegistry.set(key, mod)
+  tapRegistry.set(key, mod)
 }
 
-/** List all registered claws. */
-export function listClaws() {
-  return Array.from(clawRegistry.values()).map(({ site, name, description, columns, args }) => ({
+/** List all registered taps. */
+export function listTaps() {
+  return Array.from(tapRegistry.values()).map(({ site, name, description, columns, args }) => ({
     site, name, description: description || '', columns, args: args || {}
   }))
 }
 
-/** Get a claw module by site/name. */
-export function getClaw(site, name) {
-  return clawRegistry.get(`${site}/${name}`)
+/** Get a tap module by site/name. */
+export function getTap(site, name) {
+  return tapRegistry.get(`${site}/${name}`)
 }
 
 /**
- * Execute a claw.
+ * Execute a tap.
  *
  * Supports two formats:
- *   - run(page, args): full control (legacy + interactive claws)
+ *   - run(page, args): full control (legacy + interactive taps)
  *   - extract(args?): minimal — runtime handles nav/wait/limit
  *
  * @param {string} site - Site identifier
- * @param {string} name - Claw name
+ * @param {string} name - Tap name
  * @param {object} userArgs - User-provided arguments
  * @param {number} tabId - Chrome tab ID to operate on
  * @param {object} deps - Injected dependencies from background.js
@@ -49,12 +49,12 @@ export function getClaw(site, name) {
  * @param {function} deps.withDebugger - Debugger wrapper function
  * @returns {{ columns: string[], rows: object[] }}
  */
-export async function runClaw(site, name, userArgs = {}, tabId, deps = {}) {
+export async function runTap(site, name, userArgs = {}, tabId, deps = {}) {
   const t0 = Date.now()
-  const mod = getClaw(site, name)
-  if (!mod) throw new Error(`claw not found: ${site}/${name}`)
+  const mod = getTap(site, name)
+  if (!mod) throw new Error(`tap not found: ${site}/${name}`)
 
-  // For extract-format claws, inject default limit arg
+  // For extract-format taps, inject default limit arg
   const argDefs = { ...(mod.args || {}) }
   if (mod.extract && !mod.run && !argDefs.limit) {
     argDefs.limit = { type: 'int', default: 20 }
@@ -73,9 +73,9 @@ export async function runClaw(site, name, userArgs = {}, tabId, deps = {}) {
   // Create page API for this tab, injecting background.js debugger functions
   const page = createPageAPI(tabId, deps)
 
-  // Wire up page.claw() for composition
-  page.claw = async (s, n, a = {}) => {
-    const result = await runClaw(s, n, a, tabId, deps)
+  // Wire up page.tap() for composition
+  page.tap = async (s, n, a = {}) => {
+    const result = await runTap(s, n, a, tabId, deps)
     return result.rows
   }
 
@@ -83,7 +83,7 @@ export async function runClaw(site, name, userArgs = {}, tabId, deps = {}) {
   let timing = {}
 
   if (mod.run) {
-    // Legacy format: claw controls everything
+    // Legacy format: tap controls everything
     const tRun = Date.now()
     rows = await mod.run(page, args)
     timing = { run_ms: Date.now() - tRun, total_ms: Date.now() - t0 }
@@ -113,12 +113,12 @@ export async function runClaw(site, name, userArgs = {}, tabId, deps = {}) {
       total_ms: Date.now() - t0
     }
   } else {
-    throw new Error(`claw ${site}/${name} must have run() or extract()`)
+    throw new Error(`tap ${site}/${name} must have run() or extract()`)
   }
 
   // Validate output
   if (!Array.isArray(rows)) {
-    throw new Error(`claw ${site}/${name} must return an array, got ${typeof rows}`)
+    throw new Error(`tap ${site}/${name} must return an array, got ${typeof rows}`)
   }
 
   // Normalize: all values to trimmed strings
@@ -222,12 +222,12 @@ function coerceArg(value, type) {
 }
 
 /**
- * Parse a webclaw:// URL into { site, name, args }.
- * Format: webclaw://site/name?arg1=val1&arg2=val2
+ * Parse a tap:// URL into { site, name, args }.
+ * Format: tap://site/name?arg1=val1&arg2=val2
  */
-export function parseClawURL(url) {
-  const match = url.match(/^webclaw:\/\/([^/]+)\/([^?]+)(?:\?(.*))?$/)
-  if (!match) throw new Error(`invalid webclaw URL: ${url}`)
+export function parseTapURL(url) {
+  const match = url.match(/^tap:\/\/([^/]+)\/([^?]+)(?:\?(.*))?$/)
+  if (!match) throw new Error(`invalid tap URL: ${url}`)
 
   const [, site, name, queryString] = match
   const args = {}

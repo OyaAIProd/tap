@@ -1,5 +1,5 @@
 #![recursion_limit = "256"]
-mod adapter;
+mod tap;
 mod bridge;
 mod cdp;
 mod health;
@@ -12,7 +12,7 @@ use serde_json::Value;
 
 #[derive(Parser)]
 #[command(
-    name = "webclaw",
+    name = "tap",
     about = "Make every website programmable by AI",
     version
 )]
@@ -28,7 +28,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// List available webclaws (website API specs)
+    /// List available taps (website API specs)
     List,
     /// Generate shell completions
     Completions {
@@ -36,16 +36,16 @@ enum Command {
         shell: Shell,
     },
 
-    /// Health check all webclaws via extension bridge
+    /// Health check all taps via extension bridge
     Check,
 
     // ---- MCP SERVER (primary interface for AI agents) ----
     /// Run as MCP server (stdin/stdout JSON-RPC) for AI agent integration
     Mcp,
 
-    /// Run a webclaw via extension bridge (webclaw <site> <name> [--arg value ...])
+    /// Run a tap via extension bridge (tap <site> <name> [--arg value ...])
     #[command(external_subcommand)]
-    Adapter(Vec<String>),
+    Tap(Vec<String>),
 }
 
 #[tokio::main]
@@ -64,16 +64,16 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             mcp::serve().await?;
         }
         Command::List => {
-            let dirs = adapter::adapter_base_dirs();
+            let dirs = tap::tap_dirs();
             let refs: Vec<&str> = dirs.iter().map(|s| s.as_str()).collect();
-            let adapters = adapter::list_adapters(&refs);
-            if adapters.is_empty() {
+            let taps = tap::list_taps(&refs);
+            if taps.is_empty() {
                 println!(
-                    "No webclaws found. Add .webclaw.js files to extension-v2/webclaws/ or ~/.webclaw/webclaws/"
+                    "No taps found. Add .tap.js files to extension-v2/taps/ or ~/.tap/taps/"
                 );
             } else {
                 let columns = vec!["site".into(), "name".into(), "description".into()];
-                let rows: Vec<std::collections::HashMap<String, String>> = adapters
+                let rows: Vec<std::collections::HashMap<String, String>> = taps
                     .iter()
                     .map(|a| {
                         let mut row = std::collections::HashMap::new();
@@ -90,19 +90,19 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             // Connect to extension bridge
             let client = bridge::try_extension_bridge().await?;
 
-            // Get webclaw list from extension
+            // Get tap list from extension
             let list_result = client
-                .send("Webclaw.list", Some(serde_json::json!({})))
+                .send("Tap.list", Some(serde_json::json!({})))
                 .await?;
 
-            let claws = list_result
-                .get("claws")
+            let taps = list_result
+                .get("taps")
                 .and_then(|c| c.as_array())
                 .cloned()
                 .unwrap_or_default();
 
-            if claws.is_empty() {
-                println!("No webclaws registered in extension.");
+            if taps.is_empty() {
+                println!("No taps registered in extension.");
                 return Ok(());
             }
 
@@ -111,15 +111,15 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let mut broken = 0;
             let mut errors = 0;
 
-            for claw in &claws {
-                let site = claw["site"].as_str().unwrap_or("?");
-                let name = claw["name"].as_str().unwrap_or("?");
-                let adapter_name = format!("{}/{}", site, name);
+            for tap in &taps {
+                let site = tap["site"].as_str().unwrap_or("?");
+                let name = tap["name"].as_str().unwrap_or("?");
+                let tap_name = format!("{}/{}", site, name);
 
-                // Run the webclaw
+                // Run the tap
                 let run_result = client
                     .send(
-                        "Webclaw.run",
+                        "Tap.run",
                         Some(serde_json::json!({
                             "site": site,
                             "name": name,
@@ -130,12 +130,12 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
                 match run_result {
                     Err(e) => {
-                        println!("{} — Error: {}", adapter_name, e);
+                        println!("{} — Error: {}", tap_name, e);
                         errors += 1;
                     }
                     Ok(result) => {
                         if let Some(err) = result.get("error") {
-                            println!("{} — Error: {}", adapter_name, err);
+                            println!("{} — Error: {}", tap_name, err);
                             errors += 1;
                             continue;
                         }
@@ -149,10 +149,10 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         // Try to get health contract from result
                         let health_contract = result
                             .get("health")
-                            .and_then(adapter::parse_health_contract);
+                            .and_then(tap::parse_health_contract);
 
                         if let Some(contract) = health_contract {
-                            let report = health::validate(&adapter_name, &contract, &rows);
+                            let report = health::validate(&tap_name, &contract, &rows);
                             let status_str = match report.status {
                                 health::HealthStatus::Healthy => {
                                     healthy += 1;
@@ -174,11 +174,11 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                                 .map(|c| c.message.as_str())
                                 .collect();
                             if failures.is_empty() {
-                                println!("{} — {} ({} rows)", adapter_name, status_str, rows.len());
+                                println!("{} — {} ({} rows)", tap_name, status_str, rows.len());
                             } else {
                                 println!(
                                     "{} — {} ({})",
-                                    adapter_name,
+                                    tap_name,
                                     status_str,
                                     failures.join("; ")
                                 );
@@ -188,7 +188,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                             healthy += 1;
                             println!(
                                 "{} — OK ({} rows, no health contract)",
-                                adapter_name,
+                                tap_name,
                                 rows.len()
                             );
                         }
@@ -197,8 +197,8 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             }
 
             println!(
-                "\n{} webclaws: {} healthy, {} degraded, {} broken, {} errors",
-                claws.len(),
+                "\n{} taps: {} healthy, {} degraded, {} broken, {} errors",
+                taps.len(),
                 healthy,
                 degraded,
                 broken,
@@ -214,23 +214,23 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::Completions { shell } => {
             let mut cmd = Cli::command();
-            generate(shell, &mut cmd, "webclaw", &mut std::io::stdout());
+            generate(shell, &mut cmd, "tap", &mut std::io::stdout());
         }
 
-        Command::Adapter(raw_args) => {
+        Command::Tap(raw_args) => {
             if raw_args.len() < 2 {
-                return Err("usage: webclaw <site> <name> [--arg value ...]".into());
+                return Err("usage: tap <site> <name> [--arg value ...]".into());
             }
 
             let site = &raw_args[0];
             let name = &raw_args[1];
-            let args = parse_adapter_args(&raw_args[2..]);
+            let args = parse_tap_args(&raw_args[2..]);
 
             // Run via Chrome extension bridge
             let client = bridge::try_extension_bridge().await?;
             let result = client
                 .send(
-                    "Webclaw.run",
+                    "Tap.run",
                     Some(serde_json::json!({
                         "site": site,
                         "name": name,
@@ -246,7 +246,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Parse --key value pairs from raw CLI args into a HashMap.
-fn parse_adapter_args(raw: &[String]) -> std::collections::HashMap<String, Value> {
+fn parse_tap_args(raw: &[String]) -> std::collections::HashMap<String, Value> {
     let mut args = std::collections::HashMap::new();
     let mut i = 0;
     while i < raw.len() {
@@ -281,26 +281,26 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn parse_adapter_args_numeric() {
+    fn parse_tap_args_numeric() {
         let raw: Vec<String> = vec!["--limit", "5"].into_iter().map(String::from).collect();
-        let args = parse_adapter_args(&raw);
+        let args = parse_tap_args(&raw);
         assert_eq!(args.get("limit"), Some(&json!(5)));
     }
 
     #[test]
-    fn parse_adapter_args_string() {
+    fn parse_tap_args_string() {
         let raw: Vec<String> = vec!["--query", "rust"]
             .into_iter()
             .map(String::from)
             .collect();
-        let args = parse_adapter_args(&raw);
+        let args = parse_tap_args(&raw);
         assert_eq!(args.get("query"), Some(&json!("rust")));
     }
 
     #[test]
-    fn parse_adapter_args_flag() {
+    fn parse_tap_args_flag() {
         let raw: Vec<String> = vec!["--verbose"].into_iter().map(String::from).collect();
-        let args = parse_adapter_args(&raw);
+        let args = parse_tap_args(&raw);
         assert_eq!(args.get("verbose"), Some(&json!(true)));
     }
 }

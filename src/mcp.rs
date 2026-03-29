@@ -1,7 +1,7 @@
 //! MCP (Model Context Protocol) server implementation.
 //!
-//! Exposes webclaw's forge toolkit as MCP tools over stdin/stdout JSON-RPC.
-//! This lets AI agents (Claude Code, etc.) use webclaw's scalpels natively.
+//! Exposes tap's forge toolkit as MCP tools over stdin/stdout JSON-RPC.
+//! This lets AI agents (Claude Code, etc.) use tap's tools natively.
 
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -71,7 +71,7 @@ pub async fn serve() -> Result<(), Box<dyn std::error::Error>> {
                                     "jsonrpc": "2.0",
                                     "id": id,
                                     "result": {
-                                        "content": [{"type": "text", "text": "error: Chrome extension not connected. Install Webclaw extension and reload it."}],
+                                        "content": [{"type": "text", "text": "error: Chrome extension not connected. Install Tap extension and reload it."}],
                                         "isError": true
                                     }
                                 });
@@ -96,25 +96,25 @@ pub async fn serve() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Regenerate extension-v2/webclaws/manifest.json from the directory contents.
-fn update_claws_manifest() -> Result<(), Box<dyn std::error::Error>> {
-    let claws_dir = std::path::Path::new("extension-v2/webclaws");
+/// Regenerate extension-v2/taps/manifest.json from the directory contents.
+fn update_taps_manifest() -> Result<(), Box<dyn std::error::Error>> {
+    let taps_dir = std::path::Path::new("extension-v2/taps");
     let mut files = Vec::new();
-    for site_entry in std::fs::read_dir(claws_dir)?.flatten() {
+    for site_entry in std::fs::read_dir(taps_dir)?.flatten() {
         if !site_entry.path().is_dir() {
             continue;
         }
         let site = site_entry.file_name().to_string_lossy().to_string();
         for file_entry in std::fs::read_dir(site_entry.path())?.flatten() {
             let name = file_entry.file_name().to_string_lossy().to_string();
-            if name.ends_with(".webclaw.js") {
+            if name.ends_with(".tap.js") {
                 files.push(format!("{}/{}", site, name));
             }
         }
     }
     files.sort();
     let json = serde_json::to_string_pretty(&files)?;
-    std::fs::write(claws_dir.join("manifest.json"), format!("{}\n", json))?;
+    std::fs::write(taps_dir.join("manifest.json"), format!("{}\n", json))?;
     Ok(())
 }
 
@@ -139,7 +139,7 @@ fn handle_initialize(id: &Value) -> Value {
                 "tools": {}
             },
             "serverInfo": {
-                "name": "webclaw",
+                "name": "tap",
                 "version": env!("CARGO_PKG_VERSION")
             }
         }
@@ -164,7 +164,7 @@ fn tools_schema() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string", "description": "Output file path", "default": "/tmp/webclaw-screenshot.jpg" },
+                    "path": { "type": "string", "description": "Output file path", "default": "/tmp/tap-screenshot.jpg" },
                     "format": { "type": "string", "enum": ["jpeg", "png"], "description": "Image format", "default": "jpeg" },
                     "quality": { "type": "integer", "description": "JPEG quality 1-100 (lower = smaller file)", "default": 50 },
                     "grayscale": { "type": "boolean", "description": "Strip color for smaller file size", "default": true }
@@ -440,7 +440,7 @@ fn tools_schema() -> Value {
         },
         {
             "name": "page_intelligence",
-            "description": "One-shot page analysis for webclaw forging. Returns framework detection, SSR state (with data samples), API endpoint hints, interactive elements, auth state, and ranked strategy recommendations — all in a single call. Replaces 5-8 separate tool calls (screenshot + ax_tree + global_names + api_log + page_info). Call this FIRST when forging a new webclaw.",
+            "description": "One-shot page analysis for tap forging. Returns framework detection, SSR state (with data samples), API endpoint hints, interactive elements, auth state, and ranked strategy recommendations — all in a single call. Replaces 5-8 separate tool calls (screenshot + ax_tree + global_names + api_log + page_info). Call this FIRST when forging a new tap.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -449,19 +449,19 @@ fn tools_schema() -> Value {
             }
         },
         {
-            "name": "list_adapters",
-            "description": "List all available webclaws. Returns site, name, and description for each. Use this to discover what websites Webclaw can access.",
+            "name": "list_taps",
+            "description": "List all available taps. Returns site, name, and description for each. Use this to discover what websites Tap can access.",
             "inputSchema": { "type": "object", "properties": {} }
         },
         {
-            "name": "run_adapter",
-            "description": "Run a webclaw and return structured data (JSON rows). This is the primary way to get data from websites. Example: run_adapter({site: 'weibo', name: 'hot'}) returns trending topics.",
+            "name": "run_tap",
+            "description": "Run a tap and return structured data (JSON rows). This is the primary way to get data from websites. Example: run_tap({site: 'weibo', name: 'hot'}) returns trending topics.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "site": { "type": "string", "description": "Site name (e.g. 'weibo', 'bilibili')" },
-                    "name": { "type": "string", "description": "Adapter name (e.g. 'hot', 'trending')" },
-                    "args": { "type": "object", "description": "Adapter arguments (e.g. {limit: 10})", "additionalProperties": true }
+                    "name": { "type": "string", "description": "Tap name (e.g. 'hot', 'trending')" },
+                    "args": { "type": "object", "description": "Tap arguments (e.g. {limit: 10})", "additionalProperties": true }
                 },
                 "required": ["site", "name"]
             }
@@ -533,16 +533,16 @@ fn tools_schema() -> Value {
                 }
             }
         },
-        // ===== FORGE — Webclaw Creation Pipeline =====
+        // ===== FORGE — Tap Creation Pipeline =====
         {
             "name": "forge_verify",
-            "description": "One-shot test of webclaw extraction logic. Navigates to URL, waits, evaluates a JS expression in page context, and validates the result shape against expected columns. Combines navigate + wait + evaluate + validate into one call. Use this during forging to iterate quickly on the data extraction logic before saving.",
+            "description": "One-shot test of tap extraction logic. Navigates to URL, waits, evaluates a JS expression in page context, and validates the result shape against expected columns. Combines navigate + wait + evaluate + validate into one call. Use this during forging to iterate quickly on the data extraction logic before saving.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "url": { "type": "string", "description": "URL to navigate to" },
                     "wait_ms": { "type": "integer", "description": "Milliseconds to wait after navigation (default: 2000)", "default": 2000 },
-                    "expression": { "type": "string", "description": "JS expression that returns an array of objects (the webclaw's data extraction logic)" },
+                    "expression": { "type": "string", "description": "JS expression that returns an array of objects (the tap's data extraction logic)" },
                     "columns": { "type": "array", "items": { "type": "string" }, "description": "Expected column names — used to validate the result shape" }
                 },
                 "required": ["url", "expression"]
@@ -550,13 +550,13 @@ fn tools_schema() -> Value {
         },
         {
             "name": "forge_save",
-            "description": "Save a .webclaw.js file to disk. Writes to ~/.webclaw/webclaws/{site}/{name}.webclaw.js. Use after verifying the webclaw works with forge_verify.",
+            "description": "Save a .tap.js file to disk. Writes to ~/.tap/taps/{site}/{name}.tap.js. Use after verifying the tap works with forge_verify.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "site": { "type": "string", "description": "Site name (e.g. 'weibo')" },
-                    "name": { "type": "string", "description": "Webclaw name (e.g. 'hot')" },
-                    "code": { "type": "string", "description": "Full .webclaw.js source code" }
+                    "name": { "type": "string", "description": "Tap name (e.g. 'hot')" },
+                    "code": { "type": "string", "description": "Full .tap.js source code" }
                 },
                 "required": ["site", "name", "code"]
             }
@@ -686,7 +686,7 @@ async fn handle_tool_call(id: &Value, params: &Value, client: &BridgeClient) -> 
     let toasts = if is_action {
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         client
-            .send("WebClaw.collect_toasts", Some(json!({})))
+            .send("Tap.collect_toasts", Some(json!({})))
             .await
             .ok()
             .and_then(|v| v.as_array().cloned())
@@ -736,7 +736,7 @@ async fn handle_tool_call(id: &Value, params: &Value, client: &BridgeClient) -> 
 /// Route an MCP tool call to the extension bridge.
 ///
 /// Most tools relay directly as CDP commands via `client.send()`.
-/// A few (forge_verify, forge_save, list_adapters) have local logic.
+/// A few (forge_verify, forge_save, list_taps) have local logic.
 async fn execute_tool(
     name: &str,
     args: &Value,
@@ -758,26 +758,26 @@ async fn execute_tool(
                 pi_params["tabId"] = tid;
             }
             client
-                .send("WebClaw.pageIntelligence", Some(pi_params))
+                .send("Tap.pageIntelligence", Some(pi_params))
                 .await
         }
-        "list_adapters" => client.send("WebClaw.list", Some(json!({}))).await,
-        "run_adapter" => {
+        "list_taps" => client.send("Tap.list", Some(json!({}))).await,
+        "run_tap" => {
             let site = args["site"].as_str().ok_or("missing site")?;
             let name_arg = args["name"].as_str().ok_or("missing name")?;
-            let adapter_args = args.get("args").cloned().unwrap_or(json!({}));
-            let mut run_params = json!({"site": site, "name": name_arg, "args": adapter_args});
+            let tap_args = args.get("args").cloned().unwrap_or(json!({}));
+            let mut run_params = json!({"site": site, "name": name_arg, "args": tap_args});
             if let Some(tid) = args.get("tabId") {
                 run_params["tabId"] = tid.clone();
             }
             let mut result = client
-                .send("WebClaw.run", Some(run_params))
+                .send("Tap.run", Some(run_params))
                 .await?;
             // Health validation
             if let Some(rows) = result.get("rows").and_then(|r| r.as_array()) {
                 if let Some(contract) = result
                     .get("health")
-                    .and_then(crate::adapter::parse_health_contract)
+                    .and_then(crate::tap::parse_health_contract)
                 {
                     let report =
                         crate::health::validate(&format!("{}/{}", site, name_arg), &contract, rows);
@@ -855,14 +855,14 @@ async fn execute_tool(
         }
         "forge_save" => {
             let site = args["site"].as_str().ok_or("missing site")?;
-            let claw_name = args["name"].as_str().ok_or("missing name")?;
+            let tap_name = args["name"].as_str().ok_or("missing name")?;
             let code = args["code"].as_str().ok_or("missing code")?;
 
-            // Save to extension-v2/webclaws/ (dev) and ~/.webclaw/webclaws/ (user)
+            // Save to extension-v2/taps/ (dev) and ~/.tap/taps/ (user)
             let dirs = vec![
-                format!("extension-v2/webclaws/{}", site),
+                format!("extension-v2/taps/{}", site),
                 format!(
-                    "{}/.webclaw/webclaws/{}",
+                    "{}/.tap/taps/{}",
                     std::env::var("HOME").unwrap_or_default(),
                     site
                 ),
@@ -870,20 +870,20 @@ async fn execute_tool(
             let mut saved_to = String::new();
             for dir in &dirs {
                 if let Ok(()) = std::fs::create_dir_all(dir) {
-                    let path = format!("{}/{}.webclaw.js", dir, claw_name);
+                    let path = format!("{}/{}.tap.js", dir, tap_name);
                     if std::fs::write(&path, code).is_ok() && saved_to.is_empty() {
                         saved_to = path;
                     }
                 }
             }
 
-            // Update manifest.json if extension-v2/webclaws/ exists
-            if std::path::Path::new("extension-v2/webclaws").is_dir() {
-                let _ = update_claws_manifest();
+            // Update manifest.json if extension-v2/taps/ exists
+            if std::path::Path::new("extension-v2/taps").is_dir() {
+                let _ = update_taps_manifest();
             }
 
             if saved_to.is_empty() {
-                Err("failed to save webclaw file".into())
+                Err("failed to save tap file".into())
             } else {
                 Ok(json!(format!(
                     "saved to {} — reload extension to activate",
@@ -898,7 +898,7 @@ async fn execute_tool(
             let format = args["format"].as_str().unwrap_or("jpeg");
             let quality = args["quality"].as_u64().unwrap_or(50);
             let default_ext = if format == "jpeg" { "jpg" } else { "png" };
-            let default_path = format!("/tmp/webclaw-screenshot.{}", default_ext);
+            let default_path = format!("/tmp/tap-screenshot.{}", default_ext);
             let path = args["path"].as_str().unwrap_or(&default_path);
 
             let mut capture_params = json!({
@@ -928,7 +928,7 @@ async fn execute_tool(
             let filter = args["filter"].as_str().unwrap_or("all");
             if filter == "interactive" {
                 client
-                    .send("WebClaw.ax_tree_interactive", Some(json!({})))
+                    .send("Tap.ax_tree_interactive", Some(json!({})))
                     .await
             } else {
                 let result = client
@@ -948,12 +948,12 @@ async fn execute_tool(
         }
 
         // --- DOM tree with extension-side summarization ---
-        "read_dom" => client.send("WebClaw.read_dom", Some(args.clone())).await,
+        "read_dom" => client.send("Tap.read_dom", Some(args.clone())).await,
 
         // --- Download/save_image: fetch via browser, save to file ---
         "download" | "save_image" => {
             let result = client
-                .send(&format!("WebClaw.{}", name), Some(args.clone()))
+                .send(&format!("Tap.{}", name), Some(args.clone()))
                 .await?;
             if let Some(data_url) = result["data"].as_str() {
                 let output = args["output"].as_str().ok_or("missing output path")?;
@@ -988,7 +988,7 @@ async fn execute_tool(
                 json!({})
             };
             let info = client
-                .send("WebClaw.page_info", Some(tab_param))
+                .send("Tap.page_info", Some(tab_param))
                 .await
                 .ok();
             let url = info
@@ -1020,14 +1020,14 @@ async fn execute_tool(
     }
 }
 
-/// Relay an MCP tool call to the extension as a WebClaw.{name} command.
+/// Relay an MCP tool call to the extension as a Tap.{name} command.
 async fn relay_to_extension(
     name: &str,
     args: &Value,
     client: &BridgeClient,
 ) -> Result<Value, Box<dyn std::error::Error>> {
     client
-        .send(&format!("WebClaw.{}", name), Some(args.clone()))
+        .send(&format!("Tap.{}", name), Some(args.clone()))
         .await
 }
 
@@ -1036,24 +1036,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tools_schema_includes_list_adapters() {
+    fn tools_schema_includes_list_taps() {
         let schema = tools_schema();
         let tools = schema.as_array().unwrap();
         assert!(
-            tools.iter().any(|t| t["name"] == "list_adapters"),
-            "MCP tools must include list_adapters"
+            tools.iter().any(|t| t["name"] == "list_taps"),
+            "MCP tools must include list_taps"
         );
     }
 
     #[test]
-    fn tools_schema_includes_run_adapter() {
+    fn tools_schema_includes_run_tap() {
         let schema = tools_schema();
         let tools = schema.as_array().unwrap();
         assert!(
-            tools.iter().any(|t| t["name"] == "run_adapter"),
-            "MCP tools must include run_adapter"
+            tools.iter().any(|t| t["name"] == "run_tap"),
+            "MCP tools must include run_tap"
         );
-        let tool = tools.iter().find(|t| t["name"] == "run_adapter").unwrap();
+        let tool = tools.iter().find(|t| t["name"] == "run_tap").unwrap();
         let required = tool["inputSchema"]["required"].as_array().unwrap();
         assert!(required.contains(&json!("site")));
         assert!(required.contains(&json!("name")));
@@ -1096,7 +1096,7 @@ mod tests {
         );
         assert!(
             !relay_section.contains("JSON.stringify"),
-            "relay_to_extension must not contain inline JS — move to WebClaw.* extension methods"
+            "relay_to_extension must not contain inline JS — move to Tap.* extension methods"
         );
     }
 

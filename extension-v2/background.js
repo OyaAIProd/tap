@@ -1,89 +1,89 @@
 /**
- * WebClaw v2 — Background Service Worker
+ * Tap v2 — Background Service Worker
  *
  * One extension, three interfaces:
- *   1. WebSocket bridge — Rust MCP server sends CDP commands + webclaw actions
+ *   1. WebSocket bridge — Rust MCP server sends CDP commands + tap actions
  *   2. chrome.runtime.onMessage — popup UI
  *   3. chrome.runtime.onMessageExternal — web pages, other extensions
  *
  * Handles both CDP protocol (Page.navigate, Runtime.evaluate, Input.*)
- * and webclaw protocol (action: "list", action: "run").
+ * and tap protocol (action: "list", action: "run").
  */
 
-import { registerClaw, listClaws, runClaw, parseClawURL } from './runtime/executor.js'
+import { registerTap, listTaps, runTap, parseTapURL } from './runtime/executor.js'
 import { gatherPageIntelligence } from './runtime/page-intelligence.js'
 
-// --- WebClaw Registration (static imports — MV3 service workers prohibit dynamic import()) ---
+// --- Tap Registration (static imports — MV3 service workers prohibit dynamic import()) ---
 // AUTO-GENERATED: run `node scripts/gen-imports.js` to regenerate
 
-import c_36kr_hot from './webclaws/36kr/hot.webclaw.js'
-import c_baidu_hot from './webclaws/baidu/hot.webclaw.js'
-import c_bilibili_comment from './webclaws/bilibili/comment.webclaw.js'
-import c_bilibili_detail from './webclaws/bilibili/detail.webclaw.js'
-import c_bilibili_hot from './webclaws/bilibili/hot.webclaw.js'
-import c_bilibili_open from './webclaws/bilibili/open.webclaw.js'
-import c_bilibili_search from './webclaws/bilibili/search.webclaw.js'
-import c_bluesky_trending from './webclaws/bluesky/trending.webclaw.js'
-import c_coingecko_top from './webclaws/coingecko/top.webclaw.js'
-import c_crates_popular from './webclaws/crates/popular.webclaw.js'
-import c_devto_top from './webclaws/devto/top.webclaw.js'
-import c_dictionary_search from './webclaws/dictionary/search.webclaw.js'
-import c_douban_hot from './webclaws/douban/hot.webclaw.js'
-import c_douyin_comment from './webclaws/douyin/comment.webclaw.js'
-import c_douyin_detail from './webclaws/douyin/detail.webclaw.js'
-import c_douyin_hot from './webclaws/douyin/hot.webclaw.js'
-import c_douyin_open from './webclaws/douyin/open.webclaw.js'
-import c_douyin_search from './webclaws/douyin/search.webclaw.js'
-import c_facebook_feed from './webclaws/facebook/feed.webclaw.js'
-import c_github_trending from './webclaws/github/trending.webclaw.js'
-import c_google_trends from './webclaws/google/trends.webclaw.js'
-import c_hackernews_hot from './webclaws/hackernews/hot.webclaw.js'
-import c_instagram_explore from './webclaws/instagram/explore.webclaw.js'
-import c_jimeng_generate from './webclaws/jimeng/generate.webclaw.js'
-import c_jimeng_history from './webclaws/jimeng/history.webclaw.js'
-import c_jimeng_nav from './webclaws/jimeng/nav.webclaw.js'
-import c_juejin_hot from './webclaws/juejin/hot.webclaw.js'
-import c_lobsters_hot from './webclaws/lobsters/hot.webclaw.js'
-import c_pixiv_ranking from './webclaws/pixiv/ranking.webclaw.js'
-import c_producthunt_hot from './webclaws/producthunt/hot.webclaw.js'
-import c_pypi_top from './webclaws/pypi/top.webclaw.js'
-import c_reddit_hot from './webclaws/reddit/hot.webclaw.js'
-import c_sspai_hot from './webclaws/sspai/hot.webclaw.js'
-import c_stackoverflow_hot from './webclaws/stackoverflow/hot.webclaw.js'
-import c_steam_top_sellers from './webclaws/steam/top-sellers.webclaw.js'
-import c_telegraph_nav from './webclaws/telegraph/nav.webclaw.js'
-import c_telegraph_publish from './webclaws/telegraph/publish.webclaw.js'
-import c_tiktok_trending from './webclaws/tiktok/trending.webclaw.js'
-import c_toutiao_hot from './webclaws/toutiao/hot.webclaw.js'
-import c_v2ex_hot from './webclaws/v2ex/hot.webclaw.js'
-import c_wechat_detail from './webclaws/wechat/detail.webclaw.js'
-import c_wechat_open from './webclaws/wechat/open.webclaw.js'
-import c_wechat_search from './webclaws/wechat/search.webclaw.js'
-import c_weibo_comment from './webclaws/weibo/comment.webclaw.js'
-import c_weibo_detail from './webclaws/weibo/detail.webclaw.js'
-import c_weibo_hot from './webclaws/weibo/hot.webclaw.js'
-import c_weibo_open from './webclaws/weibo/open.webclaw.js'
-import c_weibo_search from './webclaws/weibo/search.webclaw.js'
-import c_wikipedia_most_read from './webclaws/wikipedia/most-read.webclaw.js'
-import c_x_trending from './webclaws/x/trending.webclaw.js'
-import c_xiaohongshu_hot from './webclaws/xiaohongshu/hot.webclaw.js'
-import c_xiaohongshu_post_detail from './webclaws/xiaohongshu/post_detail.webclaw.js'
-import c_xiaohongshu_publish from './webclaws/xiaohongshu/publish.webclaw.js'
-import c_xiaohongshu_search_fast from './webclaws/xiaohongshu/search_fast.webclaw.js'
-import c_xiaohongshu_comment from './webclaws/xiaohongshu/comment.webclaw.js'
-import c_xiaohongshu_detail from './webclaws/xiaohongshu/detail.webclaw.js'
-import c_xiaohongshu_nav_publish from './webclaws/xiaohongshu/nav_publish.webclaw.js'
-import c_xiaohongshu_open from './webclaws/xiaohongshu/open.webclaw.js'
-import c_xiaohongshu_search from './webclaws/xiaohongshu/search.webclaw.js'
-import c_xueqiu_hot_stock from './webclaws/xueqiu/hot-stock.webclaw.js'
-import c_youtube_trending from './webclaws/youtube/trending.webclaw.js'
-import c_zhihu_comment from './webclaws/zhihu/comment.webclaw.js'
-import c_zhihu_detail from './webclaws/zhihu/detail.webclaw.js'
-import c_zhihu_hot from './webclaws/zhihu/hot.webclaw.js'
-import c_zhihu_open from './webclaws/zhihu/open.webclaw.js'
-import c_zhihu_search from './webclaws/zhihu/search.webclaw.js'
+import c_36kr_hot from './taps/36kr/hot.tap.js'
+import c_baidu_hot from './taps/baidu/hot.tap.js'
+import c_bilibili_comment from './taps/bilibili/comment.tap.js'
+import c_bilibili_detail from './taps/bilibili/detail.tap.js'
+import c_bilibili_hot from './taps/bilibili/hot.tap.js'
+import c_bilibili_open from './taps/bilibili/open.tap.js'
+import c_bilibili_search from './taps/bilibili/search.tap.js'
+import c_bluesky_trending from './taps/bluesky/trending.tap.js'
+import c_coingecko_top from './taps/coingecko/top.tap.js'
+import c_crates_popular from './taps/crates/popular.tap.js'
+import c_devto_top from './taps/devto/top.tap.js'
+import c_dictionary_search from './taps/dictionary/search.tap.js'
+import c_douban_hot from './taps/douban/hot.tap.js'
+import c_douyin_comment from './taps/douyin/comment.tap.js'
+import c_douyin_detail from './taps/douyin/detail.tap.js'
+import c_douyin_hot from './taps/douyin/hot.tap.js'
+import c_douyin_open from './taps/douyin/open.tap.js'
+import c_douyin_search from './taps/douyin/search.tap.js'
+import c_facebook_feed from './taps/facebook/feed.tap.js'
+import c_github_trending from './taps/github/trending.tap.js'
+import c_google_trends from './taps/google/trends.tap.js'
+import c_hackernews_hot from './taps/hackernews/hot.tap.js'
+import c_instagram_explore from './taps/instagram/explore.tap.js'
+import c_jimeng_generate from './taps/jimeng/generate.tap.js'
+import c_jimeng_history from './taps/jimeng/history.tap.js'
+import c_jimeng_nav from './taps/jimeng/nav.tap.js'
+import c_juejin_hot from './taps/juejin/hot.tap.js'
+import c_lobsters_hot from './taps/lobsters/hot.tap.js'
+import c_pixiv_ranking from './taps/pixiv/ranking.tap.js'
+import c_producthunt_hot from './taps/producthunt/hot.tap.js'
+import c_pypi_top from './taps/pypi/top.tap.js'
+import c_reddit_hot from './taps/reddit/hot.tap.js'
+import c_sspai_hot from './taps/sspai/hot.tap.js'
+import c_stackoverflow_hot from './taps/stackoverflow/hot.tap.js'
+import c_steam_top_sellers from './taps/steam/top-sellers.tap.js'
+import c_telegraph_nav from './taps/telegraph/nav.tap.js'
+import c_telegraph_publish from './taps/telegraph/publish.tap.js'
+import c_tiktok_trending from './taps/tiktok/trending.tap.js'
+import c_toutiao_hot from './taps/toutiao/hot.tap.js'
+import c_v2ex_hot from './taps/v2ex/hot.tap.js'
+import c_wechat_detail from './taps/wechat/detail.tap.js'
+import c_wechat_open from './taps/wechat/open.tap.js'
+import c_wechat_search from './taps/wechat/search.tap.js'
+import c_weibo_comment from './taps/weibo/comment.tap.js'
+import c_weibo_detail from './taps/weibo/detail.tap.js'
+import c_weibo_hot from './taps/weibo/hot.tap.js'
+import c_weibo_open from './taps/weibo/open.tap.js'
+import c_weibo_search from './taps/weibo/search.tap.js'
+import c_wikipedia_most_read from './taps/wikipedia/most-read.tap.js'
+import c_x_trending from './taps/x/trending.tap.js'
+import c_xiaohongshu_hot from './taps/xiaohongshu/hot.tap.js'
+import c_xiaohongshu_post_detail from './taps/xiaohongshu/post_detail.tap.js'
+import c_xiaohongshu_publish from './taps/xiaohongshu/publish.tap.js'
+import c_xiaohongshu_search_fast from './taps/xiaohongshu/search_fast.tap.js'
+import c_xiaohongshu_comment from './taps/xiaohongshu/comment.tap.js'
+import c_xiaohongshu_detail from './taps/xiaohongshu/detail.tap.js'
+import c_xiaohongshu_nav_publish from './taps/xiaohongshu/nav_publish.tap.js'
+import c_xiaohongshu_open from './taps/xiaohongshu/open.tap.js'
+import c_xiaohongshu_search from './taps/xiaohongshu/search.tap.js'
+import c_xueqiu_hot_stock from './taps/xueqiu/hot-stock.tap.js'
+import c_youtube_trending from './taps/youtube/trending.tap.js'
+import c_zhihu_comment from './taps/zhihu/comment.tap.js'
+import c_zhihu_detail from './taps/zhihu/detail.tap.js'
+import c_zhihu_hot from './taps/zhihu/hot.tap.js'
+import c_zhihu_open from './taps/zhihu/open.tap.js'
+import c_zhihu_search from './taps/zhihu/search.tap.js'
 
-const ALL_CLAWS = [
+const ALL_TAPS = [
   c_36kr_hot, c_baidu_hot, c_bilibili_comment, c_bilibili_detail, c_bilibili_hot,
   c_bilibili_open, c_bilibili_search, c_bluesky_trending, c_coingecko_top,
   c_crates_popular, c_devto_top, c_dictionary_search, c_douban_hot, c_douyin_comment,
@@ -101,8 +101,8 @@ const ALL_CLAWS = [
   c_zhihu_hot, c_zhihu_open, c_zhihu_search,
 ]
 
-for (const mod of ALL_CLAWS) registerClaw(mod)
-console.log(`[webclaw] registered ${ALL_CLAWS.length} claws`)
+for (const mod of ALL_TAPS) registerTap(mod)
+console.log(`[tap] registered ${ALL_TAPS.length} taps`)
 
 // --- State ---
 
@@ -145,7 +145,7 @@ async function routeCDP(method, params = {}) {
     const tab = await chrome.tabs.create({ url: 'about:blank' })
     tabId = tab.id
     activeTabId = tab.id
-    console.log(`[webclaw] created new tab ${tab.id}`)
+    console.log(`[tap] created new tab ${tab.id}`)
   }
 
   switch (method) {
@@ -158,7 +158,7 @@ async function routeCDP(method, params = {}) {
         const tab = await chrome.tabs.create({ url: params.url })
         tabId = tab.id
         activeTabId = tab.id
-        console.log(`[webclaw] created tab ${tab.id} (was on chrome:// page)`)
+        console.log(`[tap] created tab ${tab.id} (was on chrome:// page)`)
       } else {
         await chrome.tabs.update(tabId, { url: params.url })
       }
@@ -319,7 +319,7 @@ async function handleBridgeCommand(method, params = {}) {
 
       if (!tabId) return { error: 'No tab to attach' }
       activeTabId = tabId
-      console.log(`[webclaw] attached to tab ${tabId}`)
+      console.log(`[tap] attached to tab ${tabId}`)
       return { tabId, attached: true, mode: 'scripting' }
     }
 
@@ -346,7 +346,7 @@ async function handleBridgeCommand(method, params = {}) {
   }
 }
 
-// --- WebClaw Protocol Commands (via bridge WebSocket) ---
+// --- Tap Protocol Commands (via bridge WebSocket) ---
 
 // Network log: per-tab, managed via networkLogs Map in State section
 
@@ -356,23 +356,23 @@ async function requireTab(params = {}) {
   return tabId
 }
 
-async function handleClawCommand(method, params = {}) {
+async function handleTapCommand(method, params = {}) {
   switch (method) {
     // ---- Core ----
 
-    case 'WebClaw.pageIntelligence': {
+    case 'Tap.pageIntelligence': {
       const tabId = params.tabId || activeTabId
       if (!tabId) throw new Error('No tab. Call Bridge.attach first.')
       return await gatherPageIntelligence(tabId)
     }
 
-    case 'WebClaw.run':
-      return await handleClawAction({ action: 'run', ...params })
+    case 'Tap.run':
+      return await handleTapAction({ action: 'run', ...params })
 
-    case 'WebClaw.list':
-      return await handleClawAction({ action: 'list' })
+    case 'Tap.list':
+      return await handleTapAction({ action: 'list' })
 
-    case 'WebClaw.page_info': {
+    case 'Tap.page_info': {
       const tabId = await requireTab(params)
       const tab = await chrome.tabs.get(tabId)
       const [result] = await chrome.scripting.executeScript({
@@ -389,7 +389,7 @@ async function handleClawCommand(method, params = {}) {
 
     // ---- Interaction tools (CDP native events) ----
 
-    case 'WebClaw.click': {
+    case 'Tap.click': {
       const tabId = await requireTab(params)
       const text = params.text
       if (!text) throw new Error('click: missing text param')
@@ -443,7 +443,7 @@ async function handleClawCommand(method, params = {}) {
       return fmtFeedback(`clicked "${text}" at (${Math.round(pos.x)}, ${Math.round(pos.y)})${nav}`, fb)
     }
 
-    case 'WebClaw.click_selector': {
+    case 'Tap.click_selector': {
       const tabId = await requireTab(params)
       const selector = params.selector
       if (!selector) throw new Error('click_selector: missing selector param')
@@ -481,7 +481,7 @@ async function handleClawCommand(method, params = {}) {
       return fmtFeedback(`clicked "${selector}" at (${Math.round(pos.x)}, ${Math.round(pos.y)})${nav}`, fb)
     }
 
-    case 'WebClaw.type_text': {
+    case 'Tap.type_text': {
       const tabId = await requireTab(params)
       const selector = params.selector
       const text = params.text
@@ -559,7 +559,7 @@ async function handleClawCommand(method, params = {}) {
       return fmtFeedback(msg, fb)
     }
 
-    case 'WebClaw.hover': {
+    case 'Tap.hover': {
       const tabId = await requireTab(params)
       const selector = params.selector
       if (!selector) throw new Error('hover: missing selector')
@@ -588,7 +588,7 @@ async function handleClawCommand(method, params = {}) {
       return fmtFeedback(`hovered "${selector}"`, fb)
     }
 
-    case 'WebClaw.scroll': {
+    case 'Tap.scroll': {
       const tabId = await requireTab(params)
       const selector = params.selector
       if (!selector) throw new Error('scroll: missing selector')
@@ -609,7 +609,7 @@ async function handleClawCommand(method, params = {}) {
       return fmtFeedback(`scrolled to "${selector}"`, fb)
     }
 
-    case 'WebClaw.press_key': {
+    case 'Tap.press_key': {
       const tabId = await requireTab(params)
       const key = params.key
       if (!key) throw new Error('press_key: missing key')
@@ -649,7 +649,7 @@ async function handleClawCommand(method, params = {}) {
       return fmtFeedback(`pressed ${key}${nav}`, fb)
     }
 
-    case 'WebClaw.select': {
+    case 'Tap.select': {
       const tabId = await requireTab(params)
       const { selector, value } = params
       if (!selector || value === undefined) throw new Error('select: missing selector or value')
@@ -672,7 +672,7 @@ async function handleClawCommand(method, params = {}) {
       return fmtFeedback(`selected "${value}" in "${selector}"`, fb)
     }
 
-    case 'WebClaw.upload': {
+    case 'Tap.upload': {
       const tabId = await requireTab(params)
       const { selector, files } = params
       if (!selector || !files) throw new Error('upload: missing selector or files')
@@ -693,7 +693,7 @@ async function handleClawCommand(method, params = {}) {
 
     // ---- Perception tools ----
 
-    case 'WebClaw.find': {
+    case 'Tap.find': {
       const tabId = await requireTab(params)
       const query = params.query
       const role = params.role || ''
@@ -752,7 +752,7 @@ async function handleClawCommand(method, params = {}) {
       return result?.result || []
     }
 
-    case 'WebClaw.element_info': {
+    case 'Tap.element_info': {
       const tabId = await requireTab(params)
       const selector = params.selector
       if (!selector) throw new Error('element_info: missing selector')
@@ -781,7 +781,7 @@ async function handleClawCommand(method, params = {}) {
       return result?.result || { error: `"${selector}" not found` }
     }
 
-    case 'WebClaw.hit_test': {
+    case 'Tap.hit_test': {
       const tabId = await requireTab(params)
       const { x, y } = params
       if (x === undefined || y === undefined) throw new Error('hit_test: missing x or y')
@@ -810,7 +810,7 @@ async function handleClawCommand(method, params = {}) {
       return result?.result || { error: `nothing at (${x}, ${y})` }
     }
 
-    case 'WebClaw.top_layer': {
+    case 'Tap.top_layer': {
       const tabId = await requireTab(params)
       const [result] = await chrome.scripting.executeScript({
         target: { tabId },
@@ -833,7 +833,7 @@ async function handleClawCommand(method, params = {}) {
       return result?.result || []
     }
 
-    case 'WebClaw.ax_tree_interactive': {
+    case 'Tap.ax_tree_interactive': {
       const tabId = await requireTab(params)
       const [result] = await chrome.scripting.executeScript({
         target: { tabId },
@@ -869,7 +869,7 @@ async function handleClawCommand(method, params = {}) {
       return { interactive: result?.result || [] }
     }
 
-    case 'WebClaw.read_dom': {
+    case 'Tap.read_dom': {
       const tabId = await requireTab(params)
       const selector = params.selector || 'body'
       const maxDepth = params.depth || 6
@@ -921,14 +921,14 @@ async function handleClawCommand(method, params = {}) {
 
     // ---- State tools ----
 
-    case 'WebClaw.cookies': {
+    case 'Tap.cookies': {
       const tabId = await requireTab(params)
       const tab = await chrome.tabs.get(tabId)
       const cookies = await chrome.cookies.getAll({ url: tab.url })
       return { cookies }
     }
 
-    case 'WebClaw.set_cookie': {
+    case 'Tap.set_cookie': {
       await requireTab(params)
       const { url, name, value, domain, path, secure, httpOnly, sameSite, expirationDate } = params
       if (!url || !name) throw new Error('set_cookie: missing url or name')
@@ -943,7 +943,7 @@ async function handleClawCommand(method, params = {}) {
       return { set: true, name }
     }
 
-    case 'WebClaw.dismiss_dialog': {
+    case 'Tap.dismiss_dialog': {
       const tabId = await requireTab(params)
       const accept = params.accept !== false
       await withDebugger(tabId, async (tid) => {
@@ -954,7 +954,7 @@ async function handleClawCommand(method, params = {}) {
       return { dismissed: true, accepted: accept }
     }
 
-    case 'WebClaw.force_state': {
+    case 'Tap.force_state': {
       const tabId = await requireTab(params)
       const { selector, state } = params
       if (!selector || !state) throw new Error('force_state: missing selector or state')
@@ -971,7 +971,7 @@ async function handleClawCommand(method, params = {}) {
       return { forced: true, selector, state }
     }
 
-    case 'WebClaw.event_listeners': {
+    case 'Tap.event_listeners': {
       const tabId = await requireTab(params)
       const selector = params.selector
       if (!selector) throw new Error('event_listeners: missing selector')
@@ -991,7 +991,7 @@ async function handleClawCommand(method, params = {}) {
       return listeners
     }
 
-    case 'WebClaw.storage_items': {
+    case 'Tap.storage_items': {
       const tabId = await requireTab(params)
       const storageType = params.type || 'local'
       const [result] = await chrome.scripting.executeScript({
@@ -1013,7 +1013,7 @@ async function handleClawCommand(method, params = {}) {
 
     // ---- Network tools ----
 
-    case 'WebClaw.network_log_start': {
+    case 'Tap.network_log_start': {
       const tabId = await requireTab(params)
       const netLog = getNetworkLog(tabId)
       netLog.entries = []
@@ -1024,7 +1024,7 @@ async function handleClawCommand(method, params = {}) {
       return { started: true }
     }
 
-    case 'WebClaw.network_log_dump': {
+    case 'Tap.network_log_dump': {
       const tabId = await requireTab(params)
       const entries = getNetworkLog(tabId).entries.map(e => ({
         url: e.url, method: e.method, status: e.status,
@@ -1033,7 +1033,7 @@ async function handleClawCommand(method, params = {}) {
       return { count: entries.length, entries }
     }
 
-    case 'WebClaw.network_log_dump_bodies': {
+    case 'Tap.network_log_dump_bodies': {
       const tabId = await requireTab(params)
       // Return entries with response bodies
       const entries = getNetworkLog(tabId).entries.slice(-50).map(e => ({
@@ -1043,13 +1043,13 @@ async function handleClawCommand(method, params = {}) {
       return { count: entries.length, entries }
     }
 
-    case 'WebClaw.api_log': {
+    case 'Tap.api_log': {
       const tabId = await requireTab(params)
       const [result] = await chrome.scripting.executeScript({
         target: { tabId },
         func: () => {
-          const log = window.__webclaw_api_log || []
-          window.__webclaw_api_log = []
+          const log = window.__tap_api_log || []
+          window.__tap_api_log = []
           return log
         },
         world: 'MAIN'
@@ -1057,7 +1057,7 @@ async function handleClawCommand(method, params = {}) {
       return result?.result || []
     }
 
-    case 'WebClaw.download': {
+    case 'Tap.download': {
       const tabId = await requireTab(params)
       const { url, output } = params
       if (!url) throw new Error('download: missing url')
@@ -1075,10 +1075,10 @@ async function handleClawCommand(method, params = {}) {
         args: [url],
         world: 'MAIN'
       })
-      return { data: result?.result, output: output || '/tmp/webclaw-download' }
+      return { data: result?.result, output: output || '/tmp/tap-download' }
     }
 
-    case 'WebClaw.save_image': {
+    case 'Tap.save_image': {
       const tabId = await requireTab(params)
       const { selector, output } = params
       if (!selector || !output) throw new Error('save_image: missing selector or output')
@@ -1103,7 +1103,7 @@ async function handleClawCommand(method, params = {}) {
 
     // ---- Resource inspection ----
 
-    case 'WebClaw.global_names': {
+    case 'Tap.global_names': {
       const tabId = await requireTab(params)
       const [result] = await chrome.scripting.executeScript({
         target: { tabId },
@@ -1121,7 +1121,7 @@ async function handleClawCommand(method, params = {}) {
       return result?.result || []
     }
 
-    case 'WebClaw.resource_tree': {
+    case 'Tap.resource_tree': {
       const tabId = await requireTab(params)
       let tree = null
       await withDebugger(tabId, async (tid) => {
@@ -1130,7 +1130,7 @@ async function handleClawCommand(method, params = {}) {
       return tree || {}
     }
 
-    case 'WebClaw.resource_content': {
+    case 'Tap.resource_content': {
       const tabId = await requireTab(params)
       const { frameId, url } = params
       if (!url) throw new Error('resource_content: missing url')
@@ -1144,7 +1144,7 @@ async function handleClawCommand(method, params = {}) {
       return content || {}
     }
 
-    case 'WebClaw.search_resource': {
+    case 'Tap.search_resource': {
       const tabId = await requireTab(params)
       const { query } = params
       if (!query) throw new Error('search_resource: missing query')
@@ -1159,7 +1159,7 @@ async function handleClawCommand(method, params = {}) {
       return results
     }
 
-    case 'WebClaw.request_replay': {
+    case 'Tap.request_replay': {
       const tabId = await requireTab(params)
       const { requestId } = params
       if (!requestId) throw new Error('request_replay: missing requestId')
@@ -1171,7 +1171,7 @@ async function handleClawCommand(method, params = {}) {
 
     // ---- Intercept tools ----
 
-    case 'WebClaw.intercept_on': {
+    case 'Tap.intercept_on': {
       const tabId = await requireTab(params)
       const patterns = params.patterns || [{ urlPattern: '*' }]
       await withDebugger(tabId, async (tid) => {
@@ -1180,7 +1180,7 @@ async function handleClawCommand(method, params = {}) {
       return { enabled: true, patterns }
     }
 
-    case 'WebClaw.intercept_off': {
+    case 'Tap.intercept_off': {
       const tabId = await requireTab(params)
       await withDebugger(tabId, async (tid) => {
         await chrome.debugger.sendCommand({ tabId: tid }, 'Fetch.disable', {})
@@ -1188,11 +1188,11 @@ async function handleClawCommand(method, params = {}) {
       return { disabled: true }
     }
 
-    case 'WebClaw.intercept_list': {
+    case 'Tap.intercept_list': {
       return { note: 'Intercept patterns are managed via intercept_on. No persistent list.' }
     }
 
-    case 'WebClaw.intercept_continue': {
+    case 'Tap.intercept_continue': {
       const tabId = await requireTab(params)
       const { requestId, url, method, headers } = params
       if (!requestId) throw new Error('intercept_continue: missing requestId')
@@ -1206,7 +1206,7 @@ async function handleClawCommand(method, params = {}) {
       return { continued: true }
     }
 
-    case 'WebClaw.intercept_fulfill': {
+    case 'Tap.intercept_fulfill': {
       const tabId = await requireTab(params)
       const { requestId, responseCode, body, responseHeaders } = params
       if (!requestId) throw new Error('intercept_fulfill: missing requestId')
@@ -1220,7 +1220,7 @@ async function handleClawCommand(method, params = {}) {
       return { fulfilled: true }
     }
 
-    case 'WebClaw.intercept_fail': {
+    case 'Tap.intercept_fail': {
       const tabId = await requireTab(params)
       const { requestId, errorReason } = params
       if (!requestId) throw new Error('intercept_fail: missing requestId')
@@ -1234,15 +1234,15 @@ async function handleClawCommand(method, params = {}) {
 
     // ---- Toast collection ----
 
-    case 'WebClaw.collect_toasts': {
+    case 'Tap.collect_toasts': {
       const tabId = params.tabId ? Number(params.tabId) : activeTabId
       if (!tabId) return []
       try {
         const [result] = await chrome.scripting.executeScript({
           target: { tabId },
           func: () => {
-            const toasts = window.__webclaw_toasts || []
-            window.__webclaw_toasts = []
+            const toasts = window.__tap_toasts || []
+            window.__tap_toasts = []
             return toasts
           },
           world: 'MAIN'
@@ -1253,17 +1253,17 @@ async function handleClawCommand(method, params = {}) {
 
     // --- Tab Management ---
 
-    case 'WebClaw.tab_list': {
+    case 'Tap.tab_list': {
       const tabs = await chrome.tabs.query({})
       return tabs.map(t => ({ tabId: t.id, url: t.url || '', title: t.title || '' }))
     }
 
-    case 'WebClaw.tab_new': {
+    case 'Tap.tab_new': {
       const tab = await chrome.tabs.create({ url: params.url || 'about:blank' })
       return { tabId: tab.id, url: tab.url || params.url || 'about:blank' }
     }
 
-    case 'WebClaw.tab_close': {
+    case 'Tap.tab_close': {
       const tabId = Number(params.tabId)
       if (!tabId) throw new Error('tab_close: missing tabId')
       const session = debuggerSessions.get(tabId)
@@ -1279,7 +1279,7 @@ async function handleClawCommand(method, params = {}) {
     }
 
     default:
-      throw new Error(`Unknown WebClaw command: ${method}`)
+      throw new Error(`Unknown Tap command: ${method}`)
   }
 }
 
@@ -1292,17 +1292,17 @@ async function cdpClick(tabId, x, y) {
   })
 }
 
-// --- WebClaw Action Handler ---
+// --- Tap Action Handler ---
 
-async function handleClawAction(msg) {
+async function handleTapAction(msg) {
   switch (msg.action) {
     case 'list':
-      return { claws: listClaws() }
+      return { taps: listTaps() }
 
     case 'run': {
       let site, name, args
       if (msg.url) {
-        ({ site, name, args } = parseClawURL(msg.url))
+        ({ site, name, args } = parseTapURL(msg.url))
         args = { ...args, ...msg.args }
       } else {
         ({ site, name } = msg)
@@ -1316,18 +1316,18 @@ async function handleClawAction(msg) {
       }
       if (!tabId) throw new Error('no tab available')
 
-      return await runClaw(site, name, args, tabId, { cdpClick, withDebugger })
+      return await runTap(site, name, args, tabId, { cdpClick, withDebugger })
     }
 
     case 'showResults': {
-      const hash = msg.url.replace('webclaw://', '')
+      const hash = msg.url.replace('tap://', '')
       const resultsUrl = chrome.runtime.getURL(`results.html#${hash}`)
       chrome.tabs.create({ url: resultsUrl })
       return { ok: true }
     }
 
     case 'ping':
-      return { pong: true, claws: listClaws().length }
+      return { pong: true, taps: listTaps().length }
 
     default:
       throw new Error(`unknown action: ${msg.action}`)
@@ -1335,14 +1335,14 @@ async function handleClawAction(msg) {
 }
 
 // --- Unified Message Router ---
-// Handles both CDP commands and webclaw actions from any source.
+// Handles both CDP commands and tap actions from any source.
 
 async function handleMessage(msg) {
   const { method, params, action } = msg
 
-  // WebClaw actions: { action: "list" } or { action: "run", site, name }
+  // Tap actions: { action: "list" } or { action: "run", site, name }
   if (action) {
-    return await handleClawAction(msg)
+    return await handleTapAction(msg)
   }
 
   // Bridge meta-commands: { method: "Bridge.attach" }
@@ -1350,9 +1350,9 @@ async function handleMessage(msg) {
     return await handleBridgeCommand(method, params || {})
   }
 
-  // WebClaw commands: { method: "WebClaw.pageIntelligence" }, { method: "WebClaw.run" }
-  if (method && method.startsWith('WebClaw.')) {
-    return await handleClawCommand(method, params || {})
+  // Tap commands: { method: "Tap.pageIntelligence" }, { method: "Tap.run" }
+  if (method && method.startsWith('Tap.')) {
+    return await handleTapCommand(method, params || {})
   }
 
   // CDP commands: { method: "Page.navigate", params: { url: "..." } }
@@ -1394,7 +1394,7 @@ function connectBridge() {
   }
 
   ws.onopen = () => {
-    console.log('[webclaw] bridge connected')
+    console.log('[tap] bridge connected')
     reconnectDelay = 1000
   }
 
@@ -1412,7 +1412,7 @@ function connectBridge() {
   }
 
   ws.onclose = () => {
-    console.log('[webclaw] bridge disconnected')
+    console.log('[tap] bridge disconnected')
     scheduleBridgeReconnect()
   }
 
@@ -1460,7 +1460,7 @@ async function ensureDebugger(tabId) {
     await chrome.debugger.sendCommand({ tabId }, 'DOM.enable', {})
     await chrome.debugger.sendCommand({ tabId }, 'Page.enable', {})
     debuggerSessions.set(tabId, { attached: true, detachTimer: null })
-    console.log(`[webclaw] debugger attached to ${tabId}`)
+    console.log(`[tap] debugger attached to ${tabId}`)
   }
 
   // Schedule auto-detach after 500ms idle
@@ -1468,7 +1468,7 @@ async function ensureDebugger(tabId) {
   s.detachTimer = setTimeout(async () => {
     await chrome.debugger.detach({ tabId }).catch(() => {})
     debuggerSessions.delete(tabId)
-    console.log(`[webclaw] debugger detached from ${tabId} (idle)`)
+    console.log(`[tap] debugger detached from ${tabId} (idle)`)
   }, 500)
 }
 
@@ -1477,15 +1477,15 @@ async function withDebugger(tabId, fn) {
   return await fn(tabId)
 }
 
-// --- Omnibox: webclaw:// protocol via address bar ---
+// --- Omnibox: tap:// protocol via address bar ---
 
 chrome.omnibox.onInputSuggestion = undefined // suppress default
 
 chrome.omnibox.onInputChanged.addListener((text, suggest) => {
-  const claws = listClaws()
+  const taps = listTaps()
   const matches = text.trim()
-    ? claws.filter(c => `${c.site}/${c.name}`.includes(text.trim()))
-    : claws
+    ? taps.filter(c => `${c.site}/${c.name}`.includes(text.trim()))
+    : taps
 
   suggest(matches.slice(0, 8).map(c => ({
     content: `${c.site}/${c.name}`,
@@ -1511,8 +1511,8 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
     chrome.scripting.executeScript({
       target: { tabId },
       func: () => {
-        if (window.__webclaw_toast_observer) return
-        window.__webclaw_toasts = window.__webclaw_toasts || []
+        if (window.__tap_toast_observer) return
+        window.__tap_toasts = window.__tap_toasts || []
 
         const observer = new MutationObserver((mutations) => {
           for (const mutation of mutations) {
@@ -1528,15 +1528,15 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
               if (isToast) {
                 const text = node.innerText?.trim()
                 if (text && text.length > 0 && text.length < 500) {
-                  window.__webclaw_toasts.push({ text, time: Date.now(), cls: cls.substring(0, 100) })
-                  if (window.__webclaw_toasts.length > 20) window.__webclaw_toasts.shift()
+                  window.__tap_toasts.push({ text, time: Date.now(), cls: cls.substring(0, 100) })
+                  if (window.__tap_toasts.length > 20) window.__tap_toasts.shift()
                 }
               }
             }
           }
         })
         observer.observe(document.body, { childList: true, subtree: true })
-        window.__webclaw_toast_observer = observer
+        window.__tap_toast_observer = observer
       },
       world: 'MAIN'
     }).catch(() => {}) // ignore chrome:// pages
@@ -1575,4 +1575,4 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
 })
 
-console.log('[webclaw] v2 ready — webclaw:// protocol active')
+console.log('[tap] v2 ready — tap:// protocol active')

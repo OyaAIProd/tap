@@ -1,5 +1,5 @@
 const statusEl = document.getElementById('status')
-const clawsEl = document.getElementById('claws')
+const tapsEl = document.getElementById('taps')
 
 chrome.runtime.sendMessage({ action: 'list' }, (response) => {
   if (!response || response.error) {
@@ -7,23 +7,23 @@ chrome.runtime.sendMessage({ action: 'list' }, (response) => {
     return
   }
 
-  const claws = response.claws || []
-  statusEl.textContent = `${claws.length} claws loaded`
+  const taps = response.taps || []
+  statusEl.textContent = `${taps.length} taps loaded`
   statusEl.classList.add('connected')
 
-  if (claws.length === 0) {
-    clawsEl.innerHTML = '<li class="empty">no claws registered</li>'
+  if (taps.length === 0) {
+    tapsEl.innerHTML = '<li class="empty">no taps registered</li>'
     return
   }
 
-  for (const claw of claws) {
+  for (const tap of taps) {
     const li = document.createElement('li')
-    li.innerHTML = `<span class="site">${claw.site}</span>/<span class="name">${claw.name}</span><span class="desc">${claw.description}</span>`
+    li.innerHTML = `<span class="site">${tap.site}</span>/<span class="name">${tap.name}</span><span class="desc">${tap.description}</span>`
     li.addEventListener('click', () => {
-      chrome.runtime.sendMessage({ action: 'run', site: claw.site, name: claw.name }, (result) => {
-        console.log(`webclaw://${claw.site}/${claw.name}`, result)
+      chrome.runtime.sendMessage({ action: 'run', site: tap.site, name: tap.name }, (result) => {
+        console.log(`tap://${tap.site}/${tap.name}`, result)
       })
     })
-    clawsEl.appendChild(li)
+    tapsEl.appendChild(li)
   }
 })
