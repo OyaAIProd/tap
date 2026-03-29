@@ -2,171 +2,30 @@
 
 > **Make every website programmable by AI.**
 
-Websites are closing their APIs. AI agents need them more than ever. Claw bridges the gap.
+Websites are closing their APIs. AI agents need them more than ever.
 
-AI agents grab websites and turn them into **claws** — deterministic, machine-generated API specs that run with zero AI. One agent grabs a website, every agent benefits.
+Claw is a Chrome extension + MCP server. AI agents forge `.claw.js` scripts that extract data from any website — deterministically, with zero AI at runtime.
 
 ```
-AI agent ──grab──→ claw (YAML/Lua) ──run──→ structured data
-         (once)                     (1000x, free)
+page_intelligence → forge_verify → forge_save → run_adapter
+     (1 call)        (1 call)       (1 call)      (forever)
 ```
 
-The long-term value: even as AI agents get stronger, Claw eliminates redundant discovery across all agents. One grab, shared by all — like Wikipedia for web APIs.
+One agent forges a claw, every agent benefits.
 
 ## Install
 
+**Chrome Extension** — download `claw-extension.zip` from [Releases](https://github.com/LeonTing1010/claw/releases), unzip, load in `chrome://extensions/` (developer mode).
+
+**MCP Server** (for Claude Code / AI agents):
+
 ```bash
-# One-line install
-curl -fsSL https://raw.githubusercontent.com/LeonTing1010/claw/master/install.sh | sh
-
-# Or from source
-cargo install --git https://github.com/LeonTing1010/claw
-
-# Or download binary from GitHub Releases
+# Download binary from GitHub Releases
 # https://github.com/LeonTing1010/claw/releases
+
+# Or build from source
+cargo install --path .
 ```
-
-## Quick Start
-
-```bash
-claw list                              # See available claws (auto-syncs on first run)
-claw weibo hot                         # 微博热搜
-claw bilibili hot --limit 5 -f json    # B站热门 → JSON
-claw trending scan                     # 13+ 平台热搜聚合
-claw v2ex hot                          # V2EX 热门话题
-
-# Grab a new website (API-first)
-claw grab --site mysite --name feed \
-  --url "https://api.example.com/feed" \
-  --fields "title,author,score"
-
-# Write operations (CDP native — works on SPAs)
-claw xiaohongshu publish \
-  --title "标题" --content "正文" \
-  --images "/path/to/image.webp"
-```
-
-Chrome launches automatically. No manual setup needed.
-
-## How It Works
-
-### Grab and Run
-
-**Grab** (one-time): AI agent uses 28 MCP tools to explore a website — screenshot, read DOM, try interactions, discover APIs — then outputs a claw (YAML/Lua).
-
-**Run** (every time, zero AI): Claw loads the claw and executes it deterministically. No tokens, sub-second, works 1000x without drift.
-
-### Why CDP Native
-
-```
-JS dispatchEvent()          → React/Vue ignore it → silent failure
-CDP Input.dispatchMouseEvent → browser-native      → works everywhere
-```
-
-This is the difference between "works on static sites" and "works on any website."
-
-### API-first Claws
-
-For websites with public APIs, claws run without a browser at all:
-
-```yaml
-browser: false
-pipeline:
-  - fetch: https://lobste.rs/hottest.json
-  - map:
-      title: ${{ item.title }}
-      score: ${{ item.score }}
-  - limit: ${{ args.limit }}
-```
-
-No Chrome, no navigation — pure HTTP, sub-100ms execution.
-
-## Claws
-
-A claw is an API spec for a website. YAML for reads, Lua for complex interactions:
-
-```yaml
-site: weibo
-name: hot
-description: 微博热搜榜
-strategy: public
-browser: true
-args:
-  limit: { type: int, default: 20 }
-columns: [rank, title, hot]
-pipeline:
-  - navigate: https://weibo.com
-  - evaluate: |
-      (async () => {
-        const res = await fetch('/ajax/side/hotSearch');
-        const data = await res.json();
-        return data.data.realtime.map((item, i) => ({
-          rank: i + 1, title: item.note, hot: item.num || 0
-        }));
-      })()
-  - map:
-      rank: ${{ item.rank }}
-      title: ${{ item.title }}
-      hot: ${{ item.hot }}
-  - limit: ${{ args.limit }}
-```
-
-### Pipeline Steps
-
-| Category | Steps |
-|----------|-------|
-| **Extract** | `evaluate`, `fetch`, `intercept`, `select` (path) |
-| **Transform** | `map`, `filter`, `limit`, `transform` (Lua: sort_by, group_by, unique_by, pick) |
-| **Browser** | `navigate`, `click`, `click_selector`, `type`, `upload`, `hover`, `scroll`, `press_key`, `select` (dropdown), `dismiss_dialog` |
-| **Wait** | `wait`, `wait_for` (selector/text/url/network_idle) |
-| **Control** | `if_selector`, `if_text`, `if_url`, `use` (compose claws) |
-| **Assert** | `assert_selector`, `assert_text`, `assert_url`, `assert_not_selector` |
-
-### Lua Transform
-
-```yaml
-- transform: |
-    data = sort_by(data, "views", "desc")
-    data = unique_by(data, "title")
-    return limit(data, 10)
-```
-
-Helpers: `sort_by`, `limit`, `pick`, `group_by`, `unique_by`.
-
-### Lua Claws
-
-For complex multi-step UI flows:
-
-```yaml
-site: telegraph
-name: publish
-columns: [status, url]
-run: |
-  page:goto("https://telegra.ph")
-  page:type_into(".tl_article_edit #_tl_editor", args.content)
-  page:click_text("Publish")
-  page:wait(3)
-  local url = page:evaluate("location.href")
-  return {{ status = "published", url = url }}
-```
-
-## For AI Agents (MCP)
-
-Claw exposes 30 tools as an MCP server — the primary interface for AI agents:
-
-```bash
-claw mcp    # Start MCP server (stdin/stdout JSON-RPC)
-```
-
-**Discover and run claws:**
-- `list_adapters` — what websites are available
-- `run_adapter` — execute a claw, get structured JSON
-
-**Grab toolkit (28 tools):**
-- See: `screenshot`, `ax_tree`, `read_dom`, `explore`, `page_info`
-- Probe: `find`, `element_info`, `network_log_start/dump`, `cookies`
-- Try: `click`, `type_text`, `navigate`, `evaluate`, `hover`, `scroll`
-- Verify: `try_step`, `verify_adapter`
 
 Configure in your AI client:
 
@@ -181,54 +40,164 @@ Configure in your AI client:
 }
 ```
 
-## Commands
+## Quick Start
 
-```bash
-# Run claws
-claw <site> <name> [--args] [-f json|csv|yaml|md]
-claw trending scan --platforms "weibo,bilibili,hackernews"
+### From any webpage console
 
-# Grab new claws
-claw grab --site X --name Y --url "API_URL" --fields "title,score"
+```js
+// List available claws
+await claw.list()
 
-# Sync shared claws from GitHub
-claw sync
-
-# Grab toolkit (for AI agents or manual exploration)
-claw screenshot /tmp/page.png
-claw ax-tree
-claw explore https://example.com
-claw find "Submit" --role button
-
-# Claw management
-claw list
-claw verify-adapter weibo hot
-claw save-adapter ./my-claw.yaml
-claw rollback-adapter weibo hot
-
-# System
-claw doctor
-claw login weibo
-claw completions zsh
+// Run a claw
+const data = await claw("github/trending", {limit: 5})
+console.table(data.rows)
 ```
 
-## Output Formats
+### From Chrome address bar
+
+```
+claw github/trending
+claw weibo/hot
+claw xiaohongshu/search?keyword=美食
+```
+
+### From CLI
 
 ```bash
-claw weibo hot                    # Table (default)
-claw weibo hot -f json            # JSON
-claw weibo hot -f csv > hot.csv   # CSV
-claw weibo hot -f yaml            # YAML
-claw weibo hot -f md              # Markdown
+claw list                        # See all 45 claws
+claw github trending --limit 5   # Run via extension bridge
+claw check                       # Health check all claws
 ```
+
+### From AI agents (MCP)
+
+```
+> Use page_intelligence to analyze https://example.com
+> Then forge_verify to test the extraction logic
+> Then forge_save to persist the new claw
+```
+
+## 45 Claws
+
+| Site | Claws |
+|------|-------|
+| GitHub | trending |
+| Hacker News | hot |
+| Reddit | hot |
+| Weibo | hot, search |
+| Bilibili | hot |
+| Xiaohongshu | hot, search, publish, post_detail |
+| Zhihu | hot, search |
+| Douyin | hot, search |
+| YouTube | trending |
+| X (Twitter) | trending |
+| Product Hunt | hot |
+| Stack Overflow | hot |
+| V2EX | hot |
+| Lobsters | hot |
+| Dev.to | top |
+| Bluesky | trending |
+| Baidu | hot |
+| Toutiao | hot |
+| Douban | hot |
+| 36Kr | hot |
+| Juejin | hot |
+| SSPAI | hot |
+| Xueqiu | hot-stock |
+| Wikipedia | most-read |
+| Steam | top-sellers |
+| CoinGecko | top |
+| Crates.io | popular |
+| PyPI | top |
+| Google | trends |
+| Pixiv | ranking |
+| Dictionary | search |
+| Facebook | feed |
+| Instagram | explore |
+| TikTok | trending |
+| Jimeng | generate, history |
+| Telegraph | publish |
+
+## .claw.js Format
+
+```js
+export default {
+  site: "github",
+  name: "trending",
+  description: "GitHub Trending repositories",
+  columns: ["repo", "description", "stars", "language"],
+  args: { limit: { type: "int", default: 20 } },
+  health: { min_rows: 5, non_empty: ["repo"] },
+
+  async run(page, args) {
+    await page.nav("https://github.com/trending")
+    await page.waitFor("article.Box-row", 10000)
+    await page.wait(2000)
+
+    const items = await page.eval(() => {
+      return Array.from(document.querySelectorAll('article.Box-row')).map(el => ({
+        repo: el.querySelector('h2 a')?.textContent?.trim().replace(/\s+/g, '') || '',
+        description: el.querySelector('p.col-9')?.textContent?.trim() || '',
+        stars: el.querySelector('[href$="/stargazers"]')?.textContent?.trim() || '',
+        language: el.querySelector('[itemprop="programmingLanguage"]')?.textContent?.trim() || ''
+      })).filter(item => item.repo.length > 0)
+    })
+
+    return items.slice(0, args.limit)
+  }
+}
+```
+
+### Page API (11 methods)
+
+| Method | Mode | Description |
+|--------|------|-------------|
+| `page.nav(url)` | scripting | Navigate |
+| `page.wait(ms)` | scripting | Fixed delay |
+| `page.waitFor(sel, ms)` | scripting | Wait for selector |
+| `page.eval(fn)` | scripting | Run JS in page context |
+| `page.fetch(url)` | scripting | Fetch with page cookies |
+| `page.screenshot()` | scripting | Capture visible area |
+| `page.cookies()` | scripting | Read cookies |
+| `page.click(target)` | debugger | CDP native click |
+| `page.type(sel, text)` | debugger | CDP native keyboard |
+| `page.upload(sel, files)` | debugger | File upload via CDP |
+| `page.claw(site, name)` | - | Run another claw |
+
+Scripting mode = undetectable. Debugger mode = millisecond attach/detach.
+
+## Architecture
+
+```
+Claude Code ←→ MCP (stdin/stdout) ←→ Bridge (ws://9333) ←→ Chrome Extension
+                 Rust binary              WebSocket            background.js
+                 2,341 lines              auto-reconnect       page API + claws
+```
+
+Rust binary = thin MCP bridge (6 dependencies). Chrome extension = sole runtime. No direct CDP.
+
+## MCP Tools
+
+| Category | Tools |
+|----------|-------|
+| **Forge** | `page_intelligence`, `forge_verify`, `forge_save` |
+| **Run** | `run_adapter`, `list_adapters` |
+| **See** | `screenshot`, `ax_tree`, `read_dom`, `page_info` |
+| **Probe** | `find`, `element_info`, `evaluate`, `cookies` |
+| **Act** | `click`, `type_text`, `navigate`, `hover`, `scroll`, `press_key` |
+| **Inspect** | `api_log`, `global_names`, `resource_tree`, `search_resource`, `request_replay` |
+| **Intercept** | `intercept_on/off/list/continue/fulfill/fail`, `set_cookie` |
 
 ## Building
 
 ```bash
 cargo build              # Build
-cargo test               # 108 tests
-cargo clippy             # Lint
-cargo fmt -- --check     # Format check
+cargo test               # 39 tests
+cargo clippy             # Lint (0 warnings)
+
+# Extension tests
+node extension-v2/test/claw-format.test.mjs   # 447 constraints
+node extension-v2/test/page-api.test.mjs       # 16 constraints
 ```
 
 ## License
