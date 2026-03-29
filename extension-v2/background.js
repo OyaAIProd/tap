@@ -35,7 +35,7 @@ async function registerAllClaws() {
   }
 }
 
-await registerAllClaws()
+registerAllClaws()
 
 // --- State ---
 

@@ -256,7 +256,9 @@ fn parse_adapter_args(raw: &[String]) -> std::collections::HashMap<String, Value
                 let json_val = if let Ok(n) = val.parse::<i64>() {
                     Value::Number(n.into())
                 } else if let Ok(f) = val.parse::<f64>() {
-                    Value::Number(serde_json::Number::from_f64(f).unwrap())
+                    serde_json::Number::from_f64(f)
+                        .map(Value::Number)
+                        .unwrap_or_else(|| Value::String(val.clone()))
                 } else {
                     Value::String(val.clone())
                 };
