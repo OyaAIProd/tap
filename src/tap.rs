@@ -108,8 +108,13 @@ pub fn tap_cache() -> String {
     cache
 }
 
+/// Max log file size before rotation (1 MB).
+const LOG_MAX_BYTES: u64 = 1_024 * 1_024;
+/// Lines to keep after rotation (most recent).
+const LOG_KEEP_LINES: usize = 5_000;
+
 /// Append a structured event to ~/.tap/logs/tap.jsonl.
-/// Each line is a self-contained JSON object for AI agent analysis.
+/// Auto-rotates: when file exceeds LOG_MAX_BYTES, keeps last LOG_KEEP_LINES.
 pub fn tap_log(event: &serde_json::Value) {
     let logs_dir = format!("{}/logs", tap_home());
     let _ = std::fs::create_dir_all(&logs_dir);
@@ -124,6 +129,13 @@ pub fn tap_log(event: &serde_json::Value) {
         obj.insert("ts".to_string(), serde_json::json!(ts));
     }
 
+    // Rotate if file exceeds size limit
+    if let Ok(meta) = std::fs::metadata(&path) {
+        if meta.len() > LOG_MAX_BYTES {
+            rotate_log(&path);
+        }
+    }
+
     use std::io::Write;
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
@@ -132,6 +144,17 @@ pub fn tap_log(event: &serde_json::Value) {
     {
         let _ = writeln!(f, "{}", entry);
     }
+}
+
+/// Rotate log: keep last LOG_KEEP_LINES, discard the rest.
+fn rotate_log(path: &str) {
+    let Ok(content) = std::fs::read_to_string(path) else { return };
+    let lines: Vec<&str> = content.lines().collect();
+    if lines.len() <= LOG_KEEP_LINES {
+        return;
+    }
+    let kept = &lines[lines.len() - LOG_KEEP_LINES..];
+    let _ = std::fs::write(path, kept.join("\n") + "\n");
 }
 
 /// Read recent log entries. Returns last `n` lines from tap.jsonl.
