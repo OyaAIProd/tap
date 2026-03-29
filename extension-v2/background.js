@@ -1063,29 +1063,63 @@ async function handleTapAction(msg) {
 // Handles both CDP commands and tap actions from any source.
 
 async function handleMessage(msg) {
+  // --- Tap Protocol envelope (formal): {"protocol":"tap/1.0","type":"...","method":"...","params":{...},"tabId":N} ---
+  if (msg.protocol && msg.protocol.startsWith('tap/')) {
+    return await handleProtocol(msg)
+  }
+
+  // --- Legacy formats (chrome.runtime, popup, omnibox) ---
   const { method, params, action } = msg
 
-  // Tap actions: { action: "list" } or { action: "run", site, name }
   if (action) {
     return await handleTapAction(msg)
   }
 
-  // Bridge meta-commands: { method: "Bridge.attach" }
   if (method && method.startsWith('Bridge.')) {
     return await handleBridgeCommand(method, params || {})
   }
 
-  // Tap commands: { method: "Tap.pageIntelligence" }, { method: "Tap.run" }
   if (method && method.startsWith('Tap.')) {
     return await handleTapCommand(method, params || {})
   }
 
-  // CDP commands: { method: "Page.navigate", params: { url: "..." } }
   if (method) {
     return await routeCDP(method, params || {})
   }
 
-  throw new Error('invalid message: need "action" or "method"')
+  throw new Error('invalid message: need "protocol", "action", or "method"')
+}
+
+/**
+ * Handle Tap protocol envelope — formal bridge communication.
+ * Routes by type: tool (Tap.* handlers), cdp (passthrough), bridge (meta).
+ */
+async function handleProtocol(msg) {
+  const { type: msgType, method, params = {}, tabId } = msg
+
+  // Inject tabId into params for handlers that use requireTab()
+  if (tabId !== undefined && tabId >= 0) {
+    params.tabId = tabId
+  }
+
+  switch (msgType) {
+    case 'tool':
+      // Delegate to existing Tap command handlers
+      return await handleTapCommand(`Tap.${method}`, params)
+
+    case 'cdp':
+      // CDP passthrough with tabId routing
+      if (tabId !== undefined && tabId >= 0) {
+        return await routeCDP(method, params, tabId)
+      }
+      return await routeCDP(method, params)
+
+    case 'bridge':
+      return await handleBridgeCommand(`Bridge.${method}`, params)
+
+    default:
+      throw new Error(`unknown protocol type: ${msgType}`)
+  }
 }
 
 // --- chrome.runtime listeners ---

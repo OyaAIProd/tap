@@ -686,7 +686,7 @@ async fn handle_tool_call(id: &Value, params: &Value, client: &BridgeClient) -> 
     let toasts = if is_action {
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         client
-            .send("Tap.collect_toasts", Some(json!({})))
+            .send_tap("tool", "collect_toasts", json!({}), -1)
             .await
             .ok()
             .and_then(|v| v.as_array().cloned())
@@ -745,33 +745,29 @@ async fn execute_tool(
     match name {
         // --- Tools with local logic ---
         "page_intelligence" => {
-            let tab_id = args.get("tabId").cloned();
+            let tab_id = extract_tab_id(args);
             if let Some(url) = args["url"].as_str() {
-                let mut nav_params = json!({ "url": url });
-                if let Some(tid) = &tab_id {
-                    nav_params["tabId"] = tid.clone();
-                }
-                client.send("Page.navigate", Some(nav_params)).await?;
-            }
-            let mut pi_params = json!({});
-            if let Some(tid) = tab_id {
-                pi_params["tabId"] = tid;
+                client
+                    .send_tap("cdp", "Page.navigate", json!({ "url": url }), tab_id)
+                    .await?;
             }
             client
-                .send("Tap.pageIntelligence", Some(pi_params))
+                .send_tap("tool", "pageIntelligence", json!({}), tab_id)
                 .await
         }
-        "list_taps" => client.send("Tap.list", Some(json!({}))).await,
+        "list_taps" => {
+            client
+                .send_tap("tool", "list", json!({}), -1)
+                .await
+        }
         "run_tap" => {
             let site = args["site"].as_str().ok_or("missing site")?;
             let name_arg = args["name"].as_str().ok_or("missing name")?;
             let tap_args = args.get("args").cloned().unwrap_or(json!({}));
-            let mut run_params = json!({"site": site, "name": name_arg, "args": tap_args});
-            if let Some(tid) = args.get("tabId") {
-                run_params["tabId"] = tid.clone();
-            }
+            let tab_id = extract_tab_id(args);
+            let run_params = json!({"site": site, "name": name_arg, "args": tap_args});
             let mut result = client
-                .send("Tap.run", Some(run_params))
+                .send_tap("tool", "run", run_params, tab_id)
                 .await?;
             // Health validation
             if let Some(rows) = result.get("rows").and_then(|r| r.as_array()) {
@@ -796,19 +792,21 @@ async fn execute_tool(
                 .unwrap_or_default();
 
             let start = std::time::Instant::now();
-            let mut nav_params = json!({ "url": url });
-            if let Some(tid) = args.get("tabId") {
-                nav_params["tabId"] = tid.clone();
-            }
-            client.send("Page.navigate", Some(nav_params)).await?;
+            let tab_id = extract_tab_id(args);
+            client
+                .send_tap("cdp", "Page.navigate", json!({ "url": url }), tab_id)
+                .await?;
             if wait_ms > 0 {
                 tokio::time::sleep(std::time::Duration::from_millis(wait_ms)).await;
             }
-            let mut eval_params = json!({ "expression": expression });
-            if let Some(tid) = args.get("tabId") {
-                eval_params["tabId"] = tid.clone();
-            }
-            let eval_result = client.send("Runtime.evaluate", Some(eval_params)).await?;
+            let eval_result = client
+                .send_tap(
+                    "cdp",
+                    "Runtime.evaluate",
+                    json!({ "expression": expression }),
+                    tab_id,
+                )
+                .await?;
             let result = eval_result
                 .get("result")
                 .and_then(|r| r.get("value"))
@@ -908,8 +906,9 @@ async fn execute_tool(
             if format == "jpeg" {
                 capture_params["quality"] = json!(quality);
             }
+            let tab_id = extract_tab_id(args);
             let result = client
-                .send("Page.captureScreenshot", Some(capture_params))
+                .send_tap("cdp", "Page.captureScreenshot", capture_params, tab_id)
                 .await?;
             if let Some(b64) = result["data"].as_str() {
                 use base64::Engine;
@@ -925,14 +924,15 @@ async fn execute_tool(
 
         // --- Accessibility tree with optional interactive filter ---
         "ax_tree" => {
+            let tab_id = extract_tab_id(args);
             let filter = args["filter"].as_str().unwrap_or("all");
             if filter == "interactive" {
                 client
-                    .send("Tap.ax_tree_interactive", Some(json!({})))
+                    .send_tap("tool", "ax_tree_interactive", json!({}), tab_id)
                     .await
             } else {
                 let result = client
-                    .send("Accessibility.getFullAXTree", Some(json!({})))
+                    .send_tap("cdp", "Accessibility.getFullAXTree", json!({}), tab_id)
                     .await?;
                 let text = serde_json::to_string(&result).unwrap_or_default();
                 if text.len() > 50_000 {
@@ -948,12 +948,16 @@ async fn execute_tool(
         }
 
         // --- DOM tree with extension-side summarization ---
-        "read_dom" => client.send("Tap.read_dom", Some(args.clone())).await,
+        "read_dom" => {
+            let tab_id = extract_tab_id(args);
+            client.send_tap("tool", "read_dom", args.clone(), tab_id).await
+        }
 
         // --- Download/save_image: fetch via browser, save to file ---
         "download" | "save_image" => {
+            let tab_id = extract_tab_id(args);
             let result = client
-                .send(&format!("Tap.{}", name), Some(args.clone()))
+                .send_tap("tool", name, args.clone(), tab_id)
                 .await?;
             if let Some(data_url) = result["data"].as_str() {
                 let output = args["output"].as_str().ok_or("missing output path")?;
@@ -973,25 +977,19 @@ async fn execute_tool(
             }
         }
 
-        // --- CDP relay tools — forward directly to extension ---
+        // --- CDP relay tools — forward via protocol envelope ---
         "navigate" => {
-            let mut params = json!({ "url": args["url"].as_str().ok_or("missing url")? });
-            if let Some(tid) = args.get("tabId") {
-                params["tabId"] = tid.clone();
-            }
-            client.send("Page.navigate", Some(params)).await?;
-            // Fetch page state after navigation
+            let tab_id = extract_tab_id(args);
+            let url = args["url"].as_str().ok_or("missing url")?;
+            client
+                .send_tap("cdp", "Page.navigate", json!({ "url": url }), tab_id)
+                .await?;
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-            let tab_param = if let Some(tid) = args.get("tabId") {
-                json!({ "tabId": tid })
-            } else {
-                json!({})
-            };
             let info = client
-                .send("Tap.page_info", Some(tab_param))
+                .send_tap("tool", "page_info", json!({}), tab_id)
                 .await
                 .ok();
-            let url = info
+            let nav_url = info
                 .as_ref()
                 .and_then(|v| v["url"].as_str())
                 .unwrap_or("?");
@@ -999,14 +997,19 @@ async fn execute_tool(
                 .as_ref()
                 .and_then(|v| v["title"].as_str())
                 .unwrap_or("?");
-            Ok(json!(format!("navigated\n  → url: {}\n  → title: {}", url, title)))
+            Ok(json!(format!("navigated\n  → url: {}\n  → title: {}", nav_url, title)))
         }
         "evaluate" => {
-            let mut params = json!({ "expression": args["expression"].as_str().ok_or("missing expression")? });
-            if let Some(tid) = args.get("tabId") {
-                params["tabId"] = tid.clone();
-            }
-            let result = client.send("Runtime.evaluate", Some(params)).await?;
+            let tab_id = extract_tab_id(args);
+            let expression = args["expression"].as_str().ok_or("missing expression")?;
+            let result = client
+                .send_tap(
+                    "cdp",
+                    "Runtime.evaluate",
+                    json!({ "expression": expression }),
+                    tab_id,
+                )
+                .await?;
             let value = result
                 .get("result")
                 .and_then(|r| r.get("value"))
@@ -1015,19 +1018,27 @@ async fn execute_tool(
             Ok(value)
         }
 
-        // All other tools: relay as CDP commands to extension
+        // All other tools: relay via protocol envelope
         _ => relay_to_extension(name, args, client).await,
     }
 }
 
-/// Relay an MCP tool call to the extension as a Tap.{name} command.
+/// Extract tabId from args, defaulting to -1 (use active tab).
+fn extract_tab_id(args: &Value) -> i64 {
+    args.get("tabId").and_then(|v| v.as_i64()).unwrap_or(-1)
+}
+
+/// Relay an MCP tool call to the extension via Tap protocol envelope.
+///
+/// Wire format: {"protocol":"tap/1.0","id":N,"type":"tool","method":"...","params":{...},"tabId":N}
 async fn relay_to_extension(
     name: &str,
     args: &Value,
     client: &BridgeClient,
 ) -> Result<Value, Box<dyn std::error::Error>> {
+    let tab_id = extract_tab_id(args);
     client
-        .send(&format!("Tap.{}", name), Some(args.clone()))
+        .send_tap("tool", name, args.clone(), tab_id)
         .await
 }
 

@@ -1,7 +1,7 @@
-//! WebSocket JSON-RPC client for Chrome extension bridge communication.
+//! WebSocket client for Chrome extension bridge communication.
 //!
 //! BridgeClient is the transport layer between the Rust MCP server and the
-//! Chrome extension. It sends method calls and receives responses over WebSocket.
+//! Chrome extension. Supports both legacy JSON-RPC and the Tap protocol envelope.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -149,8 +149,48 @@ impl BridgeClient {
         }
     }
 
-    // navigate() and evaluate() removed — mcp.rs now calls client.send()
-    // directly with tabId support for multi-tab routing.
+    /// Send a Tap protocol message (formal envelope with version, type, method).
+    ///
+    /// Wire format:
+    /// ```json
+    /// {"protocol":"tap/1.0","id":42,"type":"stdlib","method":"click","params":{"text":"Login"},"tabId":123}
+    /// ```
+    pub async fn send_tap(
+        &self,
+        msg_type: &str,
+        method: &str,
+        params: Value,
+        tab_id: i64,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
+        let id = {
+            let mut next = self.next_id.lock().await;
+            let id = *next;
+            *next += 1;
+            id
+        };
+
+        let mut envelope = serde_json::json!({
+            "protocol": "tap/1.0",
+            "id": id,
+            "type": msg_type,
+            "method": method,
+            "params": params,
+        });
+        if tab_id >= 0 {
+            envelope["tabId"] = serde_json::json!(tab_id);
+        }
+
+        let (resp_tx, resp_rx) = oneshot::channel();
+        self.pending.lock().await.insert(id, resp_tx);
+
+        let json = serde_json::to_string(&envelope)?;
+        self.tx.send(Message::Text(json.into())).await?;
+
+        match resp_rx.await? {
+            Ok(value) => Ok(value),
+            Err(rpc_err) => Err(Box::new(rpc_err)),
+        }
+    }
 }
 
 #[cfg(test)]
