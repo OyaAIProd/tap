@@ -1,10 +1,10 @@
-# Webclaw
+# WebClaw
 
 > **Make every website programmable by AI.**
 
 Websites are closing their APIs. AI agents need them more than ever.
 
-Webclaw is a Chrome extension + MCP server. AI agents forge `.webclaw.js` scripts that extract data from any website — deterministically, with zero AI at runtime.
+WebClaw is a Chrome extension + MCP server. AI agents forge `.webclaw.js` scripts that extract data from any website — deterministically, with zero AI at runtime.
 
 ```
 page_intelligence → forge_verify → forge_save → run_adapter
@@ -15,19 +15,18 @@ One agent forges a webclaw, every agent benefits.
 
 ## Install
 
-**Chrome Extension** — download `webclaw-extension.zip` from [Releases](https://github.com/LeonTing1010/webclaw/releases), unzip, load in `chrome://extensions/` (developer mode).
-
-**MCP Server** (for Claude Code / AI agents):
-
 ```bash
-# Download binary from GitHub Releases
-# https://github.com/LeonTing1010/webclaw/releases
-
-# Or build from source
-cargo install --path .
+# One-line install (macOS / Linux)
+curl -fsSL https://raw.githubusercontent.com/LeonTing1010/webclaw/master/install.sh | sh
 ```
 
-Configure in your AI client:
+Then install the Chrome extension:
+
+1. Download `webclaw-extension.zip` from [Releases](https://github.com/LeonTing1010/webclaw/releases/latest)
+2. Unzip, open `chrome://extensions/`, enable Developer mode
+3. Click "Load unpacked" → select the unzipped folder
+
+Configure for AI agents (Claude Code, etc.):
 
 ```json
 {
@@ -40,20 +39,36 @@ Configure in your AI client:
 }
 ```
 
+<details>
+<summary>Other install methods</summary>
+
+```bash
+# From source
+cargo install --git https://github.com/LeonTing1010/webclaw
+
+# Or build locally
+git clone https://github.com/LeonTing1010/webclaw && cd webclaw
+cargo install --path .
+
+# Windows — download webclaw-x86_64-pc-windows-msvc.zip from Releases
+```
+
+</details>
+
 ## Quick Start
 
 ### From any webpage console
 
 ```js
-// List available webclaws
-await webclaw.list()
-
-// Run a webclaw
 const data = await webclaw("github/trending", {limit: 5})
 console.table(data.rows)
+
+await webclaw.list()  // see all available webclaws
 ```
 
 ### From Chrome address bar
+
+Type `webclaw` then Tab:
 
 ```
 webclaw github/trending
@@ -162,7 +177,7 @@ export default {
 | `page.click(target)` | debugger | CDP native click |
 | `page.type(sel, text)` | debugger | CDP native keyboard |
 | `page.upload(sel, files)` | debugger | File upload via CDP |
-| `page.webclaw(site, name)` | - | Run another webclaw |
+| `page.webclaw(site, name)` | — | Run another webclaw |
 
 Scripting mode = undetectable. Debugger mode = millisecond attach/detach.
 
@@ -171,7 +186,7 @@ Scripting mode = undetectable. Debugger mode = millisecond attach/detach.
 ```
 Claude Code ←→ MCP (stdin/stdout) ←→ Bridge (ws://9333) ←→ Chrome Extension
                  Rust binary              WebSocket            background.js
-                 2,341 lines              auto-reconnect       page API + webclaws
+                 ~2,300 lines             auto-reconnect       page API + webclaws
 ```
 
 Rust binary = thin MCP bridge (6 dependencies). Chrome extension = sole runtime. No direct CDP.
