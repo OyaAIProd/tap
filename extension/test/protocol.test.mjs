@@ -269,5 +269,51 @@ test('capabilities() stdlib list matches STDLIB_METHODS', () => {
   }
 })
 
+// --- Layer isolation constraints (safety / what — violations = architectural rot) ---
+
+console.log('\n  layer isolation\n')
+
+test('background.js does not import kernel internals (createKernel, createStdlib)', () => {
+  // Why: bridge layer must only depend on the public protocol interface (createPage)
+  assert(!bgSrc.includes('createKernel'), 'bridge must not import createKernel — use createPage')
+  assert(!bgSrc.includes('createStdlib'), 'bridge must not import createStdlib — use createPage')
+})
+
+test('background.js delegated handlers do not use chrome.scripting.executeScript', () => {
+  // Why: delegated operations must go through protocol layer, not reimplement with raw chrome APIs
+  for (const [handler] of DELEGATED_HANDLERS) {
+    const caseStart = bgSrc.indexOf(`case '${handler}':`)
+    if (caseStart === -1) continue
+    const nextCase = bgSrc.indexOf("case '", caseStart + handler.length + 10)
+    const section = bgSrc.substring(caseStart, nextCase !== -1 ? nextCase : caseStart + 500)
+    assert(!section.includes('chrome.scripting.executeScript'),
+      `${handler} handler uses chrome.scripting directly — must delegate to protocol`)
+  }
+})
+
+test('protocol.js does not import from background.js (no upward dependency)', () => {
+  // Why: protocol is the lower layer — it must not depend on the bridge layer above it
+  assert(!src.includes("from '../background"), 'protocol must not import from background.js')
+  assert(!src.includes("from './background"), 'protocol must not import from background.js')
+})
+
+test('Rust mcp.rs tool names all use category.method format', () => {
+  // Why: unified naming convention — every tool must have a dot separator
+  const mcpSrc = readFileSync(new URL('../../src/mcp.rs', import.meta.url), 'utf-8')
+  // Extract tool names only from the tools_schema() function
+  const schemaSection = mcpSrc.substring(mcpSrc.indexOf('fn tools_schema()'), mcpSrc.indexOf('async fn handle_tool_call'))
+  const toolNames = [...schemaSection.matchAll(/"name":\s*"([^"]+)"/g)].map(m => m[1])
+  for (const name of toolNames) {
+    assert(name.includes('.'), `MCP tool "${name}" missing category.method dot — expected format like "page.click"`)
+  }
+})
+
+test('Rust relay_to_extension strips category prefix', () => {
+  // Why: extension handlers use bare method names, Rust must strip "page." / "inspect." etc.
+  const mcpSrc = readFileSync(new URL('../../src/mcp.rs', import.meta.url), 'utf-8')
+  const relayFn = mcpSrc.substring(mcpSrc.indexOf('fn relay_to_extension'))
+  assert(relayFn.includes("split('.')"), 'relay_to_extension must strip category prefix via split')
+})
+
 console.log(`\n${passed + failed} constraints, ${passed} passed, ${failed} failed\n`)
 process.exit(failed > 0 ? 1 : 0)

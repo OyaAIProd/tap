@@ -1230,6 +1230,79 @@ async fn relay_to_extension(
 mod tests {
     use super::*;
 
+    // ── MCP Standard Format Compliance ──
+
+    #[test]
+    fn initialize_response_has_required_fields() {
+        // Why: MCP spec requires protocolVersion, capabilities, serverInfo in initialize
+        let resp = handle_initialize(&json!(1));
+        let result = &resp["result"];
+        assert_eq!(result["protocolVersion"], "2024-11-05", "must declare MCP protocol version");
+        assert!(result["capabilities"]["tools"].is_object(), "must declare tools capability");
+        assert!(result["capabilities"]["resources"].is_object(), "must declare resources capability");
+        assert!(result["capabilities"]["prompts"].is_object(), "must declare prompts capability");
+        assert_eq!(result["serverInfo"]["name"], "tap");
+        assert!(!result["serverInfo"]["version"].as_str().unwrap_or("").is_empty(), "must have version");
+        assert_eq!(result["serverInfo"]["tapProtocol"], TAP_PROTOCOL_VERSION, "must expose tap protocol version");
+    }
+
+    #[test]
+    fn tap_protocol_version_matches_extension() {
+        // Why: mcp.rs and protocol.js must agree on protocol version — mismatch = silent breakage
+        let extension_src = std::fs::read_to_string("extension/protocol/protocol.js")
+            .expect("protocol.js must exist");
+        let expected = format!("PROTOCOL_VERSION = '{}'", TAP_PROTOCOL_VERSION);
+        assert!(extension_src.contains(&expected),
+            "protocol.js PROTOCOL_VERSION must match mcp.rs TAP_PROTOCOL_VERSION ({})", TAP_PROTOCOL_VERSION);
+    }
+
+    #[test]
+    fn every_tool_has_valid_schema() {
+        // Why: MCP spec requires name, description, inputSchema for each tool
+        let schema = tools_schema();
+        let tools = schema.as_array().unwrap();
+        assert!(tools.len() >= 20, "should have 20+ tools, got {}", tools.len());
+        for tool in tools {
+            let name = tool["name"].as_str().unwrap_or("");
+            assert!(!name.is_empty(), "tool must have name");
+            assert!(tool["description"].is_string(), "tool {} must have description", name);
+            assert_eq!(tool["inputSchema"]["type"], "object", "tool {} inputSchema must be object", name);
+        }
+    }
+
+    #[test]
+    fn resources_list_has_valid_format() {
+        // Why: MCP spec requires uri, name for each resource
+        let resp = handle_resources_list(&json!(1));
+        let resources = resp["result"]["resources"].as_array().unwrap();
+        assert!(resources.len() >= 2, "must have at least protocol + logs resources");
+        for r in resources {
+            assert!(r["uri"].is_string(), "resource must have uri");
+            assert!(r["name"].is_string(), "resource must have name");
+            let uri = r["uri"].as_str().unwrap();
+            assert!(uri.starts_with("tap://"), "resource URI must use tap:// scheme, got {}", uri);
+        }
+    }
+
+    #[test]
+    fn prompts_list_has_valid_format() {
+        // Why: MCP spec requires name, description for each prompt
+        let resp = handle_prompts_list(&json!(1));
+        let prompts = resp["result"]["prompts"].as_array().unwrap();
+        assert!(prompts.len() >= 2, "must have forge + debug prompts");
+        for p in prompts {
+            assert!(p["name"].is_string(), "prompt must have name");
+            assert!(p["description"].is_string(), "prompt must have description");
+        }
+        // forge prompt must have url and capability arguments
+        let forge = prompts.iter().find(|p| p["name"] == "forge").unwrap();
+        let args = forge["arguments"].as_array().unwrap();
+        assert!(args.iter().any(|a| a["name"] == "url"), "forge must have url argument");
+        assert!(args.iter().any(|a| a["name"] == "capability"), "forge must have capability argument");
+    }
+
+    // ── Tool Existence Constraints ──
+
     #[test]
     fn tools_schema_includes_list_taps() {
         let schema = tools_schema();
