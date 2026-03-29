@@ -84,13 +84,28 @@ fn extract_js_string(content: &str, field: &str) -> Option<String> {
     Some(rest[start..start + end].to_string())
 }
 
+/// Tap home directory (~/.tap). All runtime state lives here.
+/// Override with TAP_HOME env var.
+pub fn tap_home() -> String {
+    std::env::var("TAP_HOME").unwrap_or_else(|_| {
+        let home = std::env::var("HOME").unwrap_or_default();
+        format!("{}/.tap", home)
+    })
+}
+
 /// Standard tap search directories.
 pub fn tap_dirs() -> Vec<String> {
-    let home = std::env::var("HOME").unwrap_or_default();
     vec![
         "extension-v2/taps".to_string(),
-        format!("{}/.tap/taps", home),
+        format!("{}/taps", tap_home()),
     ]
+}
+
+/// Cache directory for ephemeral files (screenshots, downloads).
+pub fn tap_cache() -> String {
+    let cache = format!("{}/cache", tap_home());
+    let _ = std::fs::create_dir_all(&cache);
+    cache
 }
 
 /// Parse a HealthContract from a JSON value.
@@ -133,11 +148,24 @@ mod tests {
     }
 
     #[test]
+    fn tap_home_defaults_to_dot_tap() {
+        let home = tap_home();
+        assert!(home.ends_with(".tap"), "tap_home should end with .tap, got {}", home);
+    }
+
+    #[test]
     fn tap_dirs_v2_only() {
         let dirs = tap_dirs();
         assert_eq!(dirs.len(), 2);
         assert!(dirs[0].contains("extension-v2/taps"));
         assert!(dirs[1].contains(".tap/taps"));
+    }
+
+    #[test]
+    fn tap_cache_creates_dir() {
+        let cache = tap_cache();
+        assert!(cache.ends_with("/cache"), "tap_cache should end with /cache, got {}", cache);
+        assert!(std::path::Path::new(&cache).is_dir(), "tap_cache should create directory");
     }
 
     #[test]

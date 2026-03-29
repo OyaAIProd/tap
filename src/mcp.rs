@@ -8,6 +8,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use crate::bridge::BridgeServer;
 use crate::cdp::BridgeClient;
+use crate::tap::{tap_home, tap_cache};
 
 /// Run the MCP server: read JSON-RPC from stdin, write responses to stdout.
 pub async fn serve() -> Result<(), Box<dyn std::error::Error>> {
@@ -164,7 +165,7 @@ fn tools_schema() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string", "description": "Output file path", "default": "/tmp/tap-screenshot.jpg" },
+                    "path": { "type": "string", "description": "Output file path (default: ~/.tap/cache/screenshot.jpg)" },
                     "format": { "type": "string", "enum": ["jpeg", "png"], "description": "Image format", "default": "jpeg" },
                     "quality": { "type": "integer", "description": "JPEG quality 1-100 (lower = smaller file)", "default": 50 },
                     "grayscale": { "type": "boolean", "description": "Strip color for smaller file size", "default": true }
@@ -856,14 +857,10 @@ async fn execute_tool(
             let tap_name = args["name"].as_str().ok_or("missing name")?;
             let code = args["code"].as_str().ok_or("missing code")?;
 
-            // Save to extension-v2/taps/ (dev) and ~/.tap/taps/ (user)
+            // Save to extension-v2/taps/ (dev) and TAP_HOME/taps/ (user)
             let dirs = vec![
                 format!("extension-v2/taps/{}", site),
-                format!(
-                    "{}/.tap/taps/{}",
-                    std::env::var("HOME").unwrap_or_default(),
-                    site
-                ),
+                format!("{}/taps/{}", tap_home(), site),
             ];
             let mut saved_to = String::new();
             for dir in &dirs {
@@ -896,7 +893,7 @@ async fn execute_tool(
             let format = args["format"].as_str().unwrap_or("jpeg");
             let quality = args["quality"].as_u64().unwrap_or(50);
             let default_ext = if format == "jpeg" { "jpg" } else { "png" };
-            let default_path = format!("/tmp/tap-screenshot.{}", default_ext);
+            let default_path = format!("{}/screenshot.{}", tap_cache(), default_ext);
             let path = args["path"].as_str().unwrap_or(&default_path);
 
             let mut capture_params = json!({
