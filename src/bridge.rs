@@ -78,7 +78,7 @@ async fn try_connect_and_attach(
         .map_err(|e| format!("handshake failed: {}", e))?;
 
     let result = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(15),
         client.send("Bridge.attach", Some(serde_json::json!({}))),
     )
     .await
