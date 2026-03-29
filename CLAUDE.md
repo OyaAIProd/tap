@@ -138,9 +138,9 @@ node extension/test/protocol.test.mjs      # protocol contract checks
 | typecheck | `cargo check` | Rust compiler |
 | lint | `cargo clippy -- -D warnings` | Zero warnings |
 | format | `cargo fmt -- --check` | Rustfmt |
-| rust tests | `cargo test` | 39 unit tests |
-| tap format | `node extension/test/tap-format.test.mjs` | 790 constraints |
-| protocol | `node extension/test/protocol.test.mjs` | 79 constraints (kernel + stdlib + versioning) |
+| rust tests | `cargo test` | 47 unit tests |
+| tap format | `node extension/test/tap-format.test.mjs` | 933 constraints |
+| protocol | `node extension/test/protocol.test.mjs` | 86 constraints (kernel + stdlib + versioning) |
 
 ## Test Conventions
 
