@@ -265,6 +265,97 @@ AI：已保存至 hackernews/hot.tap.js ✓
 
 新的运行时实现 8 个内核方法 — 免费获得全部 16 个标准库操作和所有已有的 `.tap.js`。
 
+### Page API
+
+<details>
+<summary>内核 — 8 个原语（点击展开）</summary>
+
+| 原语 | 描述 |
+|------|------|
+| `page.eval(fn, ...args)` | 在目标上下文执行 |
+| `page.pointer(x, y, action)` | 指针事件 |
+| `page.keyboard(key, action, mods?)` | 键盘事件 |
+| `page.nav(url)` | 导航到 URL |
+| `page.wait(ms \| condition)` | 等待时间或条件 |
+| `page.screenshot()` | 视觉截图 |
+| `page.tap(site, name, args?)` | 调用另一个 tap |
+| `page.capabilities()` | 查询运行时能力 |
+
+</details>
+
+<details>
+<summary>标准库 — 16 个操作（点击展开）</summary>
+
+| 操作 | 构建自 | 描述 |
+|------|--------|------|
+| `page.click(target)` | eval + pointer | 点击选择器或可见文本 |
+| `page.type(sel, text)` | eval + keyboard | 输入文本 |
+| `page.hover(sel)` | eval + pointer | 悬停 |
+| `page.scroll(sel)` | eval | 滚动到可见 |
+| `page.pressKey(key, mods?)` | keyboard | 按键 |
+| `page.select(sel, value)` | eval | 下拉选择 |
+| `page.upload(sel, files)` | runtime override | 文件上传 |
+| `page.dialog(accept?, text?)` | runtime override | 处理弹窗 |
+| `page.fetch(url, opts?)` | eval | 带会话 Cookie 的 API 调用 |
+| `page.find(query, role?)` | eval | 按可见文本查找元素 |
+| `page.cookies()` | runtime override | 读取 Cookie |
+| `page.download(url)` | eval | 下载并解析 |
+| `page.waitFor(sel, ms?)` | wait | 等待元素出现 |
+| `page.waitForNetwork(ms?, idle?)` | eval | 等待网络空闲 |
+| `page.ssrState(name?)` | eval | 提取 SSR 全局状态 |
+| `page.storage(type?)` | eval | 读取本地/会话存储 |
+
+</details>
+
+### .tap.js 格式
+
+两种形式 — **extract**（读取数据）和 **run**（执行操作）：
+
+```js
+// Extract 形式：纯数据提取，API 优先
+export default {
+  site: "bilibili",
+  name: "hot",
+  description: "B站热门视频",
+  url: "https://www.bilibili.com",
+  health: { min_rows: 5, non_empty: ["title"] },
+
+  extract: async () => {
+    const res = await fetch('https://api.bilibili.com/x/web-interface/ranking/v2',
+      { credentials: 'include' })
+    const data = await res.json()
+    return data.data.list.map(v => ({
+      title: v.title,
+      author: v.owner.name,
+      views: String(v.stat.view),
+      url: 'https://bilibili.com/video/' + v.bvid
+    }))
+  }
+}
+```
+
+```js
+// Run 形式：通过 page API 执行操作
+export default {
+  site: "x",
+  name: "post",
+  description: "发推文",
+  columns: ["status", "url"],
+  args: { content: { type: "string" } },
+
+  async run(page, args) {
+    await page.nav('https://x.com/compose/post')
+    await page.wait(2000)
+    await page.click('[data-testid="tweetTextarea_0"]')
+    await page.type('[data-testid="tweetTextarea_0"]', args.content)
+    await page.click('[data-testid="tweetButton"]')
+    await page.wait(3000)
+    const url = await page.eval(() => location.href)
+    return [{ status: 'posted', url }]
+  }
+}
+```
+
 ## 架构
 
 ```
@@ -276,6 +367,19 @@ AI Agent ←→ MCP (stdin/stdout) ←→ Bridge (ws://9333) ←→ Chrome 扩�
 **Rust 二进制** — 轻量 MCP 网关。无浏览器逻辑，无 CDP 依赖。
 **Chrome 扩展** — 运行时 #1。所有浏览器操作通过合法扩展 API。
 **.tap.js** — 确定性脚本。零 AI，零 token，永久运行。
+
+## MCP 工具
+
+38 个工具按类别组织：
+
+| 类别 | 工具 |
+|------|------|
+| **tap.** | `run`, `list`, `screenshot`, `logs` |
+| **page.** | `click`, `type`, `nav`, `eval`, `hover`, `scroll`, `pressKey`, `select`, `upload`, `find`, `cookies`, `dialog`, `storage`, `setCookie` |
+| **forge.** | `inspect`, `verify`, `save` |
+| **inspect.** | `page`, `a11y`, `dom`, `element`, `apiLog`, `networkStart`, `networkDump`, `globals`, `resources`, `download` |
+| **intercept.** | `on`, `off`, `list`, `continue`, `fulfill`, `fail` |
+| **tab.** | `list`, `new`, `close` |
 
 ## 构建
 
@@ -304,6 +408,10 @@ node extension/test/protocol.test.mjs     # 86 条约束
 - [ ] **Android 运行时** — 基于 AccessibilityService 的内核
 - [ ] **自动修复** — 检测并重新生成失效的 tap
 - [ ] **Tap 组合** — 编排多站点工作流的高阶 tap
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=LeonTing1010/tap&type=Date)](https://star-history.com/#LeonTing1010/tap&Date)
 
 ## 许可证
 

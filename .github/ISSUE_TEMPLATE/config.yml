@@ -3,3 +3,6 @@ contact_links:
   - name: Discussion
     url: https://github.com/LeonTing1010/tap/discussions
     about: Ask questions and share ideas
+  - name: Contributing Guide
+    url: https://github.com/LeonTing1010/tap/blob/master/CONTRIBUTING.md
+    about: How to forge and contribute new taps

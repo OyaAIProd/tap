@@ -417,6 +417,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for how to:
 - [ ] **Auto-healing** — detect and regenerate broken taps
 - [ ] **Tap composition** — higher-order taps that orchestrate multi-site workflows
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=LeonTing1010/tap&type=Date)](https://star-history.com/#LeonTing1010/tap&Date)
+
 ## License
 
 AGPL-3.0 — see [LICENSE](LICENSE). Commercial licensing available.

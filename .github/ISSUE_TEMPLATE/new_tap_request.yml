@@ -1,0 +1,44 @@
+name: New Tap Request
+description: Request a tap for a site that isn't covered yet
+labels: ["new-tap"]
+body:
+  - type: input
+    id: site
+    attributes:
+      label: Site
+      description: Which website or app?
+      placeholder: "e.g. spotify, linkedin, substack"
+    validations:
+      required: true
+  - type: input
+    id: url
+    attributes:
+      label: URL
+      description: The main URL for this site
+      placeholder: "https://example.com"
+    validations:
+      required: true
+  - type: textarea
+    id: taps
+    attributes:
+      label: What taps would be useful?
+      description: "What operations should be supported? (e.g. hot, search, post)"
+      placeholder: |
+        - hot — trending content
+        - search — search by keyword
+    validations:
+      required: true
+  - type: dropdown
+    id: auth
+    attributes:
+      label: Requires login?
+      options:
+        - "No — public data"
+        - "Yes — needs Chrome login session"
+        - "Not sure"
+  - type: textarea
+    id: api
+    attributes:
+      label: Known API?
+      description: "If you know of a JSON/REST API this site exposes, share it here."
+      placeholder: "e.g. https://example.com/api/v1/trending returns JSON"

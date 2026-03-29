@@ -36,6 +36,8 @@ import c_douyin_hot from './taps/douyin/hot.tap.js'
 import c_douyin_open from './taps/douyin/open.tap.js'
 import c_douyin_search from './taps/douyin/search.tap.js'
 import c_facebook_feed from './taps/facebook/feed.tap.js'
+import c_github_issues from './taps/github/issues.tap.js'
+import c_github_stars from './taps/github/stars.tap.js'
 import c_github_trending from './taps/github/trending.tap.js'
 import c_google_trends from './taps/google/trends.tap.js'
 import c_hackernews_hot from './taps/hackernews/hot.tap.js'
@@ -45,10 +47,15 @@ import c_jimeng_history from './taps/jimeng/history.tap.js'
 import c_jimeng_nav from './taps/jimeng/nav.tap.js'
 import c_juejin_hot from './taps/juejin/hot.tap.js'
 import c_lobsters_hot from './taps/lobsters/hot.tap.js'
+import c_medium_hot from './taps/medium/hot.tap.js'
+import c_medium_search from './taps/medium/search.tap.js'
 import c_pixiv_ranking from './taps/pixiv/ranking.tap.js'
 import c_producthunt_hot from './taps/producthunt/hot.tap.js'
 import c_pypi_top from './taps/pypi/top.tap.js'
+import c_arxiv_search from './taps/arxiv/search.tap.js'
+import c_reddit_comment from './taps/reddit/comment.tap.js'
 import c_reddit_hot from './taps/reddit/hot.tap.js'
+import c_reddit_search from './taps/reddit/search.tap.js'
 import c_sspai_hot from './taps/sspai/hot.tap.js'
 import c_stackoverflow_hot from './taps/stackoverflow/hot.tap.js'
 import c_steam_top_sellers from './taps/steam/top-sellers.tap.js'
@@ -65,7 +72,11 @@ import c_weibo_detail from './taps/weibo/detail.tap.js'
 import c_weibo_hot from './taps/weibo/hot.tap.js'
 import c_weibo_open from './taps/weibo/open.tap.js'
 import c_weibo_search from './taps/weibo/search.tap.js'
+import c_weread_highlights from './taps/weread/highlights.tap.js'
+import c_weread_shelf from './taps/weread/shelf.tap.js'
 import c_wikipedia_most_read from './taps/wikipedia/most-read.tap.js'
+import c_x_post from './taps/x/post.tap.js'
+import c_x_search from './taps/x/search.tap.js'
 import c_x_trending from './taps/x/trending.tap.js'
 import c_xiaohongshu_hot from './taps/xiaohongshu/hot.tap.js'
 import c_xiaohongshu_post_detail from './taps/xiaohongshu/post_detail.tap.js'
@@ -88,14 +99,18 @@ const ALL_TAPS = [
   c_36kr_hot, c_baidu_hot, c_bilibili_comment, c_bilibili_detail, c_bilibili_hot,
   c_bilibili_open, c_bilibili_search, c_bluesky_trending, c_coingecko_top,
   c_crates_popular, c_devto_top, c_dictionary_search, c_douban_hot, c_douyin_comment,
-  c_douyin_detail, c_douyin_hot, c_douyin_open, c_douyin_search, c_facebook_feed, c_github_trending, c_google_trends, c_hackernews_hot,
+  c_douyin_detail, c_douyin_hot, c_douyin_open, c_douyin_search, c_facebook_feed,
+  c_github_issues, c_github_stars, c_github_trending, c_google_trends, c_hackernews_hot,
   c_instagram_explore, c_jimeng_generate, c_jimeng_history, c_jimeng_nav, c_juejin_hot, c_lobsters_hot,
-  c_pixiv_ranking, c_producthunt_hot, c_pypi_top, c_reddit_hot, c_sspai_hot,
+  c_medium_hot, c_medium_search,
+  c_pixiv_ranking, c_producthunt_hot, c_pypi_top,
+  c_arxiv_search, c_reddit_comment, c_reddit_hot, c_reddit_search, c_sspai_hot,
   c_stackoverflow_hot, c_steam_top_sellers, c_telegraph_nav, c_telegraph_publish, c_tiktok_trending,
   c_toutiao_hot, c_v2ex_hot, c_wechat_detail, c_wechat_open, c_wechat_search,
   c_weibo_comment, c_weibo_detail, c_weibo_hot,
-  c_weibo_open, c_weibo_search, c_wikipedia_most_read,
-  c_x_trending, c_xiaohongshu_comment, c_xiaohongshu_detail, c_xiaohongshu_hot,
+  c_weibo_open, c_weibo_search,
+  c_weread_highlights, c_weread_shelf, c_wikipedia_most_read,
+  c_x_post, c_x_search, c_x_trending, c_xiaohongshu_comment, c_xiaohongshu_detail, c_xiaohongshu_hot,
   c_xiaohongshu_nav_publish, c_xiaohongshu_open, c_xiaohongshu_post_detail, c_xiaohongshu_publish,
   c_xiaohongshu_search_fast, c_xiaohongshu_search,
   c_xueqiu_hot_stock, c_youtube_trending, c_zhihu_comment, c_zhihu_detail,
@@ -103,7 +118,8 @@ const ALL_TAPS = [
 ]
 
 for (const mod of ALL_TAPS) registerTap(mod)
-console.log(`[tap] registered ${ALL_TAPS.length} taps`)
+const sites = new Set(ALL_TAPS.map(t => t.site).filter(Boolean))
+console.log(`[tap] ${ALL_TAPS.length} taps loaded (${sites.size} sites)`)
 
 // --- State ---
 
@@ -980,7 +996,7 @@ function connectBridge() {
   }
 
   bridgeSocket.onopen = () => {
-    console.log('[tap] bridge connected')
+    console.log(`[tap] bridge connected (ws://127.0.0.1:${BRIDGE_PORT})`)
     reconnectDelay = 1000
   }
 
@@ -1161,4 +1177,4 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
 })
 
-console.log('[tap] v2 ready — tap:// protocol active')
+console.log(`[tap] v0.3.0 ready — ${ALL_TAPS.length} taps · ${sites.size} sites · tap:// active`)

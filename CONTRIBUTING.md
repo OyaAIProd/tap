@@ -173,3 +173,7 @@ Load the extension from `extension/` directory in Chrome (Developer mode).
 - Include the site URL and a brief description of your extraction strategy
 - For write taps (run form): describe what the tap does and any prerequisites
 - Run `cargo clippy -- -D warnings` and `cargo fmt` for Rust changes
+
+## License
+
+Core is AGPL-3.0. Taps (`extension/taps/`) are Apache-2.0.

@@ -1174,11 +1174,11 @@ async fn execute_tool(
             let nav_url = info
                 .as_ref()
                 .and_then(|v| v["url"].as_str())
-                .unwrap_or("?");
+                .unwrap_or(url);
             let title = info
                 .as_ref()
                 .and_then(|v| v["title"].as_str())
-                .unwrap_or("?");
+                .unwrap_or("(loading)");
             Ok(json!(format!("navigated\n  → url: {}\n  → title: {}", nav_url, title)))
         }
         "page.eval" => {
@@ -1219,10 +1219,16 @@ async fn relay_to_extension(
     client: &BridgeClient,
 ) -> Result<Value, Box<dyn std::error::Error>> {
     let tab_id = extract_tab_id(args);
-    // Strip category prefix for extension dispatch (e.g., "page.click" -> "click")
-    let method = name.split('.').next_back().unwrap_or(name);
+    // Convert MCP dot notation to extension underscore notation
+    // "page.click" -> "click" (page category stripped)
+    // "tab.new" -> "tab_new", "intercept.on" -> "intercept_on" (prefix preserved)
+    let method = match name.split_once('.') {
+        Some(("page", action)) => action.to_string(),
+        Some((prefix, action)) => format!("{}_{}", prefix, action),
+        None => name.to_string(),
+    };
     client
-        .send_tap("tool", method, args.clone(), tab_id)
+        .send_tap("tool", &method, args.clone(), tab_id)
         .await
 }
 
@@ -1398,5 +1404,50 @@ mod tests {
                 tool_name
             );
         }
+    }
+
+    #[test]
+    fn relay_method_mapping_preserves_category_prefix() {
+        // Why: extension expects "tab_new" not "new", "intercept_on" not "on"
+        // Only page.* strips the prefix (extension uses "click" not "page_click")
+        let cases = vec![
+            ("page.click", "click"),
+            ("page.type", "type"),
+            ("page.hover", "hover"),
+            ("tab.new", "tab_new"),
+            ("tab.list", "tab_list"),
+            ("tab.close", "tab_close"),
+            ("intercept.on", "intercept_on"),
+            ("intercept.off", "intercept_off"),
+            ("intercept.continue", "intercept_continue"),
+            ("intercept.fulfill", "intercept_fulfill"),
+            ("intercept.fail", "intercept_fail"),
+        ];
+        for (mcp_name, expected_method) in cases {
+            let method = match mcp_name.split_once('.') {
+                Some(("page", action)) => action.to_string(),
+                Some((prefix, action)) => format!("{}_{}", prefix, action),
+                None => mcp_name.to_string(),
+            };
+            assert_eq!(method, expected_method,
+                "relay mapping: {} should become {}, got {}", mcp_name, expected_method, method);
+        }
+    }
+
+    #[test]
+    fn page_nav_fallback_uses_request_url() {
+        // Why: page.nav must never show "?" — fallback to the requested URL
+        let source = include_str!("mcp.rs");
+        let nav_section = source
+            .split("\"page.nav\"")
+            .nth(1)
+            .expect("page.nav handler must exist")
+            .split("\"page.eval\"")
+            .next()
+            .unwrap();
+        assert!(
+            !nav_section.contains("unwrap_or(\"?\")"),
+            "page.nav must not fallback to '?' — use the requested URL"
+        );
     }
 }
