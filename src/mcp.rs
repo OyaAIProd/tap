@@ -779,10 +779,8 @@ async fn execute_tool(
             for dir in &dirs {
                 if let Ok(()) = std::fs::create_dir_all(dir) {
                     let path = format!("{}/{}.claw.js", dir, claw_name);
-                    if std::fs::write(&path, code).is_ok() {
-                        if saved_to.is_empty() {
-                            saved_to = path;
-                        }
+                    if std::fs::write(&path, code).is_ok() && saved_to.is_empty() {
+                        saved_to = path;
                     }
                 }
             }

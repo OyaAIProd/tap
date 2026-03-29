@@ -68,7 +68,9 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let refs: Vec<&str> = dirs.iter().map(|s| s.as_str()).collect();
             let adapters = adapter::list_adapters(&refs);
             if adapters.is_empty() {
-                println!("No claws found. Run `claw sync` or add YAML files to ~/.claw/adapters/");
+                println!(
+                    "No claws found. Add .claw.js files to extension-v2/claws/ or ~/.claw/claws/"
+                );
             } else {
                 let columns = vec!["site".into(), "name".into(), "description".into()];
                 let mut need_login: Vec<String> = Vec::new();

@@ -18,6 +18,8 @@ jobs:
             target: x86_64-apple-darwin
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -26,11 +28,17 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release --target ${{ matrix.target }}
-      - run: tar -czf claw-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release claw
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        run: tar -czf claw-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release claw
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path target/${{ matrix.target }}/release/claw.exe -DestinationPath claw-${{ matrix.target }}.zip
       - uses: actions/upload-artifact@v4
         with:
           name: claw-${{ matrix.target }}
-          path: claw-${{ matrix.target }}.tar.gz
+          path: claw-${{ matrix.target }}.*
 
   extension:
     runs-on: ubuntu-latest
