@@ -27,6 +27,8 @@ jobs:
         with:
           node-version: 20
       - name: Validate .tap.js format
-        run: node extension-v2/test/tap-format.test.mjs
-      - name: Validate page API contract
-        run: node extension-v2/test/page-api.test.mjs
+        run: node extension/test/tap-format.test.mjs
+      - name: Validate protocol contract
+        run: node extension/test/protocol.test.mjs
+      - name: Validate architecture
+        run: node extension/test/architecture.test.mjs

@@ -24,7 +24,7 @@ Tap follows the **POSIX design philosophy**: minimal kernel, maximal possibility
 │ Built on kernel. Runtime may override.            │
 │ click, type, hover, scroll, pressKey, select,    │
 │ upload, dialog, fetch, find, cookies, download,   │
-│ waitFor, waitForNetwork, getSSRState, storage     │
+│ waitFor, waitForNetwork, ssrState, storage     │
 └──────────────────────┬───────────────────────────┘
 ┌──────────────────────▼───────────────────────────┐
 │ Kernel — 8 irreducible primitives                 │
@@ -155,7 +155,7 @@ Built on kernel primitives. Runtime may override for native performance.
 | `page.download(url)` | eval | Fetch + parse response |
 | `page.waitFor(sel, ms?)` | wait | Wait for element to appear |
 | `page.waitForNetwork(ms?, idle?)` | eval | Wait for network to settle |
-| `page.getSSRState(name?)` | eval | Extract SSR globals |
+| `page.ssrState(name?)` | eval | Extract SSR globals |
 | `page.storage(type?)` | eval | Read local/session storage |
 
 ## .tap.js Format
