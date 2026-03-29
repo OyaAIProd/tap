@@ -1,49 +1,20 @@
-use serde::Deserialize;
-use std::collections::HashMap;
 use std::path::Path;
 
-/// Adapter metadata loaded from YAML.
-/// Execution is handled by the Chrome extension in v2.
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-pub struct Adapter {
-    pub site: String,
-    pub name: String,
-    pub description: Option<String>,
-    pub domain: Option<String>,
-    pub strategy: Option<String>,
-    pub browser: Option<bool>,
-    pub columns: Vec<String>,
-    pub version: Option<String>,
-    pub last_forged: Option<String>,
-    pub forged_by: Option<String>,
-    #[serde(default)]
-    pub schema: Option<HashMap<String, String>>,
-    #[serde(default)]
-    pub health: Option<HealthContract>,
-}
-
 /// Health contract: output quality assertions for a claw.
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct HealthContract {
-    /// Minimum number of rows the adapter must return.
     pub min_rows: Option<usize>,
-    /// Columns that must have non-empty values in every row.
     pub non_empty: Option<Vec<String>>,
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct AdapterInfo {
     pub site: String,
     pub name: String,
     pub description: String,
-    pub strategy: String,
-    /// "yaml" or "js"
-    pub format: String,
 }
 
-/// Scan adapter directories for .yaml and .claw.js files and return metadata.
+/// Scan directories for .claw.js files and return metadata.
 pub fn list_adapters(base_dirs: &[&str]) -> Vec<AdapterInfo> {
     let mut adapters = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -70,12 +41,7 @@ pub fn list_adapters(base_dirs: &[&str]) -> Vec<AdapterInfo> {
                 let path = file_entry.path();
                 let filename = path.file_name().and_then(|f| f.to_str()).unwrap_or("");
 
-                // Match .yaml or .claw.js
-                let (adapter_name, format) = if filename.ends_with(".yaml") {
-                    (filename.strip_suffix(".yaml").unwrap().to_string(), "yaml")
-                } else if filename.ends_with(".claw.js") {
-                    (filename.strip_suffix(".claw.js").unwrap().to_string(), "js")
-                } else {
+                let Some(adapter_name) = filename.strip_suffix(".claw.js") else {
                     continue;
                 };
 
@@ -85,18 +51,15 @@ pub fn list_adapters(base_dirs: &[&str]) -> Vec<AdapterInfo> {
                 }
                 seen.insert(key);
 
-                let (description, strategy) = if format == "yaml" {
-                    parse_yaml_metadata(&path)
-                } else {
-                    parse_clawjs_metadata(&path)
-                };
+                let description = std::fs::read_to_string(&path)
+                    .ok()
+                    .and_then(|c| extract_js_string(&c, "description"))
+                    .unwrap_or_default();
 
                 adapters.push(AdapterInfo {
                     site: site_name.clone(),
-                    name: adapter_name,
+                    name: adapter_name.to_string(),
                     description,
-                    strategy,
-                    format: format.to_string(),
                 });
             }
         }
@@ -105,44 +68,23 @@ pub fn list_adapters(base_dirs: &[&str]) -> Vec<AdapterInfo> {
     adapters
 }
 
-/// Parse metadata from a YAML adapter file.
-fn parse_yaml_metadata(path: &Path) -> (String, String) {
-    let parsed = std::fs::read_to_string(path)
-        .ok()
-        .and_then(|content| serde_yml::from_str::<Adapter>(&content).ok());
-    let description = parsed
-        .as_ref()
-        .and_then(|a| a.description.clone())
-        .unwrap_or_default();
-    let strategy = parsed
-        .as_ref()
-        .and_then(|a| a.strategy.clone())
-        .unwrap_or_else(|| "public".to_string());
-    (description, strategy)
+/// Extract a quoted string field from .claw.js source.
+/// Matches: description: "some text" or description: 'some text'
+fn extract_js_string(content: &str, field: &str) -> Option<String> {
+    let needle = format!("{}:", field);
+    let pos = content.find(&needle)? + needle.len();
+    let rest = content[pos..].trim_start();
+    let quote = rest.as_bytes().first()?;
+    if *quote != b'"' && *quote != b'\'' {
+        return None;
+    }
+    let q = *quote as char;
+    let start = 1;
+    let end = rest[start..].find(q)?;
+    Some(rest[start..start + end].to_string())
 }
 
-/// Parse metadata from a .claw.js file using simple regex extraction.
-fn parse_clawjs_metadata(path: &Path) -> (String, String) {
-    let content = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(_) => return (String::new(), "public".to_string()),
-    };
-
-    // Extract description: "..." from the JS module
-    let description = extract_js_string_field(&content, "description").unwrap_or_default();
-    (description, "public".to_string())
-}
-
-/// Extract a simple string field value from a .claw.js export default object.
-/// Matches patterns like: description: "some text" or description: 'some text'
-fn extract_js_string_field(content: &str, field: &str) -> Option<String> {
-    let pattern = format!(r#"{}:\s*["']([^"']+)["']"#, regex::escape(field));
-    let re = regex::Regex::new(&pattern).ok()?;
-    re.captures(content)
-        .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
-}
-
-/// Compute the standard adapter search directories (.claw.js only).
+/// Standard claw search directories.
 pub fn adapter_base_dirs() -> Vec<String> {
     let home = std::env::var("HOME").unwrap_or_default();
     vec![
@@ -151,7 +93,7 @@ pub fn adapter_base_dirs() -> Vec<String> {
     ]
 }
 
-/// Parse a HealthContract from a JSON value (e.g., from extension claw metadata).
+/// Parse a HealthContract from a JSON value.
 pub fn parse_health_contract(value: &serde_json::Value) -> Option<HealthContract> {
     let obj = value.as_object()?;
     Some(HealthContract {
@@ -175,17 +117,12 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn list_adapters_finds_clawjs_from_extension() {
-        // Why: v2 primary source is extension-v2/claws/, not YAML adapters/
+    fn list_adapters_finds_clawjs() {
         let adapters = list_adapters(&["extension-v2/claws"]);
         assert!(
             adapters.len() >= 40,
-            "extension-v2/claws should have 40+ .claw.js files, got {}",
+            "should have 40+ claws, got {}",
             adapters.len()
-        );
-        assert!(
-            adapters.iter().all(|a| a.format == "js"),
-            "all adapters from extension dir should be .claw.js format"
         );
     }
 
@@ -196,52 +133,39 @@ mod tests {
     }
 
     #[test]
-    fn adapter_base_dirs_excludes_yaml_legacy() {
-        // Why: v2 uses .claw.js only; "adapters/" YAML dir is dead weight
+    fn adapter_base_dirs_v2_only() {
         let dirs = adapter_base_dirs();
+        assert_eq!(dirs.len(), 2);
+        assert!(dirs[0].contains("extension-v2/claws"));
+        assert!(dirs[1].contains(".claw/claws"));
+    }
+
+    #[test]
+    fn extract_js_double_quotes() {
+        let js = r#"  description: "Hacker News top stories","#;
         assert_eq!(
-            dirs.len(),
-            2,
-            "should only have extension claws + ~/.claw/claws"
+            extract_js_string(js, "description").unwrap(),
+            "Hacker News top stories"
         );
-        assert!(
-            !dirs.iter().any(|d| d == "adapters"),
-            "must not include legacy YAML 'adapters' directory"
+    }
+
+    #[test]
+    fn extract_js_single_quotes() {
+        assert_eq!(
+            extract_js_string("description: 'GitHub Trending'", "description").unwrap(),
+            "GitHub Trending"
         );
-        assert!(dirs.iter().any(|d| d.contains("extension-v2/claws")));
-        assert!(dirs.iter().any(|d| d.contains(".claw/claws")));
     }
 
     #[test]
-    fn extract_js_description() {
-        let js = r#"export default {
-  site: "hackernews",
-  name: "hot",
-  description: "Hacker News top stories",
-  columns: ["rank", "title"],
-}"#;
-        let desc = extract_js_string_field(js, "description");
-        assert_eq!(desc.unwrap(), "Hacker News top stories");
+    fn extract_js_missing() {
+        assert!(extract_js_string("site: 'github'", "description").is_none());
     }
 
     #[test]
-    fn extract_js_description_single_quotes() {
-        let js = "description: 'GitHub Trending'";
-        let desc = extract_js_string_field(js, "description");
-        assert_eq!(desc.unwrap(), "GitHub Trending");
-    }
-
-    #[test]
-    fn extract_js_missing_field() {
-        let js = "site: 'github'";
-        let desc = extract_js_string_field(js, "description");
-        assert!(desc.is_none());
-    }
-
-    #[test]
-    fn parse_health_contract_from_json() {
-        let val = json!({"min_rows": 5, "non_empty": ["title", "url"]});
-        let hc = parse_health_contract(&val).unwrap();
+    fn parse_health_contract_full() {
+        let hc =
+            parse_health_contract(&json!({"min_rows": 5, "non_empty": ["title", "url"]})).unwrap();
         assert_eq!(hc.min_rows, Some(5));
         assert_eq!(
             hc.non_empty,
@@ -251,17 +175,40 @@ mod tests {
 
     #[test]
     fn parse_health_contract_partial() {
-        let val = json!({"min_rows": 3});
-        let hc = parse_health_contract(&val).unwrap();
+        let hc = parse_health_contract(&json!({"min_rows": 3})).unwrap();
         assert_eq!(hc.min_rows, Some(3));
         assert!(hc.non_empty.is_none());
     }
 
     #[test]
-    fn list_adapters_finds_clawjs_files() {
-        let adapters = list_adapters(&["extension-v2/claws"]);
-        assert!(adapters.len() >= 1);
-        let js_adapters: Vec<_> = adapters.iter().filter(|a| a.format == "js").collect();
-        assert!(!js_adapters.is_empty(), "should find .claw.js files");
+    fn claws_no_js_click_injection() {
+        let claws_dir = std::path::Path::new("extension-v2/claws");
+        let mut violations = Vec::new();
+        for site in std::fs::read_dir(claws_dir).unwrap().flatten() {
+            if !site.path().is_dir() {
+                continue;
+            }
+            for f in std::fs::read_dir(site.path()).unwrap().flatten() {
+                let p = f.path();
+                if !p.extension().map_or(false, |e| e == "js") {
+                    continue;
+                }
+                let c = std::fs::read_to_string(&p).unwrap();
+                for (i, line) in c.lines().enumerate() {
+                    let t = line.trim();
+                    if t.contains("page.click") {
+                        continue;
+                    }
+                    if t.contains(".click()") || t.contains("dispatchEvent") {
+                        violations.push(format!("{}:{}: {}", p.display(), i + 1, t));
+                    }
+                }
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "Use page.click() not JS .click():\n{}",
+            violations.join("\n")
+        );
     }
 }

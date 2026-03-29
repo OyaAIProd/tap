@@ -73,36 +73,17 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 );
             } else {
                 let columns = vec!["site".into(), "name".into(), "description".into()];
-                let mut need_login: Vec<String> = Vec::new();
                 let rows: Vec<std::collections::HashMap<String, String>> = adapters
                     .iter()
                     .map(|a| {
                         let mut row = std::collections::HashMap::new();
-                        let site_display = if a.strategy == "public" {
-                            a.site.clone()
-                        } else {
-                            if !need_login.contains(&a.site) {
-                                need_login.push(a.site.clone());
-                            }
-                            format!("{} *", a.site)
-                        };
-                        row.insert("site".into(), site_display);
+                        row.insert("site".into(), a.site.clone());
                         row.insert("name".into(), a.name.clone());
                         row.insert("description".into(), a.description.clone());
                         row
                     })
                     .collect();
                 output::print_output(&columns, &rows, &cli.format)?;
-                if !need_login.is_empty() {
-                    eprintln!(
-                        "\n* Need login first: {}",
-                        need_login
-                            .iter()
-                            .map(|s| format!("claw login {}", s))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    );
-                }
             }
         }
         Command::Check => {

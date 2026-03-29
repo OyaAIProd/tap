@@ -16,7 +16,7 @@ export default {
     await page.type('[role="textbox"]', args.prompt)
     await page.wait(500)
 
-    // Click the generate button via CDP native click (never JS .click())
+    // Click the generate button via CDP native mouse event
     await page.click("立即生成")
     await page.wait(3000)
 
