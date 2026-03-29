@@ -113,9 +113,9 @@ tap check                       # Health check all taps
 ### From AI agents (MCP)
 
 ```
-> Use forge_inspect to analyze https://example.com
-> Then forge_verify to test the extraction logic
-> Then forge_save to persist the new tap
+> Use forge.inspect to analyze https://example.com
+> Then forge.verify to test the extraction logic
+> Then forge.save to persist the new tap
 ```
 
 ## Page API
@@ -203,24 +203,23 @@ Claude Code ←→ MCP (stdin/stdout) ←→ Bridge (ws://9333) ←→ Chrome Ex
 
 | Category | Tools |
 |----------|-------|
-| **Forge** | `forge_inspect`, `forge_verify`, `forge_save` |
-| **Run** | `run_tap`, `list_taps` |
-| **See** | `screenshot`, `ax_tree`, `read_dom`, `page_info` |
-| **Probe** | `find`, `element_info`, `evaluate`, `cookies` |
-| **Act** | `click`, `type_text`, `navigate`, `hover`, `scroll`, `press_key` |
-| **Inspect** | `api_log`, `global_names`, `resource_tree`, `search_resource`, `request_replay` |
-| **Intercept** | `intercept_on/off/list/continue/fulfill/fail`, `set_cookie` |
+| **tap.** | `tap.run`, `tap.list`, `tap.screenshot`, `tap.logs` |
+| **page.** | `page.click`, `page.type`, `page.nav`, `page.eval`, `page.hover`, `page.scroll`, `page.pressKey`, `page.select`, `page.upload`, `page.find`, `page.cookies`, `page.dialog`, `page.storage`, `page.setCookie` |
+| **forge.** | `forge.inspect`, `forge.verify`, `forge.save` |
+| **inspect.** | `inspect.page`, `inspect.a11y`, `inspect.dom`, `inspect.element`, `inspect.apiLog`, `inspect.networkStart`, `inspect.networkDump`, `inspect.globals`, `inspect.resources`, `inspect.download` |
+| **intercept.** | `intercept.on`, `intercept.off`, `intercept.list`, `intercept.continue`, `intercept.fulfill`, `intercept.fail` |
+| **tab.** | `tab.list`, `tab.new`, `tab.close` |
 
 ## Building
 
 ```bash
 cargo build              # Build
-cargo test               # 39 tests
+cargo test               # 42 tests
 cargo clippy             # Lint (0 warnings)
 
 # Extension tests
 node extension/test/tap-format.test.mjs   # 790 constraints
-node extension/test/page-api.test.mjs     # 59 constraints (kernel + stdlib)
+node extension/test/protocol.test.mjs     # 81 constraints (kernel + stdlib + delegation)
 ```
 
 ## License

@@ -113,9 +113,9 @@ extension/
 ### Forge Pipeline
 
 ```
-forge_inspect(url)  → framework, SSR state, APIs, strategy templates
-forge_verify(url, expr) → test extraction logic, validate columns
-forge_save(site, name)  → persist to ~/.tap/taps/ + extension/taps/
+forge.inspect(url)  → framework, SSR state, APIs, strategy templates
+forge.verify(url, expr) → test extraction logic, validate columns
+forge.save(site, name)  → persist to ~/.tap/taps/ + extension/taps/
 ```
 
 ## Build & Development

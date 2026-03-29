@@ -197,17 +197,16 @@ test('background.js has getPage factory', () => {
 
 const DELEGATED_HANDLERS = [
   ['click', 'page.click'],
-  ['click_selector', 'page.click'],
-  ['type_text', 'page.type'],
+  ['type', 'page.type'],
   ['hover', 'page.hover'],
   ['scroll', 'page.scroll'],
-  ['press_key', 'page.pressKey'],
+  ['pressKey', 'page.pressKey'],
   ['select', 'page.select'],
   ['upload', 'page.upload'],
   ['find', 'page.find'],
   ['cookies', 'page.cookies'],
-  ['dismiss_dialog', 'page.dialog'],
-  ['storage_items', 'page.storage'],
+  ['dialog', 'page.dialog'],
+  ['storage', 'page.storage'],
 ]
 
 for (const [handler, delegation] of DELEGATED_HANDLERS) {
