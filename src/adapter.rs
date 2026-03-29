@@ -173,9 +173,18 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn list_adapters_finds_yaml_files() {
-        let adapters = list_adapters(&["adapters"]);
-        assert!(adapters.len() >= 2);
+    fn list_adapters_finds_clawjs_from_extension() {
+        // Why: v2 primary source is extension-v2/claws/, not YAML adapters/
+        let adapters = list_adapters(&["extension-v2/claws"]);
+        assert!(
+            adapters.len() >= 40,
+            "extension-v2/claws should have 40+ .claw.js files, got {}",
+            adapters.len()
+        );
+        assert!(
+            adapters.iter().all(|a| a.format == "js"),
+            "all adapters from extension dir should be .claw.js format"
+        );
     }
 
     #[test]
@@ -185,12 +194,16 @@ mod tests {
     }
 
     #[test]
-    fn adapter_base_dirs_includes_claws() {
+    fn adapter_base_dirs_excludes_yaml_legacy() {
+        // Why: v2 uses .claw.js only; "adapters/" YAML dir is dead weight
         let dirs = adapter_base_dirs();
-        assert_eq!(dirs.len(), 3);
-        assert_eq!(dirs[0], "adapters");
-        assert!(dirs[1].contains(".claw/adapters"));
-        assert!(dirs[2].contains(".claw/claws"));
+        assert_eq!(dirs.len(), 2, "should only have extension claws + ~/.claw/claws");
+        assert!(
+            !dirs.iter().any(|d| d == "adapters"),
+            "must not include legacy YAML 'adapters' directory"
+        );
+        assert!(dirs.iter().any(|d| d.contains("extension-v2/claws")));
+        assert!(dirs.iter().any(|d| d.contains(".claw/claws")));
     }
 
     #[test]

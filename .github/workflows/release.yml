@@ -32,14 +32,35 @@ jobs:
           name: claw-${{ matrix.target }}
           path: claw-${{ matrix.target }}.tar.gz
 
+  extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Validate claws
+        run: node extension-v2/test/claw-format.test.mjs
+      - name: Package extension
+        run: cd extension-v2 && zip -r ../claw-extension.zip . -x "test/*" -x "*.test.*"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: claw-extension
+          path: claw-extension.zip
+
   release:
-    needs: build
+    needs: [build, extension]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
-      - run: gh release create ${{ github.ref_name }} --title ${{ github.ref_name }} --generate-notes claw-*.tar.gz
+      - run: |
+          gh release create ${{ github.ref_name }} \
+            --title "Claw ${{ github.ref_name }}" \
+            --generate-notes \
+            claw-*.tar.gz \
+            claw-extension.zip
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

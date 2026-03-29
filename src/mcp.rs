@@ -866,6 +866,25 @@ mod tests {
     }
 
     #[test]
+    fn relay_has_no_inline_js() {
+        // Why: Rust binary must be zero-JS — all page logic belongs in the extension
+        let source = include_str!("mcp.rs");
+        // relay_to_extension should not contain JS expression construction
+        let relay_section = source
+            .split("fn relay_to_extension")
+            .nth(1)
+            .expect("relay_to_extension must exist");
+        assert!(
+            !relay_section.contains("Runtime.evaluate"),
+            "relay_to_extension must not construct Runtime.evaluate calls — move JS to extension"
+        );
+        assert!(
+            !relay_section.contains("JSON.stringify"),
+            "relay_to_extension must not contain inline JS — move to Claw.* extension methods"
+        );
+    }
+
+    #[test]
     fn tools_schema_includes_intercept_tools() {
         let schema = tools_schema();
         let tools = schema.as_array().unwrap();
