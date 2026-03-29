@@ -3,7 +3,7 @@ name = "tap"
 version = "0.2.0"
 edition = "2021"
 description = "Make every interface programmable by AI"
-license = "MIT"
+license = "AGPL-3.0"
 repository = "https://github.com/LeonTing1010/tap"
 
 [dependencies]
