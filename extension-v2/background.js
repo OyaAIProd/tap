@@ -1251,6 +1251,33 @@ async function handleClawCommand(method, params = {}) {
       } catch { return [] }
     }
 
+    // --- Tab Management ---
+
+    case 'WebClaw.tab_list': {
+      const tabs = await chrome.tabs.query({})
+      return tabs.map(t => ({ tabId: t.id, url: t.url || '', title: t.title || '' }))
+    }
+
+    case 'WebClaw.tab_new': {
+      const tab = await chrome.tabs.create({ url: params.url || 'about:blank' })
+      return { tabId: tab.id, url: tab.url || params.url || 'about:blank' }
+    }
+
+    case 'WebClaw.tab_close': {
+      const tabId = Number(params.tabId)
+      if (!tabId) throw new Error('tab_close: missing tabId')
+      const session = debuggerSessions.get(tabId)
+      if (session) {
+        if (session.detachTimer) clearTimeout(session.detachTimer)
+        await chrome.debugger.detach({ tabId }).catch(() => {})
+        debuggerSessions.delete(tabId)
+      }
+      networkLogs.delete(tabId)
+      if (tabId === activeTabId) activeTabId = null
+      await chrome.tabs.remove(tabId)
+      return { closed: true, tabId }
+    }
+
     default:
       throw new Error(`Unknown WebClaw command: ${method}`)
   }
