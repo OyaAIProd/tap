@@ -1,4 +1,5 @@
 <p align="center">
+  <img src=".github/logo-woodpecker.svg" width="160" height="160" alt="Tap">
   <h1 align="center">Tap</h1>
   <p align="center"><b>让 AI 可编程操控任何界面</b></p>
 </p>
