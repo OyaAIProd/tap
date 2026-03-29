@@ -103,7 +103,8 @@ fn try_bind(addr: std::net::SocketAddr) -> Result<tokio::net::TcpListener, std::
     socket.listen(16)
 }
 
-/// Connect and attach in one step — isolates non-Send errors from the spawned task.
+/// Connect and optionally attach — isolates non-Send errors from the spawned task.
+/// Connection succeeds even without an active tab (multi-tab: use tab_new later).
 async fn try_connect_and_attach(
     stream: tokio::net::TcpStream,
 ) -> Result<(BridgeClient, i64), String> {
@@ -111,19 +112,27 @@ async fn try_connect_and_attach(
         .await
         .map_err(|e| format!("handshake failed: {}", e))?;
 
-    let result = tokio::time::timeout(
+    // Try to attach to active tab — but don't fail if no tab exists
+    let tab_id = match tokio::time::timeout(
         std::time::Duration::from_secs(15),
         client.send("Bridge.attach", Some(serde_json::json!({}))),
     )
     .await
-    .map_err(|_| "attach timed out".to_string())?
-    .map_err(|e| format!("attach failed: {}", e))?;
+    {
+        Ok(Ok(result)) => {
+            if result.get("error").is_some() {
+                eprintln!("bridge: no active tab (will use tab_new later)");
+                -1
+            } else {
+                result.get("tabId").and_then(|v| v.as_i64()).unwrap_or(-1)
+            }
+        }
+        _ => {
+            eprintln!("bridge: attach skipped (timeout or error)");
+            -1
+        }
+    };
 
-    if let Some(err) = result.get("error") {
-        return Err(format!("attach error: {}", err));
-    }
-
-    let tab_id = result.get("tabId").and_then(|v| v.as_i64()).unwrap_or(-1);
     Ok((client, tab_id))
 }
 

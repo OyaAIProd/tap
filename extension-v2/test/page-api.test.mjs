@@ -11,7 +11,7 @@
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
 
-const REQUIRED_METHODS = ['nav', 'wait', 'waitFor', 'click', 'type', 'upload', 'eval', 'fetch', 'screenshot', 'cookies', 'scroll', 'hover', 'pressKey', 'select', 'download', 'dialog', 'tap']
+const REQUIRED_METHODS = ['nav', 'wait', 'waitFor', 'click', 'type', 'upload', 'eval', 'fetch', 'screenshot', 'cookies', 'scroll', 'hover', 'pressKey', 'select', 'download', 'dialog', 'find', 'waitForNetwork', 'getSSRState', 'storage', 'tap']
 
 let passed = 0
 let failed = 0

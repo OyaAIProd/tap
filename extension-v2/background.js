@@ -11,6 +11,7 @@
  */
 
 import { registerTap, listTaps, runTap, parseTapURL } from './runtime/executor.js'
+import { createPageAPI } from './runtime/page-api.js'
 import { gatherPageIntelligence } from './runtime/page-intelligence.js'
 
 // --- Tap Registration (static imports — MV3 service workers prohibit dynamic import()) ---
@@ -356,6 +357,14 @@ async function requireTab(params = {}) {
   return tabId
 }
 
+/** Create a page API instance for a tab. page-api.js is the single protocol implementation. */
+function getPageAPI(tabId) {
+  return createPageAPI(tabId, {
+    cdpClick,
+    withDebugger: (fn) => withDebugger(tabId, fn)
+  })
+}
+
 async function handleTapCommand(method, params = {}) {
   switch (method) {
     // ---- Core ----
@@ -387,287 +396,80 @@ async function handleTapCommand(method, params = {}) {
       return result?.result || { url: tab.url, title: tab.title }
     }
 
-    // ---- Interaction tools (CDP native events) ----
+    // ---- Interaction tools — delegate to page-api.js (single protocol implementation) ----
 
     case 'Tap.click': {
       const tabId = await requireTab(params)
-      const text = params.text
-      if (!text) throw new Error('click: missing text param')
+      if (!params.text) throw new Error('click: missing text param')
       const prevUrl = (await chrome.tabs.get(tabId)).url
-
-      const [result] = await chrome.scripting.executeScript({
-        target: { tabId },
-        func: (t) => {
-          // Try CSS selector first
-          let el = null
-          try { el = document.querySelector(t) } catch {}
-          // Fallback: find by visible text (leaf-first)
-          if (!el) {
-            const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT)
-            let best = null
-            while (walker.nextNode()) {
-              const node = walker.currentNode
-              if (node.offsetParent === null) continue
-              const nodeText = node.innerText?.trim()
-              if (nodeText && nodeText.includes(t)) {
-                if (!best || node.innerText.length <= best.innerText.length) best = node
-              }
-            }
-            el = best
-          }
-          if (!el) return null
-          const rect = el.getBoundingClientRect()
-          let cx = rect.x + rect.width / 2, cy = rect.y + rect.height / 2
-          if (cy < 0 || cy > innerHeight || cx < 0 || cx > innerWidth) {
-            el.scrollIntoView({ block: 'center', behavior: 'instant' })
-            const r = el.getBoundingClientRect()
-            cx = r.x + r.width / 2; cy = r.y + r.height / 2
-          }
-          const hit = document.elementFromPoint(cx, cy)
-          if (hit && !el.contains(hit) && hit !== el) {
-            el.scrollIntoView({ block: 'end', behavior: 'instant' })
-            const r = el.getBoundingClientRect()
-            cx = r.x + r.width / 2; cy = r.y + r.height / 2
-          }
-          return { x: cx, y: cy }
-        },
-        args: [text],
-        world: 'MAIN'
-      })
-      const pos = result?.result
-      if (!pos) throw new Error(`click: "${text}" not found`)
-      await cdpClick(tabId, pos.x, pos.y)
+      const page = getPageAPI(tabId)
+      await page.click(params.text)
       await new Promise(r => setTimeout(r, 150))
       const fb = await pageFeedback(tabId)
       const nav = fb.url !== prevUrl ? ' (navigated)' : ''
-      return fmtFeedback(`clicked "${text}" at (${Math.round(pos.x)}, ${Math.round(pos.y)})${nav}`, fb)
+      return fmtFeedback(`clicked "${params.text}"${nav}`, fb)
     }
 
     case 'Tap.click_selector': {
       const tabId = await requireTab(params)
-      const selector = params.selector
-      if (!selector) throw new Error('click_selector: missing selector param')
+      if (!params.selector) throw new Error('click_selector: missing selector param')
       const prevUrl = (await chrome.tabs.get(tabId)).url
-
-      const [result] = await chrome.scripting.executeScript({
-        target: { tabId },
-        func: (sel) => {
-          const el = document.querySelector(sel)
-          if (!el) return null
-          const rect = el.getBoundingClientRect()
-          let cx = rect.x + rect.width / 2, cy = rect.y + rect.height / 2
-          if (cy < 0 || cy > innerHeight || cx < 0 || cx > innerWidth) {
-            el.scrollIntoView({ block: 'center', behavior: 'instant' })
-            const r = el.getBoundingClientRect()
-            cx = r.x + r.width / 2; cy = r.y + r.height / 2
-          }
-          const hit = document.elementFromPoint(cx, cy)
-          if (hit && !el.contains(hit) && hit !== el) {
-            el.scrollIntoView({ block: 'end', behavior: 'instant' })
-            const r = el.getBoundingClientRect()
-            cx = r.x + r.width / 2; cy = r.y + r.height / 2
-          }
-          return { x: cx, y: cy }
-        },
-        args: [selector],
-        world: 'MAIN'
-      })
-      const pos = result?.result
-      if (!pos) throw new Error(`click_selector: "${selector}" not found`)
-      await cdpClick(tabId, pos.x, pos.y)
+      const page = getPageAPI(tabId)
+      await page.click(params.selector)
       await new Promise(r => setTimeout(r, 150))
       const fb = await pageFeedback(tabId)
       const nav = fb.url !== prevUrl ? ' (navigated)' : ''
-      return fmtFeedback(`clicked "${selector}" at (${Math.round(pos.x)}, ${Math.round(pos.y)})${nav}`, fb)
+      return fmtFeedback(`clicked "${params.selector}"${nav}`, fb)
     }
 
     case 'Tap.type_text': {
       const tabId = await requireTab(params)
-      const selector = params.selector
-      const text = params.text
-      if (!selector || text === undefined) throw new Error('type_text: missing selector or text')
-
-      // Focus and clear via scripting
-      await chrome.scripting.executeScript({
-        target: { tabId },
-        func: (sel) => {
-          const el = document.querySelector(sel)
-          if (!el) return
-          el.scrollIntoView({ block: 'center', behavior: 'instant' })
-          el.focus()
-          el.click()
-          // Clear existing content
-          if (el.select) el.select()
-          else if (el.contentEditable === 'true') {
-            const range = document.createRange()
-            range.selectNodeContents(el)
-            const selection = window.getSelection()
-            selection.removeAllRanges()
-            selection.addRange(range)
-          }
-        },
-        args: [selector],
-        world: 'MAIN'
-      })
-      await new Promise(r => setTimeout(r, 100))
-
-      // Type via CDP keyboard events
-      await withDebugger(tabId, async (tid) => {
-        // Delete selected content first
-        await chrome.debugger.sendCommand({ tabId: tid }, 'Input.dispatchKeyEvent', {
-          type: 'keyDown', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8
-        })
-        await chrome.debugger.sendCommand({ tabId: tid }, 'Input.dispatchKeyEvent', {
-          type: 'keyUp', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8
-        })
-        // Type each character
-        for (const char of text) {
-          await chrome.debugger.sendCommand({ tabId: tid }, 'Input.dispatchKeyEvent', {
-            type: 'keyDown', text: char, key: char, code: `Key${char.toUpperCase()}`
-          })
-          await chrome.debugger.sendCommand({ tabId: tid }, 'Input.dispatchKeyEvent', {
-            type: 'keyUp', key: char, code: `Key${char.toUpperCase()}`
-          })
-        }
-      })
-
-      // Trigger framework reactivity (Vue, React)
-      await chrome.scripting.executeScript({
-        target: { tabId },
-        func: (sel, val) => {
-          const el = document.querySelector(sel)
-          if (!el) return
-          // For native inputs, set value via property descriptor to trigger Vue/React
-          if ('value' in el) {
-            const setter = Object.getOwnPropertyDescriptor(
-              el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,
-              'value'
-            )?.set
-            if (setter) setter.call(el, val)
-          }
-          el.dispatchEvent(new Event('input', { bubbles: true }))
-          el.dispatchEvent(new Event('change', { bubbles: true }))
-        },
-        args: [selector, text],
-        world: 'MAIN'
-      })
-
-      const val = await inputValue(tabId, selector)
+      if (!params.selector || params.text === undefined) throw new Error('type_text: missing selector or text')
+      const page = getPageAPI(tabId)
+      await page.type(params.selector, params.text)
+      const val = await inputValue(tabId, params.selector)
       const fb = await pageFeedback(tabId)
-      let msg = `typed ${text.length} chars into "${selector}"`
+      let msg = `typed ${params.text.length} chars into "${params.selector}"`
       if (val !== null) msg += `\n  → value: "${val}"`
       return fmtFeedback(msg, fb)
     }
 
     case 'Tap.hover': {
       const tabId = await requireTab(params)
-      const selector = params.selector
-      if (!selector) throw new Error('hover: missing selector')
-
-      const [result] = await chrome.scripting.executeScript({
-        target: { tabId },
-        func: (sel) => {
-          const el = document.querySelector(sel)
-          if (!el) return null
-          el.scrollIntoView({ block: 'center', behavior: 'instant' })
-          const rect = el.getBoundingClientRect()
-          return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
-        },
-        args: [selector],
-        world: 'MAIN'
-      })
-      const pos = result?.result
-      if (!pos) throw new Error(`hover: "${selector}" not found`)
-
-      await withDebugger(tabId, async (tid) => {
-        await chrome.debugger.sendCommand({ tabId: tid }, 'Input.dispatchMouseEvent', {
-          type: 'mouseMoved', x: pos.x, y: pos.y
-        })
-      })
+      if (!params.selector) throw new Error('hover: missing selector')
+      const page = getPageAPI(tabId)
+      await page.hover(params.selector)
       const fb = await pageFeedback(tabId)
-      return fmtFeedback(`hovered "${selector}"`, fb)
+      return fmtFeedback(`hovered "${params.selector}"`, fb)
     }
 
     case 'Tap.scroll': {
       const tabId = await requireTab(params)
-      const selector = params.selector
-      if (!selector) throw new Error('scroll: missing selector')
-
-      const [result] = await chrome.scripting.executeScript({
-        target: { tabId },
-        func: (sel) => {
-          const el = document.querySelector(sel)
-          if (!el) return false
-          el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-          return true
-        },
-        args: [selector],
-        world: 'MAIN'
-      })
-      if (!result?.result) throw new Error(`scroll: "${selector}" not found`)
+      if (!params.selector) throw new Error('scroll: missing selector')
+      const page = getPageAPI(tabId)
+      await page.scroll(params.selector)
       const fb = await pageFeedback(tabId)
-      return fmtFeedback(`scrolled to "${selector}"`, fb)
+      return fmtFeedback(`scrolled to "${params.selector}"`, fb)
     }
 
     case 'Tap.press_key': {
       const tabId = await requireTab(params)
-      const key = params.key
-      if (!key) throw new Error('press_key: missing key')
-      const modifiers = params.modifiers || 0
+      if (!params.key) throw new Error('press_key: missing key')
       const prevUrl = (await chrome.tabs.get(tabId)).url
-
-      // Map key names to CDP key event params
-      const keyMap = {
-        Enter: { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 },
-        Tab: { key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 },
-        Escape: { key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 },
-        Backspace: { key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 },
-        Delete: { key: 'Delete', code: 'Delete', windowsVirtualKeyCode: 46 },
-        ArrowUp: { key: 'ArrowUp', code: 'ArrowUp', windowsVirtualKeyCode: 38 },
-        ArrowDown: { key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 },
-        ArrowLeft: { key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37 },
-        ArrowRight: { key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39 },
-        Home: { key: 'Home', code: 'Home', windowsVirtualKeyCode: 36 },
-        End: { key: 'End', code: 'End', windowsVirtualKeyCode: 35 },
-        PageUp: { key: 'PageUp', code: 'PageUp', windowsVirtualKeyCode: 33 },
-        PageDown: { key: 'PageDown', code: 'PageDown', windowsVirtualKeyCode: 34 },
-        Space: { key: ' ', code: 'Space', windowsVirtualKeyCode: 32 },
-      }
-      const mapped = keyMap[key] || { key, code: `Key${key.toUpperCase()}`, windowsVirtualKeyCode: key.charCodeAt(0) }
-
-      await withDebugger(tabId, async (tid) => {
-        await chrome.debugger.sendCommand({ tabId: tid }, 'Input.dispatchKeyEvent', {
-          type: 'keyDown', modifiers, ...mapped
-        })
-        await chrome.debugger.sendCommand({ tabId: tid }, 'Input.dispatchKeyEvent', {
-          type: 'keyUp', modifiers, ...mapped
-        })
-      })
+      const page = getPageAPI(tabId)
+      await page.pressKey(params.key, params.modifiers || 0)
       await new Promise(r => setTimeout(r, 150))
       const fb = await pageFeedback(tabId)
       const nav = fb.url !== prevUrl ? ' (navigated)' : ''
-      return fmtFeedback(`pressed ${key}${nav}`, fb)
+      return fmtFeedback(`pressed ${params.key}${nav}`, fb)
     }
 
     case 'Tap.select': {
       const tabId = await requireTab(params)
       const { selector, value } = params
       if (!selector || value === undefined) throw new Error('select: missing selector or value')
-
-      const [result] = await chrome.scripting.executeScript({
-        target: { tabId },
-        func: (sel, val) => {
-          const el = document.querySelector(sel)
-          if (!el) return false
-          el.value = val
-          el.dispatchEvent(new Event('change', { bubbles: true }))
-          el.dispatchEvent(new Event('input', { bubbles: true }))
-          return true
-        },
-        args: [selector, value],
-        world: 'MAIN'
-      })
-      if (!result?.result) throw new Error(`select: "${selector}" not found`)
+      const page = getPageAPI(tabId)
+      await page.select(selector, value)
       const fb = await pageFeedback(tabId)
       return fmtFeedback(`selected "${value}" in "${selector}"`, fb)
     }
@@ -676,80 +478,19 @@ async function handleTapCommand(method, params = {}) {
       const tabId = await requireTab(params)
       const { selector, files } = params
       if (!selector || !files) throw new Error('upload: missing selector or files')
+      const page = getPageAPI(tabId)
+      await page.upload(selector, files)
       const fileList = typeof files === 'string' ? files.split(',').map(f => f.trim()) : files
-
-      await withDebugger(tabId, async (tid) => {
-        const doc = await chrome.debugger.sendCommand({ tabId: tid }, 'DOM.getDocument', {})
-        const node = await chrome.debugger.sendCommand({ tabId: tid }, 'DOM.querySelector', {
-          nodeId: doc.root.nodeId, selector
-        })
-        if (!node?.nodeId) throw new Error(`upload: "${selector}" not found`)
-        await chrome.debugger.sendCommand({ tabId: tid }, 'DOM.setFileInputFiles', {
-          nodeId: node.nodeId, files: fileList
-        })
-      })
       return `uploaded ${fileList.length} file(s) to "${selector}"`
     }
 
-    // ---- Perception tools ----
+    // ---- Perception tools — find delegates to page-api, rest are forge-only ----
 
     case 'Tap.find': {
       const tabId = await requireTab(params)
-      const query = params.query
-      const role = params.role || ''
-      if (!query) throw new Error('find: missing query')
-
-      const [result] = await chrome.scripting.executeScript({
-        target: { tabId },
-        func: (q, r) => {
-          const vw = window.innerWidth, vh = window.innerHeight
-
-          function region(rect) {
-            const cx = rect.x + rect.width / 2, cy = rect.y + rect.height / 2
-            const col = cx < vw / 3 ? 'left' : cx > vw * 2 / 3 ? 'right' : 'center'
-            const row = cy < vh / 3 ? 'top' : cy > vh * 2 / 3 ? 'bottom' : 'middle'
-            return `${row}-${col}`
-          }
-
-          function quickSel(el) {
-            if (el.id) return '#' + el.id
-            const testId = el.getAttribute('data-testid') || el.getAttribute('data-test-id')
-            if (testId) return `[data-testid="${testId}"]`
-            if (el.name && el.tagName !== 'DIV') return `${el.tagName.toLowerCase()}[name="${el.name}"]`
-            const cls = Array.from(el.classList || []).filter(c => !/^(svelte-|css-|_|sc-)/.test(c)).slice(0, 2)
-            if (cls.length) return `${el.tagName.toLowerCase()}.${cls.join('.')}`
-            return el.tagName.toLowerCase()
-          }
-
-          // Leaf-first: skip parent if a visible child also matches
-          const candidates = Array.from(document.querySelectorAll('*')).filter(el => {
-            if (el.offsetParent === null && el !== document.body) return false
-            const text = el.innerText?.trim() || ''
-            if (!text.toLowerCase().includes(q.toLowerCase())) return false
-            if (r && el.getAttribute('role') !== r) return false
-            for (const child of el.children) {
-              if (child.innerText?.trim().toLowerCase().includes(q.toLowerCase()) && child.offsetParent !== null) return false
-            }
-            return true
-          }).slice(0, 20)
-
-          return candidates.map(el => {
-            const rect = el.getBoundingClientRect()
-            return {
-              tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || '',
-              text: el.innerText?.trim().substring(0, 120) || '',
-              selector: quickSel(el),
-              box: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
-              center: { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) },
-              region: region(rect),
-              visible_in_viewport: rect.top < vh && rect.bottom > 0 && rect.left < vw && rect.right > 0
-            }
-          })
-        },
-        args: [query, role],
-        world: 'MAIN'
-      })
-      return result?.result || []
+      if (!params.query) throw new Error('find: missing query')
+      const page = getPageAPI(tabId)
+      return await page.find(params.query, params.role)
     }
 
     case 'Tap.element_info': {
@@ -923,9 +664,8 @@ async function handleTapCommand(method, params = {}) {
 
     case 'Tap.cookies': {
       const tabId = await requireTab(params)
-      const tab = await chrome.tabs.get(tabId)
-      const cookies = await chrome.cookies.getAll({ url: tab.url })
-      return { cookies }
+      const page = getPageAPI(tabId)
+      return { cookies: await page.cookies() }
     }
 
     case 'Tap.set_cookie': {
@@ -946,11 +686,8 @@ async function handleTapCommand(method, params = {}) {
     case 'Tap.dismiss_dialog': {
       const tabId = await requireTab(params)
       const accept = params.accept !== false
-      await withDebugger(tabId, async (tid) => {
-        await chrome.debugger.sendCommand({ tabId: tid }, 'Page.handleJavaScriptDialog', {
-          accept, promptText: params.prompt_text || ''
-        })
-      })
+      const page = getPageAPI(tabId)
+      await page.dialog(accept, params.prompt_text)
       return { dismissed: true, accepted: accept }
     }
 
@@ -993,22 +730,10 @@ async function handleTapCommand(method, params = {}) {
 
     case 'Tap.storage_items': {
       const tabId = await requireTab(params)
-      const storageType = params.type || 'local'
-      const [result] = await chrome.scripting.executeScript({
-        target: { tabId },
-        func: (t) => {
-          const s = t === 'session' ? sessionStorage : localStorage
-          const items = {}
-          for (let i = 0; i < s.length; i++) {
-            const key = s.key(i)
-            items[key] = s.getItem(key)?.substring(0, 500)
-          }
-          return { type: t, count: s.length, items }
-        },
-        args: [storageType],
-        world: 'MAIN'
-      })
-      return result?.result || {}
+      const type = params.type || 'local'
+      const page = getPageAPI(tabId)
+      const items = await page.storage(type)
+      return { type, count: Object.keys(items).length, items }
     }
 
     // ---- Network tools ----
@@ -1316,7 +1041,7 @@ async function handleTapAction(msg) {
       }
       if (!tabId) throw new Error('no tab available')
 
-      return await runTap(site, name, args, tabId, { cdpClick, withDebugger })
+      return await runTap(site, name, args, tabId, { cdpClick, withDebugger: (fn) => withDebugger(tabId, fn) })
     }
 
     case 'showResults': {
