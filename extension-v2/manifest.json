@@ -47,7 +47,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["results.html", "tap-page-api.js"],
+      "resources": ["results.html", "tap-client.js"],
       "matches": ["<all_urls>"]
     }
   ],

@@ -84,10 +84,11 @@ extension-v2/
   manifest.json       — Chrome MV3 manifest
   background.js       — Service worker: CDP relay, tap execution, bridge
   runtime/
+    protocol.js       — Tap protocol: Kernel (8 primitives) + Stdlib (16 operations)
     executor.js       — Tap loader and runner
-    page-api.js       — Kernel (8 primitives) + Stdlib (16 operations)
     page-intelligence.js — One-shot page analysis for forging
-  content-script.js   — window.tap() API + tap:// link handler
+  tap-client.js       — Page-world client SDK (window.tap() API)
+  content-script.js   — tap:// link handler + tap-client injector
   results.html/js     — Tap output display page
   taps/               — 45 bundled .tap.js files
     manifest.json     — Auto-generated registry of all taps
@@ -127,7 +128,7 @@ cargo fmt                # Format
 
 # Extension tests
 node extension-v2/test/tap-format.test.mjs   # 447 format constraints
-node extension-v2/test/page-api.test.mjs     # 16 API contract checks
+node extension-v2/test/protocol.test.mjs      # protocol contract checks
 ```
 
 ## Verification Gates
@@ -139,7 +140,7 @@ node extension-v2/test/page-api.test.mjs     # 16 API contract checks
 | format | `cargo fmt -- --check` | Rustfmt |
 | rust tests | `cargo test` | 39 unit tests |
 | tap format | `node extension-v2/test/tap-format.test.mjs` | 790 constraints |
-| page API | `node extension-v2/test/page-api.test.mjs` | 59 constraints (kernel + stdlib) |
+| protocol | `node extension-v2/test/protocol.test.mjs` | 79 constraints (kernel + stdlib + versioning) |
 
 ## Test Conventions
 

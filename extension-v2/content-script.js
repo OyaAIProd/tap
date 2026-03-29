@@ -11,7 +11,7 @@
 
 // Inject API into page world via a file URL (avoids CSP inline script blocks)
 const s = document.createElement('script')
-s.src = chrome.runtime.getURL('tap-page-api.js')
+s.src = chrome.runtime.getURL('tap-client.js')
 s.onload = () => s.remove()
 document.documentElement.appendChild(s)
 

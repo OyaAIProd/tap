@@ -11,7 +11,7 @@
  */
 
 import { registerTap, listTaps, runTap, parseTapURL } from './runtime/executor.js'
-import { createPageAPI } from './runtime/page-api.js'
+import { createPageAPI } from './runtime/protocol.js'
 import { gatherPageIntelligence } from './runtime/page-intelligence.js'
 
 // --- Tap Registration (static imports — MV3 service workers prohibit dynamic import()) ---
@@ -357,7 +357,7 @@ async function requireTab(params = {}) {
   return tabId
 }
 
-/** Create a page API instance for a tab. page-api.js is the single protocol implementation. */
+/** Create a page API instance for a tab. protocol.js is the single protocol implementation. */
 function getPageAPI(tabId) {
   return createPageAPI(tabId, {
     cdpClick,
@@ -396,7 +396,7 @@ async function handleTapCommand(method, params = {}) {
       return result?.result || { url: tab.url, title: tab.title }
     }
 
-    // ---- Interaction tools — delegate to page-api.js (single protocol implementation) ----
+    // ---- Interaction tools — delegate to protocol.js (single protocol implementation) ----
 
     case 'Tap.click': {
       const tabId = await requireTab(params)
@@ -484,7 +484,7 @@ async function handleTapCommand(method, params = {}) {
       return `uploaded ${fileList.length} file(s) to "${selector}"`
     }
 
-    // ---- Perception tools — find delegates to page-api, rest are forge-only ----
+    // ---- Perception tools — find delegates to protocol, rest are forge-only ----
 
     case 'Tap.find': {
       const tabId = await requireTab(params)

@@ -7,7 +7,7 @@
  *   3. Call run(page, args) and return structured data
  */
 
-import { createPageAPI } from './page-api.js'
+import { createPageAPI } from './protocol.js'
 
 /** Registry of loaded tap modules, keyed by "site/name" */
 const tapRegistry = new Map()

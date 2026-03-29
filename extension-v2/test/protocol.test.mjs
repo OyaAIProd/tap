@@ -1,13 +1,13 @@
 /**
- * Constraint: page API contract (POSIX-inspired kernel + stdlib)
+ * Constraint: Tap protocol contract (POSIX-inspired kernel + stdlib)
  * Classification: safety / what — missing method = tap runtime crash
  *
- * Why: page API is the only interface between .tap.js and the browser.
+ * Why: protocol.js is the only interface between .tap.js and the browser.
  * If a method is missing or misnamed, taps fail silently.
  *
  * Architecture: 8 kernel primitives + 16 stdlib operations = 24 total
  *
- * Run: node extension-v2/test/page-api.test.mjs
+ * Run: node extension-v2/test/protocol.test.mjs
  */
 
 import { strict as assert } from 'node:assert'
@@ -37,11 +37,11 @@ function test(name, fn) {
   }
 }
 
-console.log('\npage API constraints (POSIX kernel + stdlib)\n')
+console.log('\nprotocol constraints (POSIX kernel + stdlib)\n')
 
-const src = readFileSync(new URL('../runtime/page-api.js', import.meta.url), 'utf-8')
+const src = readFileSync(new URL('../runtime/protocol.js', import.meta.url), 'utf-8')
 
-test('page-api.js exists and is non-empty', () => {
+test('protocol.js exists and is non-empty', () => {
   assert(src.length > 0)
 })
 
@@ -184,7 +184,7 @@ console.log('\n  cross-domain: bridge → protocol delegation\n')
 
 const bgSrc = readFileSync(new URL('../../extension-v2/background.js', import.meta.url), 'utf-8')
 
-test('background.js imports createPageAPI from page-api.js', () => {
+test('background.js imports createPageAPI from protocol.js', () => {
   // Why: bridge must use the protocol layer, not reimplement operations
   assert(bgSrc.includes("import { createPageAPI }"), 'background.js must import createPageAPI')
 })

@@ -3,7 +3,7 @@
  * Classification: safety / what — violations cause silent click failures, debugger conflicts
  *
  * Three rules discovered via production debugging (2026-03-29):
- *   1. Single debugger: page-api.js must NOT own debugger state; uses DI from background.js
+ *   1. Single debugger: protocol.js must NOT own debugger state; uses DI from background.js
  *   2. Click safety: all CDP clicks must verify elementFromPoint before dispatch
  *   3. Atomic composition: multi-step taps compose via page.tap(), not duplicate navigation
  *
@@ -16,7 +16,7 @@ import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const PAGE_API_SRC = readFileSync(new URL('../runtime/page-api.js', import.meta.url), 'utf-8')
+const PAGE_API_SRC = readFileSync(new URL('../runtime/protocol.js', import.meta.url), 'utf-8')
 const EXECUTOR_SRC = readFileSync(new URL('../runtime/executor.js', import.meta.url), 'utf-8')
 const BACKGROUND_SRC = readFileSync(new URL('../background.js', import.meta.url), 'utf-8')
 
@@ -38,13 +38,13 @@ function test(name, fn) {
 // ═══════════════════════════════════════════════════════════
 // Rule 1: Single Debugger Principle
 // Why: Chrome allows one debugger per tab. Two managers = silent event loss.
-//      page-api.js had its own withDebugger that conflicted with background.js,
+//      protocol.js had its own withDebugger that conflicted with background.js,
 //      causing CDP Input events to be dispatched but silently ignored.
 // ═══════════════════════════════════════════════════════════
 
 console.log('\n  ── Rule 1: Single Debugger ──\n')
 
-test('page-api.js must NOT have module-level debugger state variables', () => {
+test('protocol.js must NOT have module-level debugger state variables', () => {
   // Why: module-level debuggerTabId/detachTimer caused state split with background.js
   assert(!PAGE_API_SRC.match(/^let\s+_?debugger/m),
     'found module-level debugger state variable — use DI instead')
@@ -58,14 +58,21 @@ test('createPageAPI accepts cdpClick via dependency injection', () => {
     'createPageAPI must accept cdpClick dependency')
 })
 
-test('page.click() uses injected cdpClick when available', () => {
-  // Why: falling back to own debugger attach/detach causes silent click failures
+test('stdlib click delegates to kernel.pointer (which uses injected cdpClick)', () => {
+  // Why: click must go through kernel.pointer → cdpClick to share debugger state
   const clickSection = PAGE_API_SRC.substring(
     PAGE_API_SRC.indexOf('async click('),
     PAGE_API_SRC.indexOf('async type(')
   )
-  assert(clickSection.includes('cdpClick'),
-    'click() must delegate to injected cdpClick')
+  assert(clickSection.includes('kernel.pointer'),
+    'stdlib click() must delegate to kernel.pointer')
+  // And kernel.pointer must use cdpClick
+  const pointerSection = PAGE_API_SRC.substring(
+    PAGE_API_SRC.indexOf('async pointer('),
+    PAGE_API_SRC.indexOf('async keyboard(')
+  )
+  assert(pointerSection.includes('cdpClick'),
+    'kernel.pointer() must use injected cdpClick')
 })
 
 test('executor passes deps to createPageAPI', () => {
@@ -89,7 +96,7 @@ test('background.js injects cdpClick into runTap', () => {
 
 console.log('\n  ── Rule 2: Click Safety ──\n')
 
-test('page-api.js click uses elementFromPoint to verify target is reachable', () => {
+test('protocol.js click uses elementFromPoint to verify target is reachable', () => {
   // Why: without verification, CDP clicks silently hit sticky headers instead of target
   const clickSection = PAGE_API_SRC.substring(
     PAGE_API_SRC.indexOf('async click('),
@@ -99,40 +106,30 @@ test('page-api.js click uses elementFromPoint to verify target is reachable', ()
     'click() must verify coordinates via elementFromPoint before dispatching CDP click')
 })
 
-test('background.js click_selector uses elementFromPoint verification', () => {
-  // Why: MCP click_selector had the same scrollIntoView occlusion bug
-  const clickSelectorSection = BACKGROUND_SRC.substring(
-    BACKGROUND_SRC.indexOf("case 'Tap.click_selector'"),
-    BACKGROUND_SRC.indexOf("case 'Tap.type_text'")
-  )
-  assert(clickSelectorSection.includes('elementFromPoint'),
-    'click_selector must verify coordinates via elementFromPoint')
-})
-
-test('background.js click (text-based) uses elementFromPoint verification', () => {
-  // Why: text-based click has the same coordinate resolution path
+test('background.js click handlers delegate to protocol (no inline elementFromPoint)', () => {
+  // Why: after protocol unification, click safety lives in protocol.js stdlib.click()
+  // background.js must delegate via getPageAPI(), not reimplement element finding
   const clickSection = BACKGROUND_SRC.substring(
     BACKGROUND_SRC.indexOf("case 'Tap.click'"),
-    BACKGROUND_SRC.indexOf("case 'Tap.click_selector'")
+    BACKGROUND_SRC.indexOf("case 'Tap.type_text'")
   )
-  assert(clickSection.includes('elementFromPoint'),
-    'click (text) must verify coordinates via elementFromPoint')
+  assert(clickSection.includes('getPageAPI('),
+    'Tap.click handlers must delegate to protocol via getPageAPI()')
+  assert(!clickSection.includes('chrome.scripting.executeScript'),
+    'Tap.click handlers must NOT have inline scripting — delegate to protocol')
 })
 
-test('no unconditional scrollIntoView in click handlers', () => {
+test('no unconditional scrollIntoView in protocol click', () => {
   // Why: unconditional scroll pushes already-visible elements behind sticky headers
-  // Pattern to catch: el.scrollIntoView(...) without a preceding viewport check
-  const clickFuncs = [
-    PAGE_API_SRC.substring(PAGE_API_SRC.indexOf('async click('), PAGE_API_SRC.indexOf('async type(')),
-    BACKGROUND_SRC.substring(BACKGROUND_SRC.indexOf("case 'Tap.click'"), BACKGROUND_SRC.indexOf("case 'Tap.type_text'"))
-  ]
-  for (const src of clickFuncs) {
-    const scrollCalls = src.match(/scrollIntoView/g) || []
-    const viewportChecks = src.match(/innerHeight|innerWidth/g) || []
-    if (scrollCalls.length > 0) {
-      assert(viewportChecks.length > 0,
-        'scrollIntoView found without viewport boundary check — must only scroll when element is outside viewport')
-    }
+  const clickSection = PAGE_API_SRC.substring(
+    PAGE_API_SRC.indexOf('async click('),
+    PAGE_API_SRC.indexOf('async type(')
+  )
+  const scrollCalls = clickSection.match(/scrollIntoView/g) || []
+  const viewportChecks = clickSection.match(/innerHeight|innerWidth/g) || []
+  if (scrollCalls.length > 0) {
+    assert(viewportChecks.length > 0,
+      'scrollIntoView found without viewport boundary check — must only scroll when element is outside viewport')
   }
 })
 
