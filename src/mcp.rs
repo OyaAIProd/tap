@@ -733,21 +733,26 @@ async fn execute_tool(
             let rows = result.as_array();
             let row_count = rows.map(|r| r.len()).unwrap_or(0);
 
-            if rows.is_none() {
-                diagnostics.push("FAIL: expression did not return an array".to_string());
-            } else if row_count == 0 {
-                diagnostics.push("WARN: expression returned empty array".to_string());
-            } else {
-                diagnostics.push(format!("OK: {} rows returned", row_count));
-                if !columns.is_empty() {
-                    if let Some(obj) = rows.unwrap().first().and_then(|r| r.as_object()) {
-                        let actual: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
-                        let missing: Vec<_> =
-                            columns.iter().filter(|c| !actual.contains(*c)).collect();
-                        if missing.is_empty() {
-                            diagnostics.push(format!("OK: all {} columns present", columns.len()));
-                        } else {
-                            diagnostics.push(format!("FAIL: missing columns: {:?}", missing));
+            match rows {
+                None => {
+                    diagnostics.push("FAIL: expression did not return an array".to_string());
+                }
+                Some(r) if r.is_empty() => {
+                    diagnostics.push("WARN: expression returned empty array".to_string());
+                }
+                Some(r) => {
+                    diagnostics.push(format!("OK: {} rows returned", r.len()));
+                    if !columns.is_empty() {
+                        if let Some(obj) = r.first().and_then(|v| v.as_object()) {
+                            let actual: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
+                            let missing: Vec<_> =
+                                columns.iter().filter(|c| !actual.contains(*c)).collect();
+                            if missing.is_empty() {
+                                diagnostics
+                                    .push(format!("OK: all {} columns present", columns.len()));
+                            } else {
+                                diagnostics.push(format!("FAIL: missing columns: {:?}", missing));
+                            }
                         }
                     }
                 }
