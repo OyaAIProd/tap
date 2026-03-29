@@ -80,13 +80,13 @@ src/
   health.rs     — Output validation (min_rows, non_empty columns)
   output.rs     — CLI output formatter (table/json/csv)
 
-extension-v2/
+extension/
   manifest.json       — Chrome MV3 manifest
   background.js       — Service worker: CDP relay, tap execution, bridge
-  runtime/
+  protocol/
     protocol.js       — Tap protocol: Kernel (8 primitives) + Stdlib (16 operations)
     executor.js       — Tap loader and runner
-    page-intelligence.js — One-shot page analysis for forging
+    forge.js          — One-shot page analysis for tap forging
   tap-client.js       — Page-world client SDK (window.tap() API)
   content-script.js   — tap:// link handler + tap-client injector
   results.html/js     — Tap output display page
@@ -115,7 +115,7 @@ extension-v2/
 ```
 forge_inspect(url)  → framework, SSR state, APIs, strategy templates
 forge_verify(url, expr) → test extraction logic, validate columns
-forge_save(site, name)  → persist to ~/.tap/taps/ + extension-v2/taps/
+forge_save(site, name)  → persist to ~/.tap/taps/ + extension/taps/
 ```
 
 ## Build & Development
@@ -127,8 +127,8 @@ cargo clippy             # Lint
 cargo fmt                # Format
 
 # Extension tests
-node extension-v2/test/tap-format.test.mjs   # 447 format constraints
-node extension-v2/test/protocol.test.mjs      # protocol contract checks
+node extension/test/tap-format.test.mjs   # 447 format constraints
+node extension/test/protocol.test.mjs      # protocol contract checks
 ```
 
 ## Verification Gates
@@ -139,11 +139,11 @@ node extension-v2/test/protocol.test.mjs      # protocol contract checks
 | lint | `cargo clippy -- -D warnings` | Zero warnings |
 | format | `cargo fmt -- --check` | Rustfmt |
 | rust tests | `cargo test` | 39 unit tests |
-| tap format | `node extension-v2/test/tap-format.test.mjs` | 790 constraints |
-| protocol | `node extension-v2/test/protocol.test.mjs` | 79 constraints (kernel + stdlib + versioning) |
+| tap format | `node extension/test/tap-format.test.mjs` | 790 constraints |
+| protocol | `node extension/test/protocol.test.mjs` | 79 constraints (kernel + stdlib + versioning) |
 
 ## Test Conventions
 
 Rust: `#[cfg(test)] mod tests` inside each source file. Filter: `cargo test tap::tests`.
 
-Extension: Node.js test scripts in `extension-v2/test/`. Constraint-driven — each test asserts a property that must hold across all taps or the page API.
+Extension: Node.js test scripts in `extension/test/`. Constraint-driven — each test asserts a property that must hold across all taps or the page API.

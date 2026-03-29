@@ -69,7 +69,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let taps = tap::list_taps(&refs);
             if taps.is_empty() {
                 println!(
-                    "No taps found. Add .tap.js files to extension-v2/taps/ or ~/.tap/taps/"
+                    "No taps found. Add .tap.js files to extension/taps/ or ~/.tap/taps/"
                 );
             } else {
                 let columns = vec!["site".into(), "name".into(), "description".into()];

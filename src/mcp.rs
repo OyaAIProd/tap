@@ -97,9 +97,9 @@ pub async fn serve() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Regenerate extension-v2/taps/manifest.json from the directory contents.
+/// Regenerate extension/taps/manifest.json from the directory contents.
 fn update_taps_manifest() -> Result<(), Box<dyn std::error::Error>> {
-    let taps_dir = std::path::Path::new("extension-v2/taps");
+    let taps_dir = std::path::Path::new("extension/taps");
     let mut files = Vec::new();
     for site_entry in std::fs::read_dir(taps_dir)?.flatten() {
         if !site_entry.path().is_dir() {
@@ -857,9 +857,9 @@ async fn execute_tool(
             let tap_name = args["name"].as_str().ok_or("missing name")?;
             let code = args["code"].as_str().ok_or("missing code")?;
 
-            // Save to extension-v2/taps/ (dev) and TAP_HOME/taps/ (user)
+            // Save to extension/taps/ (dev) and TAP_HOME/taps/ (user)
             let dirs = vec![
-                format!("extension-v2/taps/{}", site),
+                format!("extension/taps/{}", site),
                 format!("{}/taps/{}", tap_home(), site),
             ];
             let mut saved_to = String::new();
@@ -872,8 +872,8 @@ async fn execute_tool(
                 }
             }
 
-            // Update manifest.json if extension-v2/taps/ exists
-            if std::path::Path::new("extension-v2/taps").is_dir() {
+            // Update manifest.json if extension/taps/ exists
+            if std::path::Path::new("extension/taps").is_dir() {
                 let _ = update_taps_manifest();
             }
 

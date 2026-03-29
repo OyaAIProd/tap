@@ -7,7 +7,7 @@
  *
  * Architecture: 8 kernel primitives + 16 stdlib operations = 24 total
  *
- * Run: node extension-v2/test/protocol.test.mjs
+ * Run: node extension/test/protocol.test.mjs
  */
 
 import { strict as assert } from 'node:assert'
@@ -39,7 +39,7 @@ function test(name, fn) {
 
 console.log('\nprotocol constraints (POSIX kernel + stdlib)\n')
 
-const src = readFileSync(new URL('../runtime/protocol.js', import.meta.url), 'utf-8')
+const src = readFileSync(new URL('../protocol/protocol.js', import.meta.url), 'utf-8')
 
 test('protocol.js exists and is non-empty', () => {
   assert(src.length > 0)
@@ -182,7 +182,7 @@ test('capabilities() includes protocol version', () => {
 
 console.log('\n  cross-domain: bridge → protocol delegation\n')
 
-const bgSrc = readFileSync(new URL('../../extension-v2/background.js', import.meta.url), 'utf-8')
+const bgSrc = readFileSync(new URL('../../extension/background.js', import.meta.url), 'utf-8')
 
 test('background.js imports createPage from protocol.js', () => {
   // Why: bridge must use the protocol layer, not reimplement operations

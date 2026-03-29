@@ -7,7 +7,7 @@
  *   2. Click safety: all CDP clicks must verify elementFromPoint before dispatch
  *   3. Atomic composition: multi-step taps compose via page.tap(), not duplicate navigation
  *
- * Run: node extension-v2/test/architecture.test.mjs
+ * Run: node extension/test/architecture.test.mjs
  */
 
 import { strict as assert } from 'node:assert'
@@ -16,8 +16,8 @@ import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const PAGE_API_SRC = readFileSync(new URL('../runtime/protocol.js', import.meta.url), 'utf-8')
-const EXECUTOR_SRC = readFileSync(new URL('../runtime/executor.js', import.meta.url), 'utf-8')
+const PAGE_API_SRC = readFileSync(new URL('../protocol/protocol.js', import.meta.url), 'utf-8')
+const EXECUTOR_SRC = readFileSync(new URL('../protocol/executor.js', import.meta.url), 'utf-8')
 const BACKGROUND_SRC = readFileSync(new URL('../background.js', import.meta.url), 'utf-8')
 
 let passed = 0

@@ -219,8 +219,8 @@ cargo test               # 39 tests
 cargo clippy             # Lint (0 warnings)
 
 # Extension tests
-node extension-v2/test/tap-format.test.mjs   # 790 constraints
-node extension-v2/test/page-api.test.mjs     # 59 constraints (kernel + stdlib)
+node extension/test/tap-format.test.mjs   # 790 constraints
+node extension/test/page-api.test.mjs     # 59 constraints (kernel + stdlib)
 ```
 
 ## License

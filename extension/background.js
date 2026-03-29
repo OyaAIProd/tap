@@ -10,9 +10,9 @@
  * and tap protocol (action: "list", action: "run").
  */
 
-import { registerTap, listTaps, runTap, parseTapURL } from './runtime/executor.js'
-import { createPage } from './runtime/protocol.js'
-import { gatherForgeInspection } from './runtime/page-intelligence.js'
+import { registerTap, listTaps, runTap, parseTapURL } from './protocol/executor.js'
+import { createPage } from './protocol/protocol.js'
+import { gatherForgeInspection } from './protocol/forge.js'
 
 // --- Tap Registration (static imports — MV3 service workers prohibit dynamic import()) ---
 // AUTO-GENERATED: run `node scripts/gen-imports.js` to regenerate

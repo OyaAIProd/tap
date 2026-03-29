@@ -12,7 +12,7 @@
  *     - Must NOT have: extract()
  *     - Must have: columns (can't infer without running)
  *
- * Run: node extension-v2/test/tap-format.test.mjs
+ * Run: node extension/test/tap-format.test.mjs
  */
 
 import { strict as assert } from 'node:assert'

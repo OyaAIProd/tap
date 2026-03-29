@@ -96,7 +96,7 @@ pub fn tap_home() -> String {
 /// Standard tap search directories.
 pub fn tap_dirs() -> Vec<String> {
     vec![
-        "extension-v2/taps".to_string(),
+        "extension/taps".to_string(),
         format!("{}/taps", tap_home()),
     ]
 }
@@ -133,7 +133,7 @@ mod tests {
 
     #[test]
     fn list_taps_finds_tapjs() {
-        let taps = list_taps(&["extension-v2/taps"]);
+        let taps = list_taps(&["extension/taps"]);
         assert!(
             taps.len() >= 40,
             "should have 40+ taps, got {}",
@@ -157,7 +157,7 @@ mod tests {
     fn tap_dirs_v2_only() {
         let dirs = tap_dirs();
         assert_eq!(dirs.len(), 2);
-        assert!(dirs[0].contains("extension-v2/taps"));
+        assert!(dirs[0].contains("extension/taps"));
         assert!(dirs[1].contains(".tap/taps"));
     }
 
@@ -210,7 +210,7 @@ mod tests {
 
     #[test]
     fn taps_no_js_click_injection() {
-        let taps_dir = std::path::Path::new("extension-v2/taps");
+        let taps_dir = std::path::Path::new("extension/taps");
         let mut violations = Vec::new();
         for site in std::fs::read_dir(taps_dir).unwrap().flatten() {
             if !site.path().is_dir() {

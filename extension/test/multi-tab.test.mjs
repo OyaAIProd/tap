@@ -6,14 +6,14 @@
  * Multi-tab requires every function to route via explicit tabId parameter,
  * falling back to activeTabId only when no tabId is specified.
  *
- * Run: node extension-v2/test/multi-tab.test.mjs
+ * Run: node extension/test/multi-tab.test.mjs
  */
 
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
 
 const BG_SRC = readFileSync(new URL('../background.js', import.meta.url), 'utf-8')
-const EXECUTOR_SRC = readFileSync(new URL('../runtime/executor.js', import.meta.url), 'utf-8')
+const EXECUTOR_SRC = readFileSync(new URL('../protocol/executor.js', import.meta.url), 'utf-8')
 
 let passed = 0
 let failed = 0
