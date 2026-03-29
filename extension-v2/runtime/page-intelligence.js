@@ -284,21 +284,14 @@ function recommendStrategies(analysis, url) {
   site: "${site}",
   name: "TODO_name",
   description: "TODO",
-  columns: [/* TODO: fill column names */],
-  args: { limit: { type: "int", default: 20 } },
+  url: "${url}",
 
-  async run(page, args) {
-    await page.nav("${url}")
-    await page.wait(1000)
-
-    const data = await page.eval(() => {
-      const state = window.${primaryGlobal}
-      // TODO: navigate state to find your array
-      // Keys: ${(analysis.ssr_state[primaryGlobal]?.keys || []).slice(0, 10).join(', ')}
-      return Array.isArray(state) ? state : Object.values(state)
-    })
-
-    return data.slice(0, args.limit).map(item => ({
+  extract: () => {
+    const state = window.${primaryGlobal}
+    // TODO: navigate state to find your array
+    // Keys: ${(analysis.ssr_state[primaryGlobal]?.keys || []).slice(0, 10).join(', ')}
+    const items = Array.isArray(state) ? state : Object.values(state)
+    return items.map(item => ({
       // TODO: map item fields to columns
     }))
   }
@@ -327,16 +320,13 @@ function recommendStrategies(analysis, url) {
   site: "${site}",
   name: "TODO_name",
   description: "TODO",
-  columns: [/* TODO: fill column names */],
-  args: { limit: { type: "int", default: 20 } },
+  url: "${url}",
 
-  async run(page, args) {
-    await page.nav("${url}")
-
-    const data = await page.fetch("${bestAPI.url}")
-    // If data is nested: const items = data.data.list || data.items || data
-
-    return data.slice(0, args.limit).map(item => ({
+  extract: async () => {
+    const res = await fetch("${bestAPI.url}", { credentials: "include" })
+    const data = await res.json()
+    // If data is nested: data.data.list || data.items || data
+    return data.map(item => ({
       // TODO: map item fields to columns
     }))
   }
@@ -353,23 +343,15 @@ function recommendStrategies(analysis, url) {
   site: "${site}",
   name: "TODO_name",
   description: "TODO",
-  columns: [/* TODO: fill column names */],
-  args: { limit: { type: "int", default: 20 } },
+  url: "${url}",
+  waitFor: "TODO_selector",
 
-  async run(page, args) {
-    await page.nav("${url}")
-    await page.waitFor("TODO_selector", 10000)
-    await page.wait(2000)
-
-    const items = await page.eval(() => {
-      return Array.from(document.querySelectorAll("TODO_selector"))
-        .map(el => ({
-          // TODO: extract from each element
-        }))
-        .filter(item => /* TODO: filter empty */ true)
-    })
-
-    return items.slice(0, args.limit)
+  extract: () => {
+    return Array.from(document.querySelectorAll("TODO_selector"))
+      .map(el => ({
+        // TODO: extract from each element
+      }))
+      .filter(item => /* TODO: filter empty */ true)
   }
 }`
   })

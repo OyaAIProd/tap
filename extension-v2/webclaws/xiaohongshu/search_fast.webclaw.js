@@ -2,23 +2,21 @@ export default {
   site: "xiaohongshu",
   name: "search_fast",
   description: "纯 HTTP 搜索小红书（无浏览器，从 SSR HTML 提取 __INITIAL_STATE__）",
-  columns: ["title", "likes", "comments", "collects", "author", "note_id"],
-  args: {
-    keyword: { type: "string" },
-    limit: { type: "int", default: 20 }
-  },
+  url: "https://www.xiaohongshu.com",
+  args: { keyword: { type: "string" } },
   health: { min_rows: 3, non_empty: ["title"] },
 
-  async run(page, args) {
+  extract: async (args) => {
     const url = `https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(args.keyword)}&type=51`
-    const html = await page.fetch(url, {
+    const res = await fetch(url, {
       method: 'GET',
       headers: {
         'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         'accept': 'text/html,application/xhtml+xml'
       },
-      raw: true
+      credentials: 'include'
     })
+    const html = await res.text()
 
     // Extract __INITIAL_STATE__ JSON from the SSR HTML
     const stateMatch = html.match(/__INITIAL_STATE__\s*=\s*({[\s\S]*?})\s*<\/script>/)
@@ -76,7 +74,7 @@ export default {
       return [{ title: 'ERROR: feeds not array', likes: '0', comments: '0', collects: '0', author: '', note_id: '' }]
     }
 
-    const results = feeds.map(item => {
+    return feeds.map(item => {
       const nc = item.noteCard || item.note_card || {}
       const interact = nc.interactInfo || nc.interact_info || {}
       return {
@@ -88,7 +86,5 @@ export default {
         note_id: String(item.id || '')
       }
     })
-
-    return results.slice(0, args.limit)
   }
 }

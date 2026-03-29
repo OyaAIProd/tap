@@ -8,16 +8,38 @@
 /**
  * Create a page API bound to a specific tab.
  * @param {number} tabId - Chrome tab ID
+ * @param {object} opts - Options
+ * @param {function} opts.cdpClick - CDP click function(tabId, x, y) from background.js
+ * @param {function} opts.cdpType - CDP type function(tabId, selector, text) from background.js
+ * @param {function} opts.withDebugger - Debugger wrapper from background.js
  * @returns {object} page API object
  */
-export function createPageAPI(tabId) {
+export function createPageAPI(tabId, { cdpClick, cdpType, withDebugger } = {}) {
   let currentUrl = ''
 
   const page = {
-    /** Navigate to URL. Uses chrome.tabs (undetectable). */
+    /** Navigate to URL. Waits for full page idle (undetectable). */
     async nav(url) {
       await chrome.tabs.update(tabId, { url })
       await waitForTabLoad(tabId)
+      // Wait for page JS to finish + browser idle — blends with natural page lifecycle
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          func: () => new Promise(resolve => {
+            const onReady = () => {
+              if (typeof requestIdleCallback === 'function') {
+                requestIdleCallback(resolve, { timeout: 5000 })
+              } else {
+                setTimeout(resolve, 500)
+              }
+            }
+            if (document.readyState === 'complete') onReady()
+            else window.addEventListener('load', onReady, { once: true })
+          }),
+          world: 'MAIN'
+        })
+      } catch { /* scripting may fail on chrome:// or restricted pages — continue */ }
       const tab = await chrome.tabs.get(tabId)
       currentUrl = tab.url || url
     },
@@ -45,8 +67,7 @@ export function createPageAPI(tabId) {
 
     /**
      * Click an element. Accepts CSS selector or visible text.
-     * Uses chrome.debugger for CDP native Input.dispatchMouseEvent (isTrusted=true).
-     * Attaches debugger, clicks, detaches — millisecond exposure.
+     * Uses CDP native Input.dispatchMouseEvent (isTrusted=true).
      */
     async click(target) {
       // Find element coordinates via scripting (undetectable)
@@ -67,7 +88,19 @@ export function createPageAPI(tabId) {
           }
           if (!el) return null
           const rect = el.getBoundingClientRect()
-          return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+          let cx = rect.x + rect.width / 2, cy = rect.y + rect.height / 2
+          if (cy < 0 || cy > innerHeight || cx < 0 || cx > innerWidth) {
+            el.scrollIntoView({ block: 'center', behavior: 'instant' })
+            const r = el.getBoundingClientRect()
+            cx = r.x + r.width / 2; cy = r.y + r.height / 2
+          }
+          const hit = document.elementFromPoint(cx, cy)
+          if (hit && !el.contains(hit) && hit !== el) {
+            el.scrollIntoView({ block: 'end', behavior: 'instant' })
+            const r = el.getBoundingClientRect()
+            cx = r.x + r.width / 2; cy = r.y + r.height / 2
+          }
+          return { x: cx, y: cy }
         },
         args: [target],
         world: 'MAIN'
@@ -76,19 +109,23 @@ export function createPageAPI(tabId) {
       const pos = results?.[0]?.result
       if (!pos) throw new Error(`click: target "${target}" not found`)
 
-      // Debugger: attach → click → detach
-      await withDebugger(tabId, async () => {
-        const params = { x: pos.x, y: pos.y, button: 'left', clickCount: 1 }
-        await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mousePressed', ...params })
-        await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...params })
-      })
+      // Use injected cdpClick from background.js (shares debugger state)
+      if (cdpClick) {
+        await cdpClick(tabId, pos.x, pos.y)
+      } else {
+        await _fallbackClick(tabId, pos.x, pos.y)
+      }
     },
 
     /**
      * Type text into an element (by CSS selector).
-     * Uses chrome.debugger for CDP native keyboard events.
+     * Uses CDP native keyboard events.
      */
     async type(selector, text) {
+      if (cdpType) {
+        await cdpType(tabId, selector, text)
+        return
+      }
       // Focus the element via scripting
       await chrome.scripting.executeScript({
         target: { tabId },
@@ -102,7 +139,8 @@ export function createPageAPI(tabId) {
       await new Promise(r => setTimeout(r, 100))
 
       // Type via debugger
-      await withDebugger(tabId, async () => {
+      const wd = withDebugger || _fallbackWithDebugger
+      await wd(async () => {
         for (const char of text) {
           await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
             type: 'keyDown', text: char, key: char, code: `Key${char.toUpperCase()}`
@@ -116,13 +154,13 @@ export function createPageAPI(tabId) {
 
     /**
      * Upload files to a file input element.
-     * Uses chrome.debugger for CDP DOM.setFileInputFiles.
+     * Uses CDP DOM.setFileInputFiles.
      */
     async upload(selector, files) {
       const fileList = typeof files === 'string' ? files.split(',').map(f => f.trim()) : files
 
-      await withDebugger(tabId, async () => {
-        // Get node ID
+      const wd = withDebugger || _fallbackWithDebugger
+      await wd(async () => {
         const doc = await chrome.debugger.sendCommand({ tabId }, 'DOM.getDocument', {})
         const node = await chrome.debugger.sendCommand({ tabId }, 'DOM.querySelector', {
           nodeId: doc.root.nodeId, selector
@@ -211,15 +249,20 @@ function waitForTabLoad(tabId) {
   })
 }
 
-/**
- * Attach debugger, run callback, detach debugger.
- * Minimizes detection window to milliseconds.
- */
-async function withDebugger(tabId, fn) {
+/** Fallback click when no cdpClick injected (attach/click/detach). */
+async function _fallbackClick(tabId, x, y) {
   await chrome.debugger.attach({ tabId }, '1.3')
   try {
-    await fn()
+    const params = { x, y, button: 'left', clickCount: 1 }
+    await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mousePressed', ...params })
+    await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...params })
   } finally {
     await chrome.debugger.detach({ tabId }).catch(() => {})
   }
+}
+
+/** Fallback withDebugger when none injected. */
+async function _fallbackWithDebugger(fn) {
+  // No-op wrapper — caller must handle debugger themselves
+  return await fn()
 }

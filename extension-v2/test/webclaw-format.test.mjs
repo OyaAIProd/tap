@@ -2,8 +2,15 @@
  * Constraint: .webclaw.js format contract
  * Classification: safety / what — invalid format = runtime crash
  *
- * Why: .webclaw.js is the only artifact format. If it's malformed,
- * nothing works. These constraints define the executable contract.
+ * Two formats:
+ *   extract-format: { site, name, description, url, extract() }
+ *     - Runtime handles nav, wait, limit, columns inference, health defaults
+ *     - Must NOT have: run(), columns, args.limit
+ *
+ *   run-format: { site, name, description, columns, run() }
+ *     - Claw controls everything (interactive / composition claws)
+ *     - Must NOT have: extract()
+ *     - Must have: columns (can't infer without running)
  *
  * Run: node extension-v2/test/webclaw-format.test.mjs
  */
@@ -14,9 +21,7 @@ import { join, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const CLAWS_DIR = new URL('../webclaws/', import.meta.url).pathname
-const REQUIRED_FIELDS = ['site', 'name', 'columns', 'run']
 const VALID_ARG_TYPES = ['string', 'int', 'float', 'boolean']
-const PAGE_API_METHODS = ['nav', 'wait', 'waitFor', 'click', 'type', 'upload', 'eval', 'fetch', 'screenshot', 'cookies', 'claw']
 
 let passed = 0
 let failed = 0
@@ -45,7 +50,6 @@ async function testAsync(name, fn) {
   }
 }
 
-// Collect all .webclaw.js files
 async function findClawFiles(dir) {
   const files = []
   for (const site of await readdir(dir)) {
@@ -82,47 +86,40 @@ for (const { site, name, path } of clawFiles) {
 
   if (!mod?.default) continue
   const claw = mod.default
+  const hasRun = typeof claw.run === 'function'
+  const hasExtract = typeof claw.extract === 'function'
+  const format = hasExtract ? 'extract' : 'run'
 
-  // Required fields
-  test(`  has required fields: ${REQUIRED_FIELDS.join(', ')}`, () => {
-    for (const field of REQUIRED_FIELDS) {
-      assert(claw[field] !== undefined, `missing required field: ${field}`)
-    }
+  // ===== COMMON CONSTRAINTS (both formats) =====
+
+  test(`  [common] has site`, () => {
+    assert.equal(typeof claw.site, 'string', 'site must be string')
   })
 
-  // site/name match directory
-  test(`  site matches directory (${claw.site} === ${site})`, () => {
+  test(`  [common] has name`, () => {
+    assert.equal(typeof claw.name, 'string', 'name must be string')
+  })
+
+  test(`  [common] has description`, () => {
+    assert.equal(typeof claw.description, 'string', 'description is required')
+  })
+
+  test(`  [common] site matches directory (${claw.site} === ${site})`, () => {
     assert.equal(claw.site, site)
   })
 
-  test(`  name matches filename (${claw.name} === ${name})`, () => {
+  test(`  [common] name matches filename (${claw.name} === ${name})`, () => {
     assert.equal(claw.name, name)
   })
 
-  // columns is non-empty string array
-  test(`  columns is non-empty string array`, () => {
-    assert(Array.isArray(claw.columns), 'columns must be an array')
-    assert(claw.columns.length > 0, 'columns must not be empty')
-    for (const col of claw.columns) {
-      assert.equal(typeof col, 'string', `column must be string, got ${typeof col}`)
-    }
+  test(`  [common] has exactly one of run() or extract()`, () => {
+    assert(hasRun || hasExtract, 'must have run() or extract()')
+    assert(!(hasRun && hasExtract), 'must not have both run() and extract()')
   })
 
-  // run is async function with 2 params
-  test(`  run is a function`, () => {
-    assert.equal(typeof claw.run, 'function', 'run must be a function')
-  })
-
-  // description is optional but must be string if present
-  if (claw.description !== undefined) {
-    test(`  description is string`, () => {
-      assert.equal(typeof claw.description, 'string')
-    })
-  }
-
-  // args validation
+  // args validation (both formats)
   if (claw.args) {
-    test(`  args have valid types`, () => {
+    test(`  [common] args have valid types`, () => {
       for (const [key, spec] of Object.entries(claw.args)) {
         assert(spec.type, `arg '${key}' missing type`)
         assert(VALID_ARG_TYPES.includes(spec.type), `arg '${key}' has invalid type '${spec.type}'`)
@@ -130,29 +127,80 @@ for (const { site, name, path } of clawFiles) {
     })
   }
 
-  // health validation
+  // health validation (both formats)
   if (claw.health) {
-    test(`  health contract is valid`, () => {
+    test(`  [common] health contract is valid`, () => {
       if (claw.health.min_rows !== undefined) {
         assert.equal(typeof claw.health.min_rows, 'number')
         assert(claw.health.min_rows > 0, 'min_rows must be > 0')
       }
       if (claw.health.non_empty !== undefined) {
         assert(Array.isArray(claw.health.non_empty))
-        for (const field of claw.health.non_empty) {
-          assert(claw.columns.includes(field), `health.non_empty field '${field}' not in columns`)
+        // Cross-check against columns if columns are declared
+        if (claw.columns) {
+          for (const field of claw.health.non_empty) {
+            assert(claw.columns.includes(field), `health.non_empty field '${field}' not in columns`)
+          }
         }
       }
     })
   }
 
-  // run() must not use forbidden globals (basic static check)
-  test(`  run() body does not reference chrome.* directly`, () => {
-    const src = claw.run.toString()
-    assert(!src.includes('chrome.tabs'), 'run() must not reference chrome.tabs directly — use page API')
-    assert(!src.includes('chrome.scripting'), 'run() must not reference chrome.scripting directly — use page API')
-    assert(!src.includes('chrome.debugger'), 'run() must not reference chrome.debugger directly — use page API')
+  // No chrome.* direct access (both formats)
+  const checkFn = claw.run || claw.extract
+  test(`  [common] ${format}() body does not reference chrome.* directly`, () => {
+    const src = checkFn.toString()
+    assert(!src.includes('chrome.tabs'), 'must not reference chrome.tabs — use page API')
+    assert(!src.includes('chrome.scripting'), 'must not reference chrome.scripting — use page API')
+    assert(!src.includes('chrome.debugger'), 'must not reference chrome.debugger — use page API')
   })
+
+  // ===== EXTRACT-FORMAT CONSTRAINTS =====
+
+  if (hasExtract) {
+    test(`  [extract] has url (string or function)`, () => {
+      const valid = (typeof claw.url === 'string' && claw.url.length > 0) || typeof claw.url === 'function'
+      assert(valid, 'extract-format requires url (string or function)')
+    })
+
+    test(`  [extract] must not have columns (runtime infers)`, () => {
+      assert(claw.columns === undefined, 'extract-format must not declare columns — runtime infers from extract() return')
+    })
+
+    test(`  [extract] must not have args.limit (runtime provides)`, () => {
+      assert(!claw.args?.limit, 'extract-format must not declare args.limit — runtime provides default limit=20')
+    })
+
+    test(`  [extract] must not have wait (runtime adaptive)`, () => {
+      assert(claw.wait === undefined, 'extract-format must not declare wait — runtime uses adaptive retry')
+    })
+
+    // waitFor must be a string if present
+    if (claw.waitFor !== undefined) {
+      test(`  [extract] waitFor is a string (CSS selector)`, () => {
+        assert.equal(typeof claw.waitFor, 'string', 'waitFor must be a CSS selector string')
+      })
+    }
+
+    // timeout must be a number if present
+    if (claw.timeout !== undefined) {
+      test(`  [extract] timeout is a number`, () => {
+        assert.equal(typeof claw.timeout, 'number', 'timeout must be a number (milliseconds)')
+      })
+    }
+  }
+
+  // ===== RUN-FORMAT CONSTRAINTS =====
+
+  if (hasRun) {
+    test(`  [run] has columns (non-empty string array)`, () => {
+      assert(Array.isArray(claw.columns), 'run-format requires columns array')
+      assert(claw.columns.length > 0, 'columns must not be empty')
+      for (const col of claw.columns) {
+        assert.equal(typeof col, 'string', `column must be string, got ${typeof col}`)
+      }
+    })
+  }
 }
 
 // --- Summary ---

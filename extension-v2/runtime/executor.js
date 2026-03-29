@@ -35,48 +35,179 @@ export function getClaw(site, name) {
 
 /**
  * Execute a claw.
+ *
+ * Supports two formats:
+ *   - run(page, args): full control (legacy + interactive claws)
+ *   - extract(args?): minimal — runtime handles nav/wait/limit
+ *
  * @param {string} site - Site identifier
  * @param {string} name - Claw name
  * @param {object} userArgs - User-provided arguments
  * @param {number} tabId - Chrome tab ID to operate on
+ * @param {object} deps - Injected dependencies from background.js
+ * @param {function} deps.cdpClick - CDP click function(tabId, x, y)
+ * @param {function} deps.withDebugger - Debugger wrapper function
  * @returns {{ columns: string[], rows: object[] }}
  */
-export async function runClaw(site, name, userArgs = {}, tabId) {
+export async function runClaw(site, name, userArgs = {}, tabId, deps = {}) {
+  const t0 = Date.now()
   const mod = getClaw(site, name)
   if (!mod) throw new Error(`claw not found: ${site}/${name}`)
 
+  // For extract-format claws, inject default limit arg
+  const argDefs = { ...(mod.args || {}) }
+  if (mod.extract && !mod.run && !argDefs.limit) {
+    argDefs.limit = { type: 'int', default: 20 }
+  }
+
   // Resolve args with defaults
   const args = {}
-  if (mod.args) {
-    for (const [key, spec] of Object.entries(mod.args)) {
-      args[key] = userArgs[key] !== undefined ? coerceArg(userArgs[key], spec.type) : spec.default
-    }
+  for (const [key, spec] of Object.entries(argDefs)) {
+    args[key] = userArgs[key] !== undefined ? coerceArg(userArgs[key], spec.type) : spec.default
   }
   // Pass through any extra args
   for (const [key, val] of Object.entries(userArgs)) {
     if (!(key in args)) args[key] = val
   }
 
-  // Create page API for this tab
-  const page = createPageAPI(tabId)
+  // Create page API for this tab, injecting background.js debugger functions
+  const page = createPageAPI(tabId, deps)
 
   // Wire up page.claw() for composition
   page.claw = async (s, n, a = {}) => {
-    const result = await runClaw(s, n, a, tabId)
+    const result = await runClaw(s, n, a, tabId, deps)
     return result.rows
   }
 
-  // Execute
-  const rows = await mod.run(page, args)
+  let rows
+  let timing = {}
+
+  if (mod.run) {
+    // Legacy format: claw controls everything
+    const tRun = Date.now()
+    rows = await mod.run(page, args)
+    timing = { run_ms: Date.now() - tRun, total_ms: Date.now() - t0 }
+  } else if (mod.extract) {
+    // Minimal format: runtime orchestrates nav + adaptive extract
+    const navUrl = typeof mod.url === 'function' ? mod.url(args) : mod.url
+    const tNav = Date.now()
+    await page.nav(navUrl)
+    if (mod.waitFor) {
+      await page.waitFor(mod.waitFor, mod.timeout || 10000)
+    }
+    const navMs = Date.now() - tNav
+
+    const tExtract = Date.now()
+    const extracted = await extractUntilReady(page, mod.extract, args, mod.timeout || 15000)
+    rows = extracted.rows
+    const extractMs = Date.now() - tExtract
+
+    if (args.limit) {
+      rows = rows.slice(0, args.limit)
+    }
+
+    timing = {
+      nav_ms: navMs,
+      extract_ms: extractMs,
+      retries: extracted.retries,
+      total_ms: Date.now() - t0
+    }
+  } else {
+    throw new Error(`claw ${site}/${name} must have run() or extract()`)
+  }
 
   // Validate output
   if (!Array.isArray(rows)) {
-    throw new Error(`claw ${site}/${name} run() must return an array, got ${typeof rows}`)
+    throw new Error(`claw ${site}/${name} must return an array, got ${typeof rows}`)
   }
 
-  const result = { columns: mod.columns, rows, count: rows.length }
-  if (mod.health) result.health = mod.health
+  // Normalize: all values to trimmed strings
+  rows = rows.map(normalizeRow)
+
+  // Infer columns from first row if not declared
+  const columns = mod.columns || (rows.length > 0 ? Object.keys(rows[0]) : [])
+
+  // Default health if not specified
+  const health = mod.health || (mod.extract && columns.length > 0
+    ? { min_rows: 3, non_empty: [columns[0]] }
+    : undefined)
+
+  const result = { columns, rows, count: rows.length, timing }
+  if (health) result.health = health
   return result
+}
+
+/**
+ * Run extract repeatedly until it returns a non-empty array or timeout.
+ * Replaces fixed wait — uses the extract function itself as the readiness sensor.
+ * On failure, diagnoses the page to provide actionable error messages.
+ */
+async function extractUntilReady(page, fn, args, timeout) {
+  const deadline = Date.now() + timeout
+  let interval = 500
+  let lastError = null
+  let retries = 0
+
+  while (Date.now() < deadline) {
+    await page.wait(interval)
+    try {
+      const result = await page.eval(fn, args)
+      if (Array.isArray(result) && result.length > 0) return { rows: result, retries }
+    } catch (e) {
+      lastError = e
+    }
+    retries++
+    interval = Math.min(Math.round(interval * 1.5), 3000)
+  }
+
+  // Final attempt
+  try {
+    const result = await page.eval(fn, args)
+    if (Array.isArray(result) && result.length > 0) return { rows: result, retries }
+  } catch (e) {
+    lastError = e
+  }
+
+  // All attempts failed — diagnose why
+  const diagnosis = await diagnosePage(page)
+  const detail = lastError ? lastError.message : 'empty result'
+  throw new Error(diagnosis !== 'ok'
+    ? `extract failed: ${diagnosis}`
+    : `extract failed after ${timeout}ms: ${detail}`)
+}
+
+/**
+ * Diagnose page state after extract failure.
+ * Returns actionable reason or 'ok' if page looks normal.
+ */
+async function diagnosePage(page) {
+  try {
+    const info = await page.eval(() => ({
+      url: location.href,
+      title: document.title || '',
+      bodyLen: document.body?.innerText?.length || 0
+    }))
+    if (/login|signin|sign_in|passport/i.test(info.url))
+      return 'auth_required — visit site and log in first'
+    if (/captcha|verify|challenge|security.check/i.test(info.title))
+      return 'captcha — solve captcha in browser first'
+    if (/404|not.found/i.test(info.title))
+      return 'page_not_found'
+    if (info.bodyLen < 100)
+      return 'empty_page — possible block or network error'
+    return 'ok'
+  } catch {
+    return 'page_unreachable'
+  }
+}
+
+/** Normalize a row: all values to trimmed strings. */
+function normalizeRow(row) {
+  const out = {}
+  for (const [k, v] of Object.entries(row)) {
+    out[k] = v == null ? '' : String(v).trim()
+  }
+  return out
 }
 
 /** Coerce argument to declared type. */

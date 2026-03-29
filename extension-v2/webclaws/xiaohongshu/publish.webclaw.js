@@ -1,7 +1,7 @@
 export default {
   site: "xiaohongshu",
   name: "publish",
-  description: "发布小红书图文笔记",
+  description: "发布小红书图文笔记（需先调用 xiaohongshu/nav_publish）",
   columns: ["status", "url"],
   args: {
     title: { type: "string", default: "" },
@@ -10,15 +10,12 @@ export default {
   },
 
   async run(page, args) {
-    await page.nav("https://creator.xiaohongshu.com/publish/publish")
-    await page.waitFor(".creator-tab", 10000)
-
     await page.click("上传图文")
     await page.wait(2000)
 
     await page.upload("input.upload-input", args.images)
 
-    // Wait for upload to complete — poll for thumbnail/preview instead of fixed 20s
+    // Wait for upload to complete
     const uploaded = await page.eval(() => {
       return new Promise((resolve) => {
         let attempts = 0

@@ -1,17 +1,13 @@
 export default {
   site: "jimeng",
   name: "generate",
-  description: "即梦AI 文生图 — 提交 prompt 触发生成",
+  description: "即梦AI 文生图 — 提交 prompt 触发生成（需先调用 jimeng/nav）",
   columns: ["status", "prompt"],
   args: {
     prompt: { type: "string" }
   },
 
   async run(page, args) {
-    await page.nav("https://jimeng.jianying.com/ai-tool/image/generate")
-    await page.waitFor('[role="textbox"], .tiptap', 20000)
-    await page.wait(1000)
-
     // Type prompt into the main input
     await page.type('[role="textbox"]', args.prompt)
     await page.wait(500)
@@ -20,7 +16,7 @@ export default {
     await page.click("立即生成")
     await page.wait(3000)
 
-    // Verify generation started by checking for progress indicators
+    // Verify generation started
     const status = await page.eval(() => {
       const loading = document.querySelector('[class*="loading"], [class*="progress"], [class*="generating"]')
       const result = document.querySelector('[class*="result"], [class*="image-item"], [class*="output"]')

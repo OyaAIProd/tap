@@ -18,14 +18,21 @@ import { gatherPageIntelligence } from './runtime/page-intelligence.js'
 
 import c_36kr_hot from './webclaws/36kr/hot.webclaw.js'
 import c_baidu_hot from './webclaws/baidu/hot.webclaw.js'
+import c_bilibili_comment from './webclaws/bilibili/comment.webclaw.js'
+import c_bilibili_detail from './webclaws/bilibili/detail.webclaw.js'
 import c_bilibili_hot from './webclaws/bilibili/hot.webclaw.js'
+import c_bilibili_open from './webclaws/bilibili/open.webclaw.js'
+import c_bilibili_search from './webclaws/bilibili/search.webclaw.js'
 import c_bluesky_trending from './webclaws/bluesky/trending.webclaw.js'
 import c_coingecko_top from './webclaws/coingecko/top.webclaw.js'
 import c_crates_popular from './webclaws/crates/popular.webclaw.js'
 import c_devto_top from './webclaws/devto/top.webclaw.js'
 import c_dictionary_search from './webclaws/dictionary/search.webclaw.js'
 import c_douban_hot from './webclaws/douban/hot.webclaw.js'
+import c_douyin_comment from './webclaws/douyin/comment.webclaw.js'
+import c_douyin_detail from './webclaws/douyin/detail.webclaw.js'
 import c_douyin_hot from './webclaws/douyin/hot.webclaw.js'
+import c_douyin_open from './webclaws/douyin/open.webclaw.js'
 import c_douyin_search from './webclaws/douyin/search.webclaw.js'
 import c_facebook_feed from './webclaws/facebook/feed.webclaw.js'
 import c_github_trending from './webclaws/github/trending.webclaw.js'
@@ -34,6 +41,7 @@ import c_hackernews_hot from './webclaws/hackernews/hot.webclaw.js'
 import c_instagram_explore from './webclaws/instagram/explore.webclaw.js'
 import c_jimeng_generate from './webclaws/jimeng/generate.webclaw.js'
 import c_jimeng_history from './webclaws/jimeng/history.webclaw.js'
+import c_jimeng_nav from './webclaws/jimeng/nav.webclaw.js'
 import c_juejin_hot from './webclaws/juejin/hot.webclaw.js'
 import c_lobsters_hot from './webclaws/lobsters/hot.webclaw.js'
 import c_pixiv_ranking from './webclaws/pixiv/ranking.webclaw.js'
@@ -43,36 +51,54 @@ import c_reddit_hot from './webclaws/reddit/hot.webclaw.js'
 import c_sspai_hot from './webclaws/sspai/hot.webclaw.js'
 import c_stackoverflow_hot from './webclaws/stackoverflow/hot.webclaw.js'
 import c_steam_top_sellers from './webclaws/steam/top-sellers.webclaw.js'
+import c_telegraph_nav from './webclaws/telegraph/nav.webclaw.js'
 import c_telegraph_publish from './webclaws/telegraph/publish.webclaw.js'
 import c_tiktok_trending from './webclaws/tiktok/trending.webclaw.js'
 import c_toutiao_hot from './webclaws/toutiao/hot.webclaw.js'
 import c_v2ex_hot from './webclaws/v2ex/hot.webclaw.js'
+import c_wechat_detail from './webclaws/wechat/detail.webclaw.js'
+import c_wechat_open from './webclaws/wechat/open.webclaw.js'
+import c_wechat_search from './webclaws/wechat/search.webclaw.js'
+import c_weibo_comment from './webclaws/weibo/comment.webclaw.js'
+import c_weibo_detail from './webclaws/weibo/detail.webclaw.js'
 import c_weibo_hot from './webclaws/weibo/hot.webclaw.js'
+import c_weibo_open from './webclaws/weibo/open.webclaw.js'
 import c_weibo_search from './webclaws/weibo/search.webclaw.js'
 import c_wikipedia_most_read from './webclaws/wikipedia/most-read.webclaw.js'
 import c_x_trending from './webclaws/x/trending.webclaw.js'
 import c_xiaohongshu_hot from './webclaws/xiaohongshu/hot.webclaw.js'
 import c_xiaohongshu_post_detail from './webclaws/xiaohongshu/post_detail.webclaw.js'
 import c_xiaohongshu_publish from './webclaws/xiaohongshu/publish.webclaw.js'
-import c_xiaohongshu_search_api from './webclaws/xiaohongshu/search_api.webclaw.js'
 import c_xiaohongshu_search_fast from './webclaws/xiaohongshu/search_fast.webclaw.js'
+import c_xiaohongshu_comment from './webclaws/xiaohongshu/comment.webclaw.js'
+import c_xiaohongshu_detail from './webclaws/xiaohongshu/detail.webclaw.js'
+import c_xiaohongshu_nav_publish from './webclaws/xiaohongshu/nav_publish.webclaw.js'
+import c_xiaohongshu_open from './webclaws/xiaohongshu/open.webclaw.js'
 import c_xiaohongshu_search from './webclaws/xiaohongshu/search.webclaw.js'
 import c_xueqiu_hot_stock from './webclaws/xueqiu/hot-stock.webclaw.js'
 import c_youtube_trending from './webclaws/youtube/trending.webclaw.js'
+import c_zhihu_comment from './webclaws/zhihu/comment.webclaw.js'
+import c_zhihu_detail from './webclaws/zhihu/detail.webclaw.js'
 import c_zhihu_hot from './webclaws/zhihu/hot.webclaw.js'
+import c_zhihu_open from './webclaws/zhihu/open.webclaw.js'
 import c_zhihu_search from './webclaws/zhihu/search.webclaw.js'
 
 const ALL_CLAWS = [
-  c_36kr_hot, c_baidu_hot, c_bilibili_hot, c_bluesky_trending, c_coingecko_top,
-  c_crates_popular, c_devto_top, c_dictionary_search, c_douban_hot, c_douyin_hot,
-  c_douyin_search, c_facebook_feed, c_github_trending, c_google_trends, c_hackernews_hot,
-  c_instagram_explore, c_jimeng_generate, c_jimeng_history, c_juejin_hot, c_lobsters_hot,
+  c_36kr_hot, c_baidu_hot, c_bilibili_comment, c_bilibili_detail, c_bilibili_hot,
+  c_bilibili_open, c_bilibili_search, c_bluesky_trending, c_coingecko_top,
+  c_crates_popular, c_devto_top, c_dictionary_search, c_douban_hot, c_douyin_comment,
+  c_douyin_detail, c_douyin_hot, c_douyin_open, c_douyin_search, c_facebook_feed, c_github_trending, c_google_trends, c_hackernews_hot,
+  c_instagram_explore, c_jimeng_generate, c_jimeng_history, c_jimeng_nav, c_juejin_hot, c_lobsters_hot,
   c_pixiv_ranking, c_producthunt_hot, c_pypi_top, c_reddit_hot, c_sspai_hot,
-  c_stackoverflow_hot, c_steam_top_sellers, c_telegraph_publish, c_tiktok_trending,
-  c_toutiao_hot, c_v2ex_hot, c_weibo_hot, c_weibo_search, c_wikipedia_most_read,
-  c_x_trending, c_xiaohongshu_hot, c_xiaohongshu_post_detail, c_xiaohongshu_publish,
-  c_xiaohongshu_search_api, c_xiaohongshu_search_fast, c_xiaohongshu_search,
-  c_xueqiu_hot_stock, c_youtube_trending, c_zhihu_hot, c_zhihu_search,
+  c_stackoverflow_hot, c_steam_top_sellers, c_telegraph_nav, c_telegraph_publish, c_tiktok_trending,
+  c_toutiao_hot, c_v2ex_hot, c_wechat_detail, c_wechat_open, c_wechat_search,
+  c_weibo_comment, c_weibo_detail, c_weibo_hot,
+  c_weibo_open, c_weibo_search, c_wikipedia_most_read,
+  c_x_trending, c_xiaohongshu_comment, c_xiaohongshu_detail, c_xiaohongshu_hot,
+  c_xiaohongshu_nav_publish, c_xiaohongshu_open, c_xiaohongshu_post_detail, c_xiaohongshu_publish,
+  c_xiaohongshu_search_fast, c_xiaohongshu_search,
+  c_xueqiu_hot_stock, c_youtube_trending, c_zhihu_comment, c_zhihu_detail,
+  c_zhihu_hot, c_zhihu_open, c_zhihu_search,
 ]
 
 for (const mod of ALL_CLAWS) registerClaw(mod)
@@ -303,16 +329,26 @@ async function handleClawCommand(method, params = {}) {
               if (node.offsetParent === null) continue
               const nodeText = node.innerText?.trim()
               if (nodeText && nodeText.includes(t)) {
-                // Prefer smaller (more specific) elements
                 if (!best || node.innerText.length <= best.innerText.length) best = node
               }
             }
             el = best
           }
           if (!el) return null
-          el.scrollIntoView({ block: 'center', behavior: 'instant' })
           const rect = el.getBoundingClientRect()
-          return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+          let cx = rect.x + rect.width / 2, cy = rect.y + rect.height / 2
+          if (cy < 0 || cy > innerHeight || cx < 0 || cx > innerWidth) {
+            el.scrollIntoView({ block: 'center', behavior: 'instant' })
+            const r = el.getBoundingClientRect()
+            cx = r.x + r.width / 2; cy = r.y + r.height / 2
+          }
+          const hit = document.elementFromPoint(cx, cy)
+          if (hit && !el.contains(hit) && hit !== el) {
+            el.scrollIntoView({ block: 'end', behavior: 'instant' })
+            const r = el.getBoundingClientRect()
+            cx = r.x + r.width / 2; cy = r.y + r.height / 2
+          }
+          return { x: cx, y: cy }
         },
         args: [text],
         world: 'MAIN'
@@ -333,9 +369,20 @@ async function handleClawCommand(method, params = {}) {
         func: (sel) => {
           const el = document.querySelector(sel)
           if (!el) return null
-          el.scrollIntoView({ block: 'center', behavior: 'instant' })
           const rect = el.getBoundingClientRect()
-          return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+          let cx = rect.x + rect.width / 2, cy = rect.y + rect.height / 2
+          if (cy < 0 || cy > innerHeight || cx < 0 || cx > innerWidth) {
+            el.scrollIntoView({ block: 'center', behavior: 'instant' })
+            const r = el.getBoundingClientRect()
+            cx = r.x + r.width / 2; cy = r.y + r.height / 2
+          }
+          const hit = document.elementFromPoint(cx, cy)
+          if (hit && !el.contains(hit) && hit !== el) {
+            el.scrollIntoView({ block: 'end', behavior: 'instant' })
+            const r = el.getBoundingClientRect()
+            cx = r.x + r.width / 2; cy = r.y + r.height / 2
+          }
+          return { x: cx, y: cy }
         },
         args: [selector],
         world: 'MAIN'
@@ -1139,7 +1186,7 @@ async function handleClawAction(msg) {
       }
       if (!tabId) throw new Error('no tab available')
 
-      return await runClaw(site, name, args, tabId)
+      return await runClaw(site, name, args, tabId, { cdpClick, withDebugger })
     }
 
     case 'showResults': {
