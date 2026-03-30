@@ -100,17 +100,14 @@ deno.json               — Deno config (root)
 
 extension/
   manifest.json       — Chrome MV3 manifest
-  background.js       — Service worker: CDP relay, tap execution, bridge
+  background.js       — Service worker: kernel provider + bridge (no tap execution)
   protocol/
     protocol.js       — Tap protocol: Kernel (8 primitives) + Stdlib (16 operations)
-    executor.js       — Tap loader and runner
     forge.js          — One-shot page analysis for tap forging
   tap-client.js       — Page-world client SDK (window.tap() API)
   content-script.js   — tap:// link handler + tap-client injector
   results.html/js     — Tap output display page
-  taps/               — 76 bundled .tap.js files
-    manifest.json     — Auto-generated registry of all taps
-  test/               — Format + API contract tests
+  test/               — Architecture + multi-tab + format constraint tests
 ```
 
 ## Best Practices
@@ -139,6 +136,9 @@ forge.save(site, name)  → persist to ~/.tap/taps/ + extension/taps/
 ## Build & Development
 
 ```bash
+# Install community skills
+deno run --allow-all src/cli.ts install
+
 # Run CLI (default: Chrome Extension runtime)
 deno run --allow-all src/cli.ts list
 deno run --allow-all src/cli.ts <site> <name> [--arg value]
@@ -152,18 +152,29 @@ deno run --allow-all src/cli.ts --runtime playwright <site> <name>
 deno compile --allow-all --output tap src/cli.ts
 
 # Tests
-deno test --no-check --allow-all src/test/     # unit constraints
-node extension/test/tap-format.test.mjs          # 943 format constraints
-node extension/test/protocol.test.mjs            # 88 protocol constraints
+deno test --no-check --allow-all src/test/            # unit constraints
+node extension/test/architecture.test.mjs              # architecture constraints
+node extension/test/multi-tab.test.mjs                 # multi-tab constraints
 ```
+
+### Skills Management
+
+```
+~/.tap/
+  taps/       ← user taps (forge_save, manual). Higher priority.
+  skills/     ← community skills (tap install). git clone of tap-skills repo.
+```
+
+`tapDirs() = [~/.tap/taps, ~/.tap/skills]` — user taps override skills with same site/name.
 
 ## Verification Gates
 
 | Gate | Command | Checks |
 |------|---------|--------|
-| deno tests | `deno test --no-check --allow-all src/test/` | 44 unit constraints |
-| tap format | `node extension/test/tap-format.test.mjs` | 943 constraints |
-| protocol | `node extension/test/protocol.test.mjs` | 88 constraints |
+| deno tests | `deno test --no-check --allow-all src/test/` | unit + wire name constraints |
+| architecture | `node extension/test/architecture.test.mjs` | kernel purity, click safety, wire names |
+| multi-tab | `node extension/test/multi-tab.test.mjs` | tab routing, debugger isolation |
+| tap format | `node extension/test/tap-format.test.mjs` | tap file format constraints |
 
 ## Test Conventions
 

@@ -473,6 +473,7 @@ async function handleToolCall(
 ): Promise<{ response: Record<string, unknown>; tabId: number }> {
   const toolName = (params.name as string) || "";
   const args = (params.arguments as Record<string, unknown>) || {};
+  console.error(`[mcp] tool=${toolName}`);
 
   try {
     const { result, tabId } = await executeToolCall(toolName, args, client, sessionTabId);

@@ -9,7 +9,7 @@
   <a href="https://github.com/LeonTing1010/tap/releases/latest"><img src="https://img.shields.io/github/v/release/LeonTing1010/tap?style=flat-square" alt="Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/LeonTing1010/tap?style=flat-square" alt="License"></a>
   <a href="https://github.com/LeonTing1010/tap/stargazers"><img src="https://img.shields.io/github/stars/LeonTing1010/tap?style=flat-square" alt="Stars"></a>
-  <a href="#built-in-taps"><img src="https://img.shields.io/badge/taps-77%20across%2040%20sites-blue?style=flat-square" alt="Taps"></a>
+  <a href="https://github.com/LeonTing1010/tap-skills"><img src="https://img.shields.io/badge/skills-81%20across%2041%20sites-blue?style=flat-square" alt="Skills"></a>
 </p>
 
 <p align="center">
@@ -18,7 +18,7 @@
 
 Tap is a universal protocol for AI to operate any interface. Define 8 kernel primitives, get 16 stdlib operations, cover every human-interface interaction. AI forges `.tap.js` scripts once — then any agent runs them deterministically, zero AI at runtime.
 
-**77 taps across 40 sites** — Twitter/X, Reddit, GitHub, YouTube, Bilibili, Zhihu, Xiaohongshu, Weibo, Medium, arXiv, and [many more](#built-in-taps). Works with your Chrome login session. No API keys needed.
+**81 skills across 41 sites** — Twitter/X, Reddit, GitHub, YouTube, Bilibili, Zhihu, Xiaohongshu, Weibo, Medium, arXiv, and [many more](https://github.com/LeonTing1010/tap-skills). Works with your Chrome login session. No API keys needed.
 
 ```
 forge_inspect → forge_verify → forge_save → tap.run
@@ -43,7 +43,7 @@ Existing browser automation tools require AI at every step, or bind to one langu
 
 | Your need | Best tool | Why |
 |-----------|-----------|-----|
-| Deterministic site operations for AI agents | **Tap** | 77 pre-built taps, zero LLM cost at runtime, MCP native |
+| Deterministic site operations for AI agents | **Tap** | 81 pre-built skills, zero LLM cost at runtime, MCP native |
 | General LLM-driven browsing | Browser-Use, Stagehand | LLM decides each step — flexible but slow and expensive |
 | Large-scale crawling | Crawl4AI, Scrapy | Purpose-built for throughput and scale |
 | CLI wrapper for websites | OpenCLI | Tool collection approach; Tap is a protocol |
@@ -87,17 +87,19 @@ Configure for AI agents (Claude Code, Cursor, etc.):
 <summary>Other install methods</summary>
 
 ```bash
-# From source
-cargo install --git https://github.com/LeonTing1010/tap
-
-# Or build locally
+# From source (requires Deno)
 git clone https://github.com/LeonTing1010/tap && cd tap
-cargo install --path .
-
-# Windows — download tap-x86_64-pc-windows-msvc.zip from Releases
+deno compile --allow-all --output tap src/cli.ts
 ```
 
 </details>
+
+Install community skills:
+
+```bash
+tap install     # Clone 81 skills from tap-skills repo
+tap update      # Update to latest
+```
 
 ## Quick Start
 
@@ -123,7 +125,7 @@ tap xiaohongshu/search?keyword=AI
 ### From CLI
 
 ```bash
-tap list                        # See all 77 taps
+tap list                        # See all skills
 tap github trending --limit 5   # Run a tap
 tap check                       # Health check all taps
 ```
@@ -137,9 +139,9 @@ tap check                       # Health check all taps
 > Now tap.run executes it — forever, zero AI
 ```
 
-## Built-in Taps
+## Skills
 
-**77 taps across 40 sites.** API-first extraction where possible, DOM fallback when necessary.
+**81 skills across 41 sites** in [tap-skills](https://github.com/LeonTing1010/tap-skills). API-first extraction where possible, DOM fallback when necessary.
 
 ### Trending / Hot
 
@@ -368,13 +370,14 @@ export default {
 ## Architecture
 
 ```
-AI Agent ←→ MCP (stdin/stdout) ←→ Bridge (ws://9333) ←→ Chrome Extension
-              Rust binary              WebSocket            Kernel + Stdlib
-              ~2,900 lines             auto-reconnect       Runtime #1
+                    ┌─ Chrome Extension (kernel via CDP)
+AI Agent ←→ MCP ←→ Deno Executor ─┤
+  CLI / MCP          load + run     └─ Playwright (kernel via pw API)
 ```
 
-**Rust binary** — thin MCP gateway. No browser logic, no CDP dependency.
-**Chrome extension** — Runtime #1. All browser ops through legitimate extension APIs.
+**Deno CLI** — MCP server + executor + daemon (~1,800 lines). Zero dependencies.
+**Chrome extension** — Runtime #1. Kernel provider, no tap execution.
+**Playwright** — Runtime #2. Headless capable, no extension needed.
 **.tap.js** — deterministic scripts. Zero AI, zero tokens, runs forever.
 
 ## MCP Tools
@@ -393,15 +396,17 @@ AI Agent ←→ MCP (stdin/stdout) ←→ Bridge (ws://9333) ←→ Chrome Exten
 ## Building
 
 ```bash
-cargo build && cargo test     # 47 Rust tests
-cargo clippy -- -D warnings   # Zero warnings
+# Deno tests
+deno test --no-check --allow-all src/test/     # unit constraints
 
 # Extension constraint tests
-node extension/test/tap-format.test.mjs   # 933 constraints
-node extension/test/protocol.test.mjs     # 86 constraints
-```
+node extension/test/tap-format.test.mjs        # format constraints
+node extension/test/architecture.test.mjs      # architecture constraints
+node extension/test/multi-tab.test.mjs         # multi-tab constraints
 
-Total: **1,066 automated checks**, zero failures.
+# Compile binary
+deno compile --allow-all --output tap src/cli.ts
+```
 
 ## Contributing
 
@@ -413,10 +418,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for how to:
 
 ## Roadmap
 
-- [ ] **Tap registry** — community tap discovery and sharing
+- [x] **tap-skills** — community skills repository (`tap install`)
+- [x] **Playwright runtime** — second kernel, headless capable
 - [ ] **Android runtime** — AccessibilityService-based kernel
 - [ ] **Auto-healing** — detect and regenerate broken taps
-- [ ] **Tap composition** — higher-order taps that orchestrate multi-site workflows
 
 ## Star History
 
