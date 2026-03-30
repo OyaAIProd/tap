@@ -701,12 +701,11 @@ async function handleMessage(msg) {
     return { pong: true }
   }
   if (msg.action === 'list') {
-    return bridgeInvoke('list', {})
+    return listTapsFromDisk()
   }
   if (msg.action === 'run') {
     let site, name, args
     if (msg.url) {
-      // Parse tap://site/name?args format
       const hash = msg.url.replace('tap://', '')
       const [path, queryString] = hash.split('?')
       ;[site, name] = path.split('/')
@@ -723,7 +722,14 @@ async function handleMessage(msg) {
       args = msg.args || {}
     }
     if (site && name) {
-      return bridgeInvoke('run', { site, name, args })
+      // Try bridge first, fall back to showing run instructions
+      if (bridgeSocket && bridgeSocket.readyState === WebSocket.OPEN) {
+        return bridgeInvoke('run', { site, name, args })
+      }
+      // No daemon — open results page with instructions
+      const hash = `${site}/${name}${Object.keys(args).length ? '?' + new URLSearchParams(args).toString() : ''}`
+      chrome.tabs.create({ url: chrome.runtime.getURL(`results.html#${hash}`) })
+      return { error: 'daemon not running', hint: 'Run "tap daemon" in terminal, then try again' }
     }
   }
   if (msg.action === 'showResults') {
@@ -834,6 +840,21 @@ function bridgeSend(msg) {
 }
 
 const pendingCallbacks = new Map()
+
+async function listTapsFromDisk() {
+  try {
+    const manifestUrl = chrome.runtime.getURL('taps/manifest.json')
+    const response = await fetch(manifestUrl)
+    const files = await response.json()
+    const taps = files.map(f => {
+      const [site, nameFile] = f.replace('.tap.js', '').split('/')
+      return { site, name: nameFile }
+    })
+    return { taps, count: taps.length }
+  } catch (e) {
+    return { error: e.message, taps: [], count: 0 }
+  }
+}
 
 function bridgeInvoke(method, params = {}, timeout = 30000) {
   return new Promise((resolve, reject) => {
