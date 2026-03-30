@@ -99,12 +99,12 @@ Deno.test("[safety/what] page.eval sends expression as RPC", async () => {
   const calls: Array<{ type: string; method: string; params: unknown }> = [];
   const page = createPageProxy((type, method, params) => {
     calls.push({ type, method, params });
-    return Promise.resolve({ value: 42 });
+    return Promise.resolve(42);
   });
 
   await page.eval("document.title");
-  assertEquals(calls[0]?.type, "cdp");
-  assertEquals(calls[0]?.method, "Runtime.evaluate");
+  assertEquals(calls[0]?.type, "tool");
+  assertEquals(calls[0]?.method, "eval");
   assertEquals(
     (calls[0]?.params as Record<string, unknown>)?.expression,
     "document.title",
@@ -119,28 +119,28 @@ Deno.test("[safety/what] page.nav sends url as RPC", async () => {
   });
 
   await page.nav("https://example.com");
-  assertEquals(calls[0]?.type, "cdp");
-  assertEquals(calls[0]?.method, "Page.navigate");
+  assertEquals(calls[0]?.type, "tool");
+  assertEquals(calls[0]?.method, "nav");
   assertEquals(
     (calls[0]?.params as Record<string, unknown>)?.url,
     "https://example.com",
   );
 });
 
-Deno.test("[safety/what] page.tap sends site+name for composition", async () => {
-  // Why: page.tap() is how taps compose — must relay to extension correctly
-  const calls: Array<{ type: string; method: string; params: unknown }> = [];
-  const page = createPageProxy((type, method, params) => {
-    calls.push({ type, method, params });
-    return Promise.resolve({ rows: [{ title: "test" }] });
-  });
+Deno.test("[safety/what] page.tap throws — must be wired by executor", () => {
+  // Why: page.tap() is composition — executor wires it at runtime to enable
+  // recursive tap calls. The proxy's default must throw to catch misconfiguration.
+  const page = createPageProxy(() => Promise.resolve({}));
 
-  await page.tap("weibo", "hot", { limit: 5 });
-  assertEquals(calls[0]?.type, "tool");
-  assertEquals(calls[0]?.method, "run");
-  const p = calls[0]?.params as Record<string, unknown>;
-  assertEquals(p?.site, "weibo");
-  assertEquals(p?.name, "hot");
+  let threw = false;
+  try {
+    // deno-lint-ignore no-explicit-any
+    (page as any).tap("weibo", "hot");
+  } catch (e) {
+    threw = true;
+    assertEquals(String(e).includes("wired by executor"), true);
+  }
+  assertEquals(threw, true, "page.tap() must throw when not wired by executor");
 });
 
 Deno.test("[safety/what] page.type sends selector+text", async () => {
@@ -156,6 +156,60 @@ Deno.test("[safety/what] page.type sends selector+text", async () => {
   const p = calls[0]?.params as Record<string, unknown>;
   assertEquals(p?.selector, "#search");
   assertEquals(p?.text, "hello");
+});
+
+// --- Safety: protocol abstraction boundary ---
+
+Deno.test("[safety/what] page proxy never sends CDP method names", async () => {
+  // Why: page proxy must use abstract names (nav, eval, pointer) not CDP names
+  // (Page.navigate, Runtime.evaluate, Input.dispatchMouseEvent).
+  // This is the protocol abstraction boundary — page.ts is runtime-independent.
+  const calls: Array<{ type: string; method: string }> = [];
+  const page = createPageProxy((type, method, params) => {
+    calls.push({ type, method });
+    return Promise.resolve({});
+  });
+
+  // Exercise all methods except tap (tap throws by design — wired by executor)
+  await page.eval("1+1");
+  await page.pointer(0, 0, "click");
+  await page.keyboard("Enter", "press");
+  await page.nav("https://example.com");
+  await page.wait(1);
+  await page.screenshot();
+  // page.tap — skipped, throws by design
+  await page.capabilities();
+  await page.click("btn");
+  await page.type("#in", "hi");
+  await page.hover("a");
+  await page.scroll("div");
+  await page.pressKey("Tab");
+  await page.select("sel", "v");
+  await page.upload("input", "f");
+  await page.dialog(true);
+  await page.fetch("https://api.test");
+  await page.find("text");
+  await page.cookies();
+  await page.download("https://f.test");
+  await page.waitFor(".el");
+  await page.waitForNetwork();
+  await page.ssrState();
+  await page.storage();
+
+  // Constraint: no CDP method names anywhere
+  const CDP_PATTERNS = /^(Page\.|Runtime\.|Input\.|DOM\.|Network\.|Fetch\.)/;
+  for (const call of calls) {
+    assertEquals(
+      CDP_PATTERNS.test(call.method),
+      false,
+      `page proxy must not send CDP method "${call.method}" — use abstract name instead`,
+    );
+    assertEquals(
+      call.type,
+      "tool",
+      `page proxy must use type "tool", not "${call.type}" (method: ${call.method})`,
+    );
+  }
 });
 
 // --- Safety: no extra methods leak ---

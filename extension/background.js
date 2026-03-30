@@ -262,8 +262,13 @@ async function handleBridgeCommand(method, params = {}) {
 // Network log: per-tab, managed via networkLogs Map in State section
 
 async function requireTab(params = {}) {
-  const tabId = params.tabId ? Number(params.tabId) : activeTabId
-  if (!tabId) throw new Error('No tab. Call Bridge.attach or pass tabId.')
+  let tabId = params.tabId ? Number(params.tabId) : activeTabId
+  if (!tabId) {
+    const tab = await chrome.tabs.create({ url: 'about:blank' })
+    tabId = tab.id
+    activeTabId = tab.id
+    console.log(`[tap] auto-created tab ${tab.id}`)
+  }
   return tabId
 }
 
