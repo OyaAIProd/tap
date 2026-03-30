@@ -12,10 +12,12 @@ export interface TapModule {
   name: string;
   description: string;
   columns?: string[];
+  args?: Record<string, { type: string; default?: unknown }>;
   run?: (page: unknown, args: Record<string, unknown>) => Promise<unknown[]>;
   url?: string | ((args: Record<string, unknown>) => string);
   extract?: (args: Record<string, unknown>) => unknown[];
   waitFor?: string;
+  timeout?: number;
   health?: { min_rows?: number; non_empty?: string[] };
 }
 
@@ -78,11 +80,30 @@ export async function runTap(
   const page = createPageProxy(send);
   const start = performance.now();
 
+  // Resolve args with defaults
+  const resolvedArgs: Record<string, unknown> = { ...args };
+  if (tap.args) {
+    for (const [key, spec] of Object.entries(tap.args)) {
+      if (resolvedArgs[key] === undefined && spec.default !== undefined) {
+        resolvedArgs[key] = spec.default;
+      }
+    }
+  }
+
   let rawRows: unknown[];
   if (tap.run) {
-    rawRows = (await tap.run(page, args)) as unknown[];
+    rawRows = (await tap.run(page, resolvedArgs)) as unknown[];
+  } else if (tap.extract) {
+    // Extract format: nav → waitFor → eval(extract) → limit
+    const navUrl = typeof tap.url === "function" ? tap.url(resolvedArgs) : tap.url;
+    if (navUrl) await page.nav(navUrl);
+    if (tap.waitFor) await page.waitFor(tap.waitFor);
+    rawRows = (await page.eval(tap.extract.toString(), resolvedArgs)) as unknown[];
+    if (resolvedArgs.limit) {
+      rawRows = (rawRows as unknown[]).slice(0, resolvedArgs.limit as number);
+    }
   } else {
-    throw new Error(`Tap ${tap.site}/${tap.name} has no run() function`);
+    throw new Error(`Tap ${tap.site}/${tap.name} must have run() or extract()`);
   }
 
   const totalMs = Math.round(performance.now() - start);

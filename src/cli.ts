@@ -11,7 +11,9 @@
 
 import { startDaemon, EXTENSION_PORT, CLIENT_PORT } from "./daemon.ts";
 import { connectToDaemon, BridgeClient } from "./bridge.ts";
-import { listTaps } from "./executor.ts";
+import { listTaps, loadTap, runTap } from "./executor.ts";
+import { type RpcSend } from "./page.ts";
+import { forgeInspect } from "./forge.ts";
 import { handleInitialize, handleToolsList, handlePromptsList, handlePromptsGet, handleResourcesList, buildToolsSchema } from "./mcp.ts";
 
 const args = Deno.args;
@@ -207,11 +209,20 @@ async function cmdTap(
 ): Promise<void> {
   const client = await connectToDaemon();
   try {
-    const result = await client.sendTap("tool", "run", {
-      site,
-      name,
-      args: tapArgs,
-    });
+    // Find tap on disk
+    const dirs = tapDirs();
+    let tapPath = "";
+    for (const dir of dirs) {
+      const p = `${dir}/${site}/${name}.tap.js`;
+      try { await Deno.stat(p); tapPath = p; break; } catch { /* next */ }
+    }
+    if (!tapPath) throw new Error(`tap not found: ${site}/${name}`);
+
+    const tap = await loadTap(tapPath);
+    const send: RpcSend = (type, method, params) =>
+      client.sendTap(type, method, params) as Promise<unknown>;
+
+    const result = await runTap(tap, tapArgs, send);
     console.log(JSON.stringify(result, null, 2));
   } catch (e) {
     console.error(`error: ${e}`);
@@ -263,13 +274,35 @@ async function executeToolCall(
 
   switch (name) {
     // Tools with local logic
-    case "tap.list":
-      return await client.sendTap("tool", "list", {}, tabId);
+    case "tap.list": {
+      const dirs = tapDirs();
+      const taps = await listTaps(dirs);
+      return { taps: taps.map(t => ({ site: t.site, name: t.name, description: t.description, columns: t.columns, args: t.args })) };
+    }
     case "tap.run": {
       const site = args.site as string;
       const tapName = args.name as string;
       const tapArgs = (args.args as Record<string, unknown>) || {};
-      return await client.sendTap("tool", "run", { site, name: tapName, args: tapArgs }, tabId);
+
+      // Find and load tap from disk
+      const dirs = tapDirs();
+      let tapPath = "";
+      for (const dir of dirs) {
+        const p = `${dir}/${site}/${tapName}.tap.js`;
+        try { await Deno.stat(p); tapPath = p; break; } catch { /* next */ }
+      }
+      if (!tapPath) {
+        throw new Error(`tap not found: ${site}/${tapName}`);
+      }
+
+      const tap = await loadTap(tapPath);
+
+      // Create RPC send that routes through bridge to extension kernel
+      const send: RpcSend = (type, method, params) => {
+        return client.sendTap(type, method, params, tabId) as Promise<unknown>;
+      };
+
+      return await runTap(tap, tapArgs, send);
     }
     case "tap.screenshot": {
       const result = await client.sendTap("cdp", "Page.captureScreenshot", {
@@ -297,11 +330,10 @@ async function executeToolCall(
       }
     }
     case "forge.inspect": {
-      const url = args.url as string;
-      if (url) {
-        await client.sendTap("cdp", "Page.navigate", { url }, tabId);
-      }
-      return await client.sendTap("tool", "forge_inspect", {}, tabId);
+      const url = args.url as string || "";
+      const send: RpcSend = (type, method, params) =>
+        client.sendTap(type, method, params, tabId) as Promise<unknown>;
+      return await forgeInspect(url, send);
     }
     case "forge.verify": {
       const url = args.url as string;
