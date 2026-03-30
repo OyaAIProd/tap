@@ -265,7 +265,7 @@ async function cmdUpdate(): Promise<void> {
 
     if (!latest) {
       steps.push({ name: "core", ok: false, detail: "cannot reach GitHub" });
-    } else if (latest === VERSION) {
+    } else if (!semverGt(latest, VERSION)) {
       steps.push({ name: "core", ok: true, detail: `v${VERSION} (latest)` });
     } else {
       // Download binary + extension
@@ -274,7 +274,7 @@ async function cmdUpdate(): Promise<void> {
       const tmpDir = await Deno.makeTempDir();
       try {
         const baseUrl = `https://github.com/LeonTing1010/tap/releases/download/v${latest}`;
-        const { code } = await new Deno.Command("sh", {
+        const { code, stderr } = await new Deno.Command("sh", {
           args: ["-c", `cd "${tmpDir}" && curl -fsSL -o "${asset}" "${baseUrl}/${asset}" && tar -xzf "${asset}" && rm -f "${binPath}" && mv tap "${binPath}" && chmod +x "${binPath}"`],
           stdout: "piped", stderr: "piped",
         }).output();
@@ -288,7 +288,8 @@ async function cmdUpdate(): Promise<void> {
           }).output();
           steps.push({ name: "core", ok: true, detail: `v${VERSION} → v${latest}` });
         } else {
-          steps.push({ name: "core", ok: false, detail: "download failed" });
+          const errDetail = new TextDecoder().decode(stderr).trim().split("\n").pop() || "download failed";
+          steps.push({ name: "core", ok: false, detail: errDetail });
         }
       } finally {
         await Deno.remove(tmpDir, { recursive: true }).catch(() => {});
@@ -864,6 +865,17 @@ async function executeToolCall(
 
 
 // --- Helpers ---
+
+/** Returns true if a > b (semver, e.g. "0.4.0" > "0.3.0"). */
+function semverGt(a: string, b: string): boolean {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] ?? 0) > (pb[i] ?? 0)) return true;
+    if ((pa[i] ?? 0) < (pb[i] ?? 0)) return false;
+  }
+  return false;
+}
 
 function tapHome(): string {
   return Deno.env.get("TAP_HOME") || `${Deno.env.get("HOME")}/.tap`;
