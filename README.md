@@ -318,7 +318,7 @@ export default {
 
 ## MCP Tools
 
-40 tools across 6 categories — the full interface protocol exposed as MCP:
+43 tools across 6 categories + 3 guided workflow prompts — the full interface protocol exposed as MCP:
 
 | Category | Tools |
 |----------|-------|
@@ -329,11 +329,19 @@ export default {
 | **intercept.** | `on`, `off`, `list`, `continue`, `fulfill`, `fail` |
 | **tab.** | `list`, `new`, `close` |
 
+**Prompts** guide agent workflow — invoke with `/mcp__tap__<name>`:
+
+| Prompt | What it does |
+|--------|-------------|
+| `run` | Check existing taps first → run if found → forge if not. Enforces tap-first execution. |
+| `forge` | Step-by-step: inspect → pick strategy → verify → save. |
+| `debug` | Diagnose failing tap: check logs → re-inspect → fix → verify → confirm. |
+
 ## How Tap Compares
 
 | Your need | Best tool | Why |
 |-----------|-----------|-----|
-| Deterministic site operations for AI agents | **Tap** | 81 pre-built skills, zero LLM cost at runtime, MCP native |
+| Deterministic site operations for AI agents | **Tap** | 106 pre-built skills, zero LLM cost at runtime, MCP native |
 | General LLM-driven browsing | Browser-Use, Stagehand | LLM decides each step — flexible but slow and expensive |
 | Large-scale crawling | Crawl4AI, Scrapy | Purpose-built for throughput and scale |
 | CLI wrapper for websites | OpenCLI | Tool collection approach; Tap is a protocol |

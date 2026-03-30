@@ -318,7 +318,7 @@ export default {
 
 ## MCP 工具
 
-40 个工具覆盖 6 个类别 — 完整的界面协议以 MCP 形式暴露：
+43 个工具覆盖 6 个类别 + 3 个引导工作流的 prompt — 完整的界面协议以 MCP 形式暴露：
 
 | 类别 | 工具 |
 |------|------|
@@ -329,11 +329,19 @@ export default {
 | **intercept.** | `on`, `off`, `list`, `continue`, `fulfill`, `fail` |
 | **tab.** | `list`, `new`, `close` |
 
+**Prompts** 引导 Agent 工作流 — 通过 `/mcp__tap__<name>` 调用：
+
+| Prompt | 作用 |
+|--------|------|
+| `run` | 优先检查已有 tap → 有则运行 → 无则锻造。强制 tap 优先执行。 |
+| `forge` | 分步引导：inspect → 选策略 → verify → save。 |
+| `debug` | 诊断失败 tap：查日志 → 重新 inspect → 修复 → 验证 → 确认。 |
+
 ## 对比
 
 | 你的需求 | 最佳工具 | 原因 |
 |---------|---------|------|
-| AI Agent 的确定性站点操作 | **Tap** | 81 个预置 skills，运行时零 LLM 成本，MCP 原生 |
+| AI Agent 的确定性站点操作 | **Tap** | 106 个预置 skills，运行时零 LLM 成本，MCP 原生 |
 | 通用 LLM 驱动浏览 | Browser-Use, Stagehand | LLM 每步决策 — 灵活但慢且贵 |
 | 大规模爬取 | Crawl4AI, Scrapy | 专为吞吐量和规模构建 |
 | 网站 CLI 封装 | OpenCLI | 工具集合模式；Tap 是协议 |
