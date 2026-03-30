@@ -404,12 +404,11 @@ async function handleTapCommand(method, params = {}) {
       const tabId = await requireTab(params)
       if (!params.selector || params.text === undefined) throw new Error('type: missing selector or text')
       const page = getPage(tabId)
-      const result = await page.type(params.selector, params.text)
+      await page.type(params.selector, params.text)
+      const val = await inputValue(tabId, params.selector)
       const fb = await pageFeedback(tabId)
-      // Protocol returns structured verification — pass through to Agent
       let msg = `typed ${params.text.length} chars into "${params.selector}"`
-      if (result?.value !== undefined) msg += `\n  → value: "${result.value}"`
-      if (result?.match === false) msg += `\n  → match: false (value differs from input)`
+      if (val !== null) msg += `\n  → value: "${val}"`
       return formatFeedback(msg, fb)
     }
 
