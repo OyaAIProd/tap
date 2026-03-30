@@ -289,18 +289,26 @@ async function handleTapCommand(method, params = {}) {
     case 'page.eval': {
       const tabId = await requireTab(params)
       const page = getPage(tabId)
-      // Wrap result in a plain object to ensure serialization across scripting boundary
+      // Try chrome.scripting first (no debugger needed)
       const wrapped = await page.eval(async (expr) => {
         try {
           const result = await (0, eval)(expr)
-          return { __ok: true, value: JSON.parse(JSON.stringify(result ?? null)) }
+          return { __ok: true, value: result }
         } catch (e) {
           return { __ok: false, error: String(e.message || e) }
         }
       }, params.expression)
       if (wrapped?.__ok) return wrapped.value
-      if (wrapped?.__ok === false) throw new Error(wrapped.error)
-      return wrapped
+      // CSP blocks eval() — fall back to CDP Runtime.evaluate (bypasses CSP)
+      await ensureDebugger(tabId)
+      const cdpResult = await chrome.debugger.sendCommand(
+        { tabId }, 'Runtime.evaluate',
+        { expression: params.expression, returnByValue: true, awaitPromise: true }
+      )
+      if (cdpResult?.exceptionDetails) {
+        throw new Error(cdpResult.exceptionDetails.exception?.description || 'eval failed')
+      }
+      return cdpResult?.result?.value
     }
 
     case 'page.pointer': {
