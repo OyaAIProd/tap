@@ -195,31 +195,37 @@ test('background.js has getPage factory', () => {
   assert(bgSrc.includes('createPage('), 'getPage must call createPage')
 })
 
+// Delegated handlers: background.js case label → page method it must call
 const DELEGATED_HANDLERS = [
-  ['click', 'page.click'],
-  ['type', 'page.type'],
-  ['hover', 'page.hover'],
-  ['scroll', 'page.scroll'],
-  ['pressKey', 'page.pressKey'],
-  ['select', 'page.select'],
-  ['upload', 'page.upload'],
-  ['find', 'page.find'],
-  ['cookies', 'page.cookies'],
-  ['dialog', 'page.dialog'],
-  ['storage', 'page.storage'],
+  ['page.click', 'click'],
+  ['page.type', 'type'],
+  ['page.hover', 'hover'],
+  ['page.scroll', 'scroll'],
+  ['page.pressKey', 'pressKey'],
+  ['page.select', 'select'],
+  ['page.upload', 'upload'],
+  ['page.find', 'find'],
+  ['page.cookies', 'cookies'],
+  ['page.dialog', 'dialog'],
+  ['page.storage', 'storage'],
+  ['page.fetch', 'fetch'],
+  ['page.download', 'download'],
+  ['page.ssrState', 'ssrState'],
+  ['page.capabilities', 'capabilities'],
+  ['page.waitFor', 'waitFor'],
+  ['page.waitForNetwork', 'waitForNetwork'],
 ]
 
-for (const [handler, delegation] of DELEGATED_HANDLERS) {
-  test(`${handler} delegates to ${delegation}`, () => {
+for (const [caseName, method] of DELEGATED_HANDLERS) {
+  test(`${caseName} delegates to page.${method}`, () => {
     // Why: single source of truth — bridge must not reimplement what protocol provides
-    const casePattern = `case '${handler}':`
+    const casePattern = `case '${caseName}':`
     const caseStart = bgSrc.indexOf(casePattern)
-    assert(caseStart !== -1, `${handler} handler not found`)
+    assert(caseStart !== -1, `${caseName} handler not found`)
     const nextCase = bgSrc.indexOf("case '", caseStart + casePattern.length)
     const handlerSection = bgSrc.substring(caseStart, nextCase !== -1 ? nextCase : caseStart + 500)
-    assert(handlerSection.includes('getPage('), `${handler} must use getPage()`)
-    const method = delegation.split('.')[1]
-    assert(handlerSection.includes(`.${method}(`), `${handler} must call .${method}()`)
+    assert(handlerSection.includes('getPage('), `${caseName} must use getPage()`)
+    assert(handlerSection.includes(`.${method}(`), `${caseName} must call .${method}()`)
   })
 }
 
@@ -299,7 +305,7 @@ test('protocol.js does not import from background.js (no upward dependency)', ()
 
 test('Deno mcp.ts tool names all use category.method format', () => {
   // Why: unified naming convention — every tool must have a dot separator
-  const mcpSrc = readFileSync(new URL('../../deno/mcp.ts', import.meta.url), 'utf-8')
+  const mcpSrc = readFileSync(new URL('../../src/mcp.ts', import.meta.url), 'utf-8')
   // Extract only from buildToolsSchema() function (not serverInfo or other metadata)
   const schemaSection = mcpSrc.substring(mcpSrc.indexOf('function buildToolsSchema'))
   const toolNames = [...schemaSection.matchAll(/name:\s*"([^"]+)"/g)].map(m => m[1])
@@ -330,11 +336,13 @@ test('Extension detaches old socket before reconnecting', () => {
     'connectBridge must null out old socket onclose before reconnecting')
 })
 
-test('Deno cli.ts convertToolName strips category prefix', () => {
-  // Why: extension handlers use bare method names, Deno must strip "page." / "inspect." etc.
-  const cliSrc = readFileSync(new URL('../../deno/cli.ts', import.meta.url), 'utf-8')
-  const fn = cliSrc.substring(cliSrc.indexOf('function convertToolName'))
-  assert(fn.includes('indexOf(".")'), 'convertToolName must strip category prefix via indexOf')
+test('Deno cli.ts uses wire names directly (no conversion layer)', () => {
+  // Why: wire names are identical everywhere — MCP tool name = page proxy method = extension case.
+  // convertToolName was removed; the default relay passes name through unchanged.
+  const cliSrc = readFileSync(new URL('../../src/cli.ts', import.meta.url), 'utf-8')
+  assert(!cliSrc.includes('convertToolName'), 'convertToolName must not exist — wire names pass through directly')
+  // Verify relay sends name as-is
+  assert(cliSrc.includes('client.sendTap("tool", name, args'), 'default relay must send tool name unchanged')
 })
 
 console.log(`\n${passed + failed} constraints, ${passed} passed, ${failed} failed\n`)

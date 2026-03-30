@@ -327,22 +327,14 @@ async function handleTapCommand(method, params = {}) {
     case 'page.waitFor': {
       const tabId = await requireTab(params)
       const page = getPage(tabId)
-      const selector = params.selector
-      const timeout = params.ms || 30000
-      const start = Date.now()
-      while (Date.now() - start < timeout) {
-        const found = await page.evaluate((sel) => !!document.querySelector(sel), selector)
-        if (found) return { found: true }
-        await new Promise(r => setTimeout(r, 100))
-      }
-      return { found: false }
+      await page.waitFor(params.selector, params.ms || 10000)
+      return {}
     }
 
     case 'page.waitForNetwork': {
       const tabId = await requireTab(params)
       const page = getPage(tabId)
-      const timeout = params.ms || 30000
-      await page.waitForNetworkIdle({ timeoutInMilliseconds: timeout })
+      await page.waitForNetwork(params.ms || 10000, params.idle || 500)
       return {}
     }
 
@@ -840,6 +832,32 @@ async function handleTapCommand(method, params = {}) {
       if (tabId === activeTabId) activeTabId = null
       await chrome.tabs.remove(tabId)
       return { closed: true, tabId }
+    }
+
+    // ---- Stdlib delegates (page object has these, just route through) ----
+
+    case 'page.fetch': {
+      const tabId = await requireTab(params)
+      const page = getPage(tabId)
+      return await page.fetch(params.url, params.opts || {})
+    }
+
+    case 'page.download': {
+      const tabId = await requireTab(params)
+      const page = getPage(tabId)
+      return await page.download(params.url)
+    }
+
+    case 'page.ssrState': {
+      const tabId = await requireTab(params)
+      const page = getPage(tabId)
+      return await page.ssrState(params.name)
+    }
+
+    case 'page.capabilities': {
+      const tabId = await requireTab(params)
+      const page = getPage(tabId)
+      return page.capabilities()
     }
 
     default:
