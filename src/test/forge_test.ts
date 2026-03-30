@@ -19,7 +19,7 @@ Deno.test("[safety/what] forgeInspect calls page.eval for page analysis", async 
   const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
   const send = (_type: string, method: string, params: Record<string, unknown>) => {
     calls.push({ method, params });
-    if (method === "eval") {
+    if (method === "page.eval") {
       return Promise.resolve({
         framework: { name: "react", evidence: "#__next" },
         ssr_state: {},
@@ -29,13 +29,13 @@ Deno.test("[safety/what] forgeInspect calls page.eval for page analysis", async 
         meta: { ready_state: "complete" },
       });
     }
-    if (method === "cookies") return Promise.resolve([]);
-    if (method === "nav") return Promise.resolve({});
+    if (method === "page.cookies") return Promise.resolve([]);
+    if (method === "page.nav") return Promise.resolve({});
     return Promise.resolve({});
   };
 
   const result = await forgeInspect("https://example.com", send);
-  assertEquals(calls.some((c) => c.method === "eval"), true, "must call page.eval");
+  assertEquals(calls.some((c) => c.method === "page.eval"), true, "must call page.eval");
   assertEquals(result.framework.name, "react");
   assertExists(result.strategies);
   assertEquals(result.url, "https://example.com");
@@ -60,7 +60,7 @@ Deno.test("[safety/what] forgeInspect navigates to URL first", async () => {
   };
 
   await forgeInspect("https://example.com/page", send);
-  const navCall = calls.find((c) => c.method === "nav");
+  const navCall = calls.find((c) => c.method === "page.nav");
   assertEquals(navCall?.params?.url, "https://example.com/page");
 });
 

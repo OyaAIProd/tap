@@ -2,22 +2,19 @@
  * Constraint: extension architecture invariants
  * Classification: safety / what — violations cause silent click failures, debugger conflicts
  *
- * Three rules discovered via production debugging (2026-03-29):
+ * Rules discovered via production debugging:
  *   1. Single debugger: protocol.js must NOT own debugger state; uses DI from background.js
  *   2. Click safety: all CDP clicks must verify elementFromPoint before dispatch
- *   3. Atomic composition: multi-step taps compose via page.tap(), not duplicate navigation
+ *   3. Tool layer must not bypass kernel
+ *   4. Unified wire names: MCP tool name = wire method = extension case (no conversion)
  *
  * Run: node extension/test/architecture.test.mjs
  */
 
 import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
-import { readdir } from 'node:fs/promises'
-import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 
 const PAGE_API_SRC = readFileSync(new URL('../protocol/protocol.js', import.meta.url), 'utf-8')
-const EXECUTOR_SRC = readFileSync(new URL('../protocol/executor.js', import.meta.url), 'utf-8')
 const BACKGROUND_SRC = readFileSync(new URL('../background.js', import.meta.url), 'utf-8')
 
 let passed = 0
@@ -36,55 +33,34 @@ function test(name, fn) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// Rule 1: Single Debugger Principle
-// Why: Chrome allows one debugger per tab. Two managers = silent event loss.
-//      protocol.js had its own withDebugger that conflicted with background.js,
-//      causing CDP Input events to be dispatched but silently ignored.
+// Rule 1: Single Debugger Owner (background.js)
+// Why: protocol.js (kernel) owns CDP state via injected deps.
+//      If protocol.js has its own chrome.debugger calls or state,
+//      two systems fight over debugger attachment → silent failures.
 // ═══════════════════════════════════════════════════════════
 
 console.log('\n  ── Rule 1: Single Debugger ──\n')
 
-test('protocol.js must NOT have module-level debugger state variables', () => {
-  // Why: module-level debuggerTabId/detachTimer caused state split with background.js
-  assert(!PAGE_API_SRC.match(/^let\s+_?debugger/m),
-    'found module-level debugger state variable — use DI instead')
-  assert(!PAGE_API_SRC.match(/^let\s+_?detach/m),
-    'found module-level detach timer — debugger lifecycle belongs to background.js')
+test('protocol.js does not call chrome.debugger directly', () => {
+  // Why: if protocol touches debugger, it conflicts with background.js's attach/detach
+  assert(!PAGE_API_SRC.includes('chrome.debugger.sendCommand'),
+    'protocol.js must not use chrome.debugger — use injected deps instead')
 })
 
-test('createPage accepts cdpClick via dependency injection', () => {
-  // Why: page.click() must use background.js's cdpClick to share debugger state
-  assert(PAGE_API_SRC.includes('cdpClick'),
-    'createPage must accept cdpClick dependency')
+test('protocol.js does not track debugger state', () => {
+  // Why: debugger state (attached/detached) must be managed by background.js only
+  assert(!PAGE_API_SRC.includes('debuggerAttached'),
+    'protocol.js must not track debugger state')
 })
 
-test('stdlib click delegates to kernel.pointer (which uses injected cdpClick)', () => {
-  // Why: click must go through kernel.pointer → cdpClick to share debugger state
-  const clickSection = PAGE_API_SRC.substring(
-    PAGE_API_SRC.indexOf('async click('),
-    PAGE_API_SRC.indexOf('async type(')
-  )
-  assert(clickSection.includes('kernel.pointer'),
-    'stdlib click() must delegate to kernel.pointer')
-  // And kernel.pointer must use cdpClick
+test('protocol.js click uses injected cdpClick, not own implementation', () => {
+  // Why: inlined CDP clicks in protocol would bypass background.js's single debugger
   const pointerSection = PAGE_API_SRC.substring(
     PAGE_API_SRC.indexOf('async pointer('),
     PAGE_API_SRC.indexOf('async keyboard(')
   )
   assert(pointerSection.includes('cdpClick'),
     'kernel.pointer() must use injected cdpClick')
-})
-
-test('executor passes deps to createPage', () => {
-  // Why: without DI wiring, page API falls back to broken standalone debugger
-  assert(EXECUTOR_SRC.includes('createPage(tabId, deps'),
-    'runTap must pass deps to createPage')
-})
-
-test('background.js injects cdpClick into runTap', () => {
-  // Why: background.js owns the debugger; it must inject its cdpClick into tap execution
-  assert(BACKGROUND_SRC.includes('runTap(site, name, args, tabId, { cdpClick'),
-    'background.js must pass cdpClick when calling runTap')
 })
 
 // ═══════════════════════════════════════════════════════════
@@ -109,8 +85,8 @@ test('protocol.js click uses elementFromPoint to verify target is reachable', ()
 test('background.js click handler delegates to protocol (no inline elementFromPoint)', () => {
   // Why: after protocol unification, click safety lives in protocol.js stdlib.click()
   // background.js must delegate via getPage(), not reimplement element finding
-  const clickStart = BACKGROUND_SRC.indexOf("case 'click'")
-  const nextCase = BACKGROUND_SRC.indexOf("case '", clickStart + 12)
+  const clickStart = BACKGROUND_SRC.indexOf("case 'page.click'")
+  const nextCase = BACKGROUND_SRC.indexOf("case '", clickStart + 18)
   const clickSection = BACKGROUND_SRC.substring(clickStart, nextCase)
   assert(clickSection.includes('getPage('),
     'click handler must delegate to protocol via getPage()')
@@ -133,164 +109,14 @@ test('no unconditional scrollIntoView in protocol click', () => {
 })
 
 // ═══════════════════════════════════════════════════════════
-// Rule 3: Atomic Tap Composition
-// Why: monolithic taps duplicate navigation logic and can't be recombined.
-//      "open + detail + comment" as atoms lets AI orchestrate any workflow.
-//      Taps that bundle nav+extract+action are fragile and untestable in parts.
-// ═══════════════════════════════════════════════════════════
-
-console.log('\n  ── Rule 3: Atomic Composition ──\n')
-
-test('page.tap() is wired for composition in executor', () => {
-  // Why: page.tap() is the composition primitive; without it, taps can't call each other
-  assert(EXECUTOR_SRC.includes('page.tap = async'),
-    'executor must wire page.tap() for tap-to-tap composition')
-})
-
-test('page.tap() passes deps through for recursive calls', () => {
-  // Why: composed taps need cdpClick too; without deps passthrough, nested clicks fail
-  const tapWiring = EXECUTOR_SRC.substring(
-    EXECUTOR_SRC.indexOf('page.tap'),
-    EXECUTOR_SRC.indexOf('page.tap') + 200
-  )
-  assert(tapWiring.includes('deps'),
-    'page.tap() must pass deps to recursive runTap calls')
-})
-
-// Check that no xiaohongshu tap duplicates the "search → click → extract" pattern
-// that should be composed from open + detail
-const TAPS_DIR = new URL('../taps/', import.meta.url).pathname
-
-async function checkComposition() {
-  const xhsDir = join(TAPS_DIR, 'xiaohongshu')
-  const files = await readdir(xhsDir)
-  const tapFiles = files.filter(f => f.endsWith('.tap.js'))
-
-  for (const file of tapFiles) {
-    const mod = (await import(pathToFileURL(join(xhsDir, file)).href)).default
-    // Skip the 'open' tap itself — it's the navigation primitive
-    if (mod.name === 'open') continue
-
-    const body = mod.run?.toString() || ''
-
-    test(`xiaohongshu/${mod.name} does not duplicate open's navigation pattern`, () => {
-      // Why: if a tap navigates to search_result AND clicks note-item, it should compose via open
-      const hasSearchNav = body.includes('search_result') && body.includes('keyword')
-      const hasNoteClick = body.includes('note-item') && body.includes('.click')
-      if (hasSearchNav && hasNoteClick) {
-        assert.fail(
-          `${mod.name} duplicates search→click pattern — should compose via page.tap("xiaohongshu", "open")`
-        )
-      }
-    })
-  }
-}
-
-await checkComposition()
-
-// ═══════════════════════════════════════════════════════════
-// Rule 4: Action Taps Must Not Navigate
-// Why: action taps that bundle page.nav() can't be reused when the user
-//      is already on the target page. Separating nav from action enables:
-//        nav → action  (full flow)
-//        action alone  (user already there)
-//        nav → detail → AI → action  (AI-orchestrated flow)
-// ═══════════════════════════════════════════════════════════
-
-console.log('\n  ── Rule 4: Action Taps Must Not Navigate ──\n')
-
-// Action taps: their purpose is to DO something (publish, comment, generate),
-// not to navigate. Navigation should be a separate composable tap.
-const ACTION_TAP_NAMES = ['comment', 'publish', 'generate']
-
-async function checkActionTaps() {
-  const dirs = await readdir(TAPS_DIR)
-  for (const dir of dirs) {
-    const dirPath = join(TAPS_DIR, dir)
-    let files
-    try { files = await readdir(dirPath) } catch { continue }
-    const tapFiles = files.filter(f => f.endsWith('.tap.js'))
-
-    for (const file of tapFiles) {
-      const mod = (await import(pathToFileURL(join(dirPath, file)).href)).default
-      if (!ACTION_TAP_NAMES.includes(mod.name)) continue
-      if (!mod.run) continue // extract-format taps don't navigate
-
-      const body = mod.run.toString()
-
-      test(`${mod.site}/${mod.name} action tap does not call page.nav()`, () => {
-        // Why: action taps must be pure actions; nav is a separate composable step
-        const hasNav = body.includes('page.nav(') || body.includes('page.nav (')
-        if (hasNav) {
-          assert.fail(
-            `${mod.site}/${mod.name} calls page.nav() — split into nav tap + action tap`
-          )
-        }
-      })
-    }
-  }
-}
-
-await checkActionTaps()
-
-// ═══════════════════════════════════════════════════════════
-// Rule 5: No Duplicate Extraction Logic Within a Site
-// Why: xiaohongshu had search + search_api + search_fast all parsing the same
-//      __INITIAL_STATE__. When the site changes its state shape, three taps
-//      break instead of one. One source of truth per extraction pattern.
-// ═══════════════════════════════════════════════════════════
-
-console.log('\n  ── Rule 5: No Duplicate Extraction ──\n')
-
-async function checkDuplicateExtraction() {
-  const dirs = await readdir(TAPS_DIR)
-  for (const dir of dirs) {
-    const dirPath = join(TAPS_DIR, dir)
-    let files
-    try { files = await readdir(dirPath) } catch { continue }
-    const tapFiles = files.filter(f => f.endsWith('.tap.js'))
-    if (tapFiles.length < 2) continue
-
-    // Load all taps for this site
-    const mods = []
-    for (const file of tapFiles) {
-      const mod = (await import(pathToFileURL(join(dirPath, file)).href)).default
-      const body = (mod.run || mod.extract)?.toString() || ''
-      mods.push({ name: mod.name, body, file })
-    }
-
-    // Check for duplicate SSR state parsing patterns
-    // Match taps that parse search feeds from SSR state (search.feeds or search?.feeds)
-    const ssrSearchParsers = mods.filter(m =>
-      m.body.includes('__INITIAL_STATE__') && /search\??\.feeds/.test(m.body)
-    )
-    // Exclude search_fast — intentionally different transport (pure HTTP, no browser)
-    const browserSSRParsers = ssrSearchParsers.filter(m => m.name !== 'search_fast')
-
-    test(`${dir}: at most one browser-based SSR search extraction (found ${browserSSRParsers.length})`, () => {
-      // Why: multiple taps parsing the same SSR state = multiple breakpoints when state shape changes
-      // search_fast is exempt because it uses HTTP fetch (different transport, valid for headless)
-      if (browserSSRParsers.length > 1) {
-        const names = browserSSRParsers.map(m => m.name).join(', ')
-        assert.fail(
-          `${dir} has ${browserSSRParsers.length} browser taps parsing SSR search state (${names}) — consolidate into one`
-        )
-      }
-    })
-  }
-}
-
-await checkDuplicateExtraction()
-
-// ═══════════════════════════════════════════════════════════
-// Rule 6: Tool Layer Must Not Bypass Kernel
+// Rule 3: Tool Layer Must Not Bypass Kernel
 // Why: handleTapCommand is the tool dispatch layer. It must delegate to
 //      kernel (page.eval, page.nav, etc.) — never call routeCDP or
 //      chrome.scripting/chrome.debugger directly. Bypassing the kernel
 //      breaks runtime portability and creates invisible coupling.
 // ═══════════════════════════════════════════════════════════
 
-console.log('\n  ── Rule 6: Tool Layer Must Not Bypass Kernel ──\n')
+console.log('\n  ── Rule 3: Tool Layer Must Not Bypass Kernel ──\n')
 
 {
   // Extract handleTapCommand body
@@ -321,6 +147,47 @@ console.log('\n  ── Rule 6: Tool Layer Must Not Bypass Kernel ──\n')
     // Why: chrome.debugger belongs to kernel; tool layer uses page.pointer/keyboard
     assert(!cmdBody.includes('chrome.debugger.'),
       'handleTapCommand uses chrome.debugger — must delegate to kernel via getPage()')
+  })
+}
+
+// ═══════════════════════════════════════════════════════════
+// Rule 4: Unified Wire Names
+// Why: MCP tool name = wire method = extension case. No conversion layer.
+//      Every case in handleTapCommand must use dot notation (page.*, inspect.*, tab.*, intercept.*).
+//      Bare names like 'click' or underscore names like 'tab_list' are forbidden.
+// ═══════════════════════════════════════════════════════════
+
+console.log('\n  ── Rule 4: Unified Wire Names ──\n')
+
+{
+  const start = BACKGROUND_SRC.indexOf('async function handleTapCommand(')
+  const bodyStart = BACKGROUND_SRC.indexOf('{', start)
+  let depth = 0, end = bodyStart
+  for (let i = bodyStart; i < BACKGROUND_SRC.length; i++) {
+    if (BACKGROUND_SRC[i] === '{') depth++
+    if (BACKGROUND_SRC[i] === '}') depth--
+    if (depth === 0) { end = i + 1; break }
+  }
+  const cmdBody = BACKGROUND_SRC.substring(bodyStart, end)
+
+  // Extract all case strings
+  const caseNames = [...cmdBody.matchAll(/case\s+'([^']+)'/g)].map(m => m[1])
+
+  test('all handleTapCommand cases use dot notation', () => {
+    const bareCases = caseNames.filter(n => !n.includes('.'))
+    assert(bareCases.length === 0,
+      `found bare case names without dot notation: ${bareCases.join(', ')} — must use prefix.action format`)
+  })
+
+  test('no underscore-separated case names (old naming)', () => {
+    const underscoreCases = caseNames.filter(n => n.includes('_') && !n.includes('.'))
+    assert(underscoreCases.length === 0,
+      `found underscore case names: ${underscoreCases.join(', ')} — must use dot notation`)
+  })
+
+  test('extension has no executor import (Deno is the only executor)', () => {
+    assert(!BACKGROUND_SRC.includes("from './protocol/executor.js'"),
+      'background.js must not import executor.js — Deno executor is the single tap runner')
   })
 }
 

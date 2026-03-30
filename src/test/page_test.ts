@@ -90,7 +90,7 @@ Deno.test("[safety/what] page.click sends correct RPC", async () => {
 
   await page.click("Submit");
   assertEquals(calls[0]?.type, "tool");
-  assertEquals(calls[0]?.method, "click");
+  assertEquals(calls[0]?.method, "page.click");
   assertEquals((calls[0]?.params as Record<string, unknown>)?.target, "Submit");
 });
 
@@ -104,7 +104,7 @@ Deno.test("[safety/what] page.eval sends expression as RPC", async () => {
 
   await page.eval("document.title");
   assertEquals(calls[0]?.type, "tool");
-  assertEquals(calls[0]?.method, "eval");
+  assertEquals(calls[0]?.method, "page.eval");
   assertEquals(
     (calls[0]?.params as Record<string, unknown>)?.expression,
     "document.title",
@@ -120,7 +120,7 @@ Deno.test("[safety/what] page.nav sends url as RPC", async () => {
 
   await page.nav("https://example.com");
   assertEquals(calls[0]?.type, "tool");
-  assertEquals(calls[0]?.method, "nav");
+  assertEquals(calls[0]?.method, "page.nav");
   assertEquals(
     (calls[0]?.params as Record<string, unknown>)?.url,
     "https://example.com",
@@ -152,7 +152,7 @@ Deno.test("[safety/what] page.type sends selector+text", async () => {
 
   await page.type("#search", "hello");
   assertEquals(calls[0]?.type, "tool");
-  assertEquals(calls[0]?.method, "type");
+  assertEquals(calls[0]?.method, "page.type");
   const p = calls[0]?.params as Record<string, unknown>;
   assertEquals(p?.selector, "#search");
   assertEquals(p?.text, "hello");
@@ -225,4 +225,50 @@ Deno.test("[safety/what] page proxy has exactly 24 methods, no more", () => {
     24,
     `page must have exactly 24 methods (8 kernel + 16 stdlib), got ${methods.length}: ${methods.join(", ")}`,
   );
+});
+
+// --- Safety: unified wire names (one name everywhere, no conversion) ---
+
+Deno.test("[safety/what] all page proxy wire names use dot notation (page.*)", async () => {
+  // Why: MCP tool name = wire method = extension case. No conversion layer.
+  // If a wire name lacks "page." prefix, the extension won't find the handler.
+  const calls: Array<{ method: string }> = [];
+  const page = createPageProxy((type, method, _params) => {
+    calls.push({ method });
+    return Promise.resolve({});
+  });
+
+  // Exercise all methods except tap (throws by design)
+  await page.eval("1");
+  await page.pointer(0, 0, "click");
+  await page.keyboard("a", "press");
+  await page.nav("https://x.com");
+  await page.wait(1);
+  await page.screenshot();
+  await page.capabilities();
+  await page.click("btn");
+  await page.type("#i", "t");
+  await page.hover("a");
+  await page.scroll("div");
+  await page.pressKey("Tab");
+  await page.select("s", "v");
+  await page.upload("i", "f");
+  await page.dialog(true);
+  await page.fetch("https://a.test");
+  await page.find("q");
+  await page.cookies();
+  await page.download("https://d.test");
+  await page.waitFor(".e");
+  await page.waitForNetwork();
+  await page.ssrState();
+  await page.storage();
+
+  assertEquals(calls.length, 23, "must exercise all 23 callable methods");
+  for (const { method } of calls) {
+    assertEquals(
+      method.startsWith("page."),
+      true,
+      `wire name "${method}" must use "page." prefix — one name everywhere, no conversion`,
+    );
+  }
 });

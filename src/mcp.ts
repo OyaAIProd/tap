@@ -181,7 +181,7 @@ export function buildToolsSchema() {
     },
     {
       name: "tap.screenshot",
-      description: "Take a screenshot of the current page.",
+      description: "Take a screenshot of the current page. Prefer inspect.page, page.eval, or inspect.a11y for extracting page info — screenshot is expensive and should only be used for visual verification.",
       inputSchema: {
         type: "object",
         properties: {

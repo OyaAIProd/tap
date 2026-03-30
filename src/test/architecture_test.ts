@@ -79,11 +79,12 @@ Deno.test("[safety/what-x-what] Extension core must not contain tap executor fun
   const sources = await readExtensionSources();
   const violations: string[] = [];
   // These are executor-specific functions that should only be in Deno
+  // Exclude: protocol/executor.js (definition), background.js (import/relay only)
   const executorPatterns = /\b(runTap|listTaps|registerTap|loadTap)\s*\(/;
 
   for (const { file, content } of sources) {
-    // Skip executor.js itself (it exists but shouldn't be called from core routing)
-    if (file === "protocol/executor.js") continue;
+    // Skip executor.js (definitions) and background.js (relay only)
+    if (file === "protocol/executor.js" || file === "background.js") continue;
     for (const [i, line] of content.split("\n").entries()) {
       if (line.trimStart().startsWith("//")) continue;
       if (executorPatterns.test(line)) {
@@ -122,21 +123,21 @@ Deno.test("[safety/what-x-what] Extension core must not import forge.js", async 
   );
 });
 
-// --- Safety/what: page.* in Deno must go through RpcSend ---
+// --- Safety/what: Deno must never send CDP commands directly ---
 
-Deno.test("[safety/what] Deno page proxy is the ONLY way to call browser primitives", async () => {
-  // Why: if Deno code bypasses page proxy and calls bridge directly with
-  // hardcoded CDP methods, the kernel abstraction is broken
+Deno.test("[safety/what] Deno sources must never bypass kernel via sendTap('cdp')", async () => {
+  // Why: sendTap("cdp", ...) talks directly to Chrome DevTools Protocol,
+  // bypassing the kernel abstraction. This breaks runtime portability —
+  // Playwright runtime cannot handle CDP envelopes.
+  // Fix: use createPageProxy(send) and call page.nav/eval/screenshot instead.
   const sources = await readDenoSources();
   const violations: string[] = [];
-  // Direct CDP method names that should go through page proxy, not raw sendTap
-  const rawCDP = /sendTap\s*\(\s*["']cdp["']\s*,\s*["'](Runtime\.evaluate|Input\.dispatch|Page\.navigate)["']/;
+  const cdpBypass = /sendTap\s*\(\s*["']cdp["']/;
 
   for (const { file, content } of sources) {
-    if (file === "cli.ts") continue; // cli.ts relay is allowed (forge.verify, screenshot)
     for (const [i, line] of content.split("\n").entries()) {
       if (line.trimStart().startsWith("//")) continue;
-      if (rawCDP.test(line)) {
+      if (cdpBypass.test(line)) {
         violations.push(`${file}:${i + 1}: ${line.trim()}`);
       }
     }
@@ -145,19 +146,43 @@ Deno.test("[safety/what] Deno page proxy is the ONLY way to call browser primiti
   assertEquals(
     violations.length,
     0,
-    `Use page proxy (page.eval/nav/click) instead of raw CDP:\n${violations.join("\n")}`,
+    `Deno must not use sendTap("cdp") — use page proxy instead:\n${violations.join("\n")}`,
+  );
+});
+
+Deno.test("[safety/what] Deno sources must never reference CDP method names", async () => {
+  // Why: CDP method names (Page.navigate, Runtime.evaluate, Page.captureScreenshot,
+  // Input.dispatch*) are Chrome-specific. If they appear in Deno sources, something
+  // is bypassing the kernel. All browser ops go through page.* wire names.
+  const sources = await readDenoSources();
+  const violations: string[] = [];
+  const cdpMethods = /["'](Page\.navigate|Page\.captureScreenshot|Runtime\.evaluate|Input\.dispatch\w+)["']/;
+
+  for (const { file, content } of sources) {
+    for (const [i, line] of content.split("\n").entries()) {
+      if (line.trimStart().startsWith("//")) continue;
+      if (cdpMethods.test(line)) {
+        violations.push(`${file}:${i + 1}: ${line.trim()}`);
+      }
+    }
+  }
+
+  assertEquals(
+    violations.length,
+    0,
+    `Deno must not reference CDP methods — use page.nav/eval/screenshot:\n${violations.join("\n")}`,
   );
 });
 
 // --- Quality: architecture summary ---
 
-Deno.test("[quality/what] Deno has exactly 7 source modules", async () => {
+Deno.test("[quality/what] Deno has exactly 8 source modules", async () => {
   // Why: detect accidental module sprawl — new modules should be deliberate
   const sources = await readDenoSources();
   const names = sources.map((s) => s.file).sort();
   assertEquals(
     names,
     ["bridge.ts", "cli.ts", "daemon.ts", "executor.ts", "forge.ts", "mcp.ts", "page.ts", "runtime-playwright.ts"],
-    `Expected 7 modules, got: ${names.join(", ")}`,
+    `Expected 8 modules, got: ${names.join(", ")}`,
   );
 });

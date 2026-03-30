@@ -4,6 +4,8 @@
  *
  * Usage:
  *   tap list                     — list available taps
+ *   tap install                  — install community skills
+ *   tap update                   — update community skills
  *   tap daemon                   — run bridge daemon (foreground)
  *   tap mcp                      — run MCP server (stdin/stdout)
  *   tap <site> <name> [--args]   — run a tap
@@ -12,7 +14,7 @@
 import { startDaemon, EXTENSION_PORT, CLIENT_PORT } from "./daemon.ts";
 import { connectToDaemon, BridgeClient } from "./bridge.ts";
 import { listTaps, loadTap, runTap, appendLog } from "./executor.ts";
-import { type RpcSend } from "./page.ts";
+import { createPageProxy, type RpcSend } from "./page.ts";
 import { forgeInspect } from "./forge.ts";
 import { handleInitialize, handleToolsList, handlePromptsList, handlePromptsGet, handleResourcesList, buildToolsSchema } from "./mcp.ts";
 
@@ -136,6 +138,12 @@ switch (command) {
   case "list":
     await cmdList();
     break;
+  case "install":
+    await cmdInstall();
+    break;
+  case "update":
+    await cmdUpdate();
+    break;
   case "daemon":
     await cmdDaemon();
     break;
@@ -165,6 +173,23 @@ switch (command) {
     break;
 }
 
+// --- Shared helpers ---
+
+/** Find a tap on disk, returns path or throws. */
+async function findTap(site: string, name: string, dirs: string[]): Promise<string> {
+  for (const dir of dirs) {
+    const p = `${dir}/${site}/${name}.tap.js`;
+    try { await Deno.stat(p); return p; } catch { /* next */ }
+  }
+  throw new Error(`tap not found: ${site}/${name}`);
+}
+
+/** Create RpcSend from bridge client + tabId. */
+function createBridgeSend(client: BridgeClient, tabId: number): RpcSend {
+  return (type, method, params) =>
+    client.sendTap(type, method, params, tabId) as Promise<unknown>;
+}
+
 // --- Commands ---
 
 async function cmdList(): Promise<void> {
@@ -190,6 +215,57 @@ async function cmdList(): Promise<void> {
   }
 }
 
+const SKILLS_REPO = "https://github.com/LeonTing1010/tap-skills.git";
+
+async function cmdInstall(): Promise<void> {
+  const skillsDir = `${tapHome()}/skills`;
+  try {
+    await Deno.stat(skillsDir);
+    console.log("Skills already installed. Run 'tap update' to update.");
+    return;
+  } catch { /* not installed yet */ }
+
+  console.log("Installing tap-skills...");
+  const cmd = new Deno.Command("git", {
+    args: ["clone", "--depth", "1", SKILLS_REPO, skillsDir],
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  const { code } = await cmd.output();
+  if (code !== 0) {
+    console.error("Failed to install tap-skills.");
+    Deno.exit(1);
+  }
+  const dirs = tapDirs();
+  const taps = await listTaps(dirs);
+  console.log(`Installed ${taps.length} skills.`);
+}
+
+async function cmdUpdate(): Promise<void> {
+  const skillsDir = `${tapHome()}/skills`;
+  try {
+    await Deno.stat(skillsDir);
+  } catch {
+    console.log("Skills not installed. Run 'tap install' first.");
+    Deno.exit(1);
+  }
+
+  console.log("Updating tap-skills...");
+  const cmd = new Deno.Command("git", {
+    args: ["-C", skillsDir, "pull", "--ff-only"],
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  const { code } = await cmd.output();
+  if (code !== 0) {
+    console.error("Failed to update. Try: rm -rf ~/.tap/skills && tap install");
+    Deno.exit(1);
+  }
+  const dirs = tapDirs();
+  const taps = await listTaps(dirs);
+  console.log(`Updated. ${taps.length} skills available.`);
+}
+
 async function cmdDaemon(): Promise<void> {
   const handle = await startDaemon();
   console.error(`daemon: extension=${EXTENSION_PORT}, clients=${CLIENT_PORT}`);
@@ -208,6 +284,7 @@ async function cmdDaemon(): Promise<void> {
 
 async function cmdMcp(): Promise<void> {
   let client: BridgeClient | null = null;
+  let sessionTabId = -1; // Track active tab across tool calls
 
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
@@ -278,7 +355,9 @@ async function cmdMcp(): Promise<void> {
               break;
             }
           }
-          response = await handleToolCall(id, request.params, client);
+          const callResult = await handleToolCall(id, request.params, client, sessionTabId);
+          response = callResult.response;
+          if (callResult.tabId >= 0) sessionTabId = callResult.tabId;
           break;
         }
         default:
@@ -304,14 +383,14 @@ async function cmdTap(
   const status = new StatusLine();
   status.start(`${site}/${name} [${runtime}] — connecting`);
 
-  // Find tap on disk
   const dirs = tapDirs();
-  let tapPath = "";
-  for (const dir of dirs) {
-    const p = `${dir}/${site}/${name}.tap.js`;
-    try { await Deno.stat(p); tapPath = p; break; } catch { /* next */ }
+  let tapPath: string;
+  try {
+    tapPath = await findTap(site, name, dirs);
+  } catch {
+    status.fail(`tap not found: ${site}/${name}`);
+    Deno.exit(1);
   }
-  if (!tapPath) { status.fail(`tap not found: ${site}/${name}`); Deno.exit(1); }
 
   const tap = await loadTap(tapPath);
 
@@ -360,25 +439,25 @@ async function cmdTap(
 
 /** Human-readable label for an RPC step. */
 function formatStep(_type: string, method: string, params: Record<string, unknown>): string {
-  if (method === "nav") {
+  if (method === "page.nav") {
     const url = String(params.url || "");
     try { return `nav ${new URL(url).hostname}`; } catch { return `nav ${url.slice(0, 50)}`; }
   }
-  if (method === "eval") {
+  if (method === "page.eval") {
     const expr = String(params.expression || "");
     if (expr.startsWith("(async") || expr.startsWith("((")) return `extract`;
     return `eval`;
   }
-  if (method === "screenshot") return `screenshot`;
-  if (method === "pointer") return `pointer ${params.x},${params.y}`;
-  if (method === "keyboard") return `key ${params.key || ""}`;
-  if (method === "run") return `tap ${params.site}/${params.name}`;
-  if (method === "click") return `click "${params.target || ""}"`;
-  if (method === "type") return `type → ${String(params.selector || "").slice(0, 30)}`;
-  if (method === "upload") return `upload → ${String(params.selector || "").slice(0, 30)}`;
-  if (method === "waitFor") return `waitFor "${params.selector || ""}"`;
-  if (method === "find") return `find "${params.query || ""}"`;
-  if (method === "fetch") {
+  if (method === "page.screenshot") return `screenshot`;
+  if (method === "page.pointer") return `pointer ${params.x},${params.y}`;
+  if (method === "page.keyboard") return `key ${params.key || ""}`;
+  if (method === "tap.run") return `tap ${params.site}/${params.name}`;
+  if (method === "page.click") return `click "${params.target || ""}"`;
+  if (method === "page.type") return `type → ${String(params.selector || "").slice(0, 30)}`;
+  if (method === "page.upload") return `upload → ${String(params.selector || "").slice(0, 30)}`;
+  if (method === "page.waitFor") return `waitFor "${params.selector || ""}"`;
+  if (method === "page.find") return `find "${params.query || ""}"`;
+  if (method === "page.fetch") {
     try { return `fetch ${new URL(String(params.url)).hostname}`; } catch { return `fetch`; }
   }
   return `${_type}/${method}`;
@@ -390,29 +469,36 @@ async function handleToolCall(
   id: unknown,
   params: Record<string, unknown>,
   client: BridgeClient,
-): Promise<Record<string, unknown>> {
+  sessionTabId: number,
+): Promise<{ response: Record<string, unknown>; tabId: number }> {
   const toolName = (params.name as string) || "";
   const args = (params.arguments as Record<string, unknown>) || {};
 
   try {
-    const result = await executeToolCall(toolName, args, client);
+    const { result, tabId } = await executeToolCall(toolName, args, client, sessionTabId);
     const text = typeof result === "string"
       ? result
       : JSON.stringify(result, null, 2);
 
     return {
-      jsonrpc: "2.0",
-      id,
-      result: { content: [{ type: "text", text }] },
+      response: {
+        jsonrpc: "2.0",
+        id,
+        result: { content: [{ type: "text", text }] },
+      },
+      tabId,
     };
   } catch (e) {
     return {
-      jsonrpc: "2.0",
-      id,
-      result: {
-        content: [{ type: "text", text: `error: ${e}` }],
-        isError: true,
+      response: {
+        jsonrpc: "2.0",
+        id,
+        result: {
+          content: [{ type: "text", text: `error: ${e}` }],
+          isError: true,
+        },
       },
+      tabId: sessionTabId,
     };
   }
 }
@@ -421,54 +507,47 @@ async function executeToolCall(
   name: string,
   args: Record<string, unknown>,
   client: BridgeClient,
-): Promise<unknown> {
-  const tabId = (args.tabId as number) ?? -1;
+  sessionTabId: number,
+): Promise<{ result: unknown; tabId: number }> {
+  // Explicit tabId in args > session tabId > -1 (let extension decide)
+  const tabId = (args.tabId as number) ?? (sessionTabId >= 0 ? sessionTabId : -1);
+
+  const wrap = (result: unknown, newTabId = tabId) => ({ result, tabId: newTabId });
 
   switch (name) {
     // Tools with local logic
     case "tap.list": {
       const dirs = tapDirs();
       const taps = await listTaps(dirs);
-      return { taps: taps.map(t => ({ site: t.site, name: t.name, description: t.description, columns: t.columns, args: t.args })) };
+      return wrap({ taps: taps.map(t => ({ site: t.site, name: t.name, description: t.description, columns: t.columns, args: t.args })) });
     }
     case "tap.run": {
       const site = args.site as string;
       const tapName = args.name as string;
       const tapArgs = (args.args as Record<string, unknown>) || {};
 
-      // Find and load tap from disk
       const dirs = tapDirs();
-      let tapPath = "";
-      for (const dir of dirs) {
-        const p = `${dir}/${site}/${tapName}.tap.js`;
-        try { await Deno.stat(p); tapPath = p; break; } catch { /* next */ }
-      }
-      if (!tapPath) {
-        throw new Error(`tap not found: ${site}/${tapName}`);
-      }
-
+      const tapPath = await findTap(site, tapName, dirs);
       const tap = await loadTap(tapPath);
+      const send = createBridgeSend(client, tabId);
 
-      // Create RPC send that routes through bridge to extension kernel
-      const send: RpcSend = (type, method, params) => {
-        return client.sendTap(type, method, params, tabId) as Promise<unknown>;
-      };
-
-      return await runTap(tap, tapArgs, send, dirs);
+      return wrap(await runTap(tap, tapArgs, send, dirs));
     }
     case "tap.screenshot": {
-      const result = await client.sendTap("cdp", "Page.captureScreenshot", {
+      const send = createBridgeSend(client, tabId);
+      const page = createPageProxy(send);
+      const result = await page.screenshot({
         format: args.format || "jpeg",
         quality: args.quality || 50,
-      }, tabId) as Record<string, unknown>;
+      }) as Record<string, unknown>;
       const data = result.data as string;
       if (data) {
         const path = (args.path as string) || `${tapHome()}/cache/screenshot.jpg`;
         await Deno.mkdir(new URL(".", `file://${path}`).pathname, { recursive: true }).catch(() => {});
         await Deno.writeFile(path, Uint8Array.from(atob(data), (c) => c.charCodeAt(0)));
-        return `Screenshot saved to ${path}`;
+        return wrap(`Screenshot saved to ${path}`);
       }
-      return result;
+      return wrap(result);
     }
     case "tap.logs": {
       const logPath = `${tapHome()}/logs/tap.jsonl`;
@@ -476,16 +555,15 @@ async function executeToolCall(
         const content = await Deno.readTextFile(logPath);
         const lines = content.trim().split("\n").filter(Boolean);
         const limit = (args.limit as number) || 50;
-        return lines.slice(-limit).map((l) => JSON.parse(l));
+        return wrap(lines.slice(-limit).map((l) => JSON.parse(l)));
       } catch {
-        return [];
+        return wrap([]);
       }
     }
     case "forge.inspect": {
       const url = args.url as string || "";
       const t0 = performance.now();
-      const send: RpcSend = (type, method, params) =>
-        client.sendTap(type, method, params, tabId) as Promise<unknown>;
+      const send = createBridgeSend(client, tabId);
       const result = await forgeInspect(url, send);
       const strategies = (result as Record<string, unknown>)?.strategies;
       await appendLog({
@@ -493,22 +571,21 @@ async function executeToolCall(
         ms: Math.round(performance.now() - t0),
         strategies: Array.isArray(strategies) ? strategies.length : 0,
       });
-      return result;
+      return wrap(result);
     }
     case "forge.verify": {
       const url = args.url as string;
       const t0 = performance.now();
-      await client.sendTap("cdp", "Page.navigate", { url }, tabId);
-      await new Promise((r) => setTimeout(r, (args.wait_ms as number) || 2000));
-      const result = await client.sendTap("cdp", "Runtime.evaluate", {
-        expression: args.expression,
-        returnByValue: true,
-      }, tabId);
+      const send = createBridgeSend(client, tabId);
+      const page = createPageProxy(send);
+      await page.nav(url);
+      await page.wait((args.wait_ms as number) || 2000);
+      const result = await page.eval(args.expression as string);
       await appendLog({
         event: "forge_verify", url,
         ms: Math.round(performance.now() - t0),
       });
-      return result;
+      return wrap(result);
     }
     case "forge.save": {
       const site = args.site as string;
@@ -521,25 +598,19 @@ async function executeToolCall(
       await appendLog({
         event: "forge_save", site, name: tapName, path,
       });
-      return `saved to ${path}`;
+      return wrap(`saved to ${path}`);
     }
     default: {
-      // Relay to extension: page.click → tool/click, tab.list → tool/tab_list
-      const method = convertToolName(name);
-      return await client.sendTap("tool", method, args, tabId);
+      // Relay to extension — name IS the wire method, no conversion
+      const result = await client.sendTap("tool", name, args, tabId);
+      // Track tabId from tab.new and page.nav responses
+      const res = result as Record<string, unknown>;
+      const newTabId = (res?.tabId as number) ?? tabId;
+      return wrap(result, newTabId);
     }
   }
 }
 
-/** Convert MCP dot notation to extension method name. */
-function convertToolName(name: string): string {
-  const dot = name.indexOf(".");
-  if (dot < 0) return name;
-  const prefix = name.substring(0, dot);
-  const action = name.substring(dot + 1);
-  if (prefix === "page") return action; // page.click → click
-  return `${prefix}_${action}`; // tab.list → tab_list
-}
 
 // --- Helpers ---
 
@@ -548,15 +619,10 @@ function tapHome(): string {
 }
 
 function tapDirs(): string[] {
-  const dirs = [`${tapHome()}/taps`];
-  // Dev environment: also scan extension/taps relative to source
-  const scriptDir = new URL(".", import.meta.url).pathname;
-  const extTaps = `${scriptDir}../extension/taps`;
-  try {
-    Deno.statSync(extTaps);
-    dirs.push(extTaps);
-  } catch { /* not in dev environment */ }
-  return dirs;
+  const home = tapHome();
+  // User taps first (higher priority), then community skills
+  const dirs = [`${home}/taps`, `${home}/skills`];
+  return dirs.filter(d => { try { Deno.statSync(d); return true; } catch { return false; } });
 }
 
 function parseArgs(raw: string[]): Record<string, unknown> {

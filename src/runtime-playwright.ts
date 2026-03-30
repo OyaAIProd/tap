@@ -5,6 +5,10 @@
  * but uses Playwright instead of chrome.* APIs. Validates that the protocol
  * abstraction (8 kernel + 16 stdlib) is truly runtime-independent.
  *
+ * Wire method names use dot notation matching MCP tool names exactly:
+ *   page.eval, page.click, page.nav, etc.
+ * One name everywhere — no conversion.
+ *
  * Usage: tap --runtime playwright <site> <name>
  */
 
@@ -50,7 +54,7 @@ export async function createPlaywrightRuntime(
       // KERNEL — 8 primitives
       // ================================================================
 
-      case "eval": {
+      case "page.eval": {
         const expr = p.expression as string;
         const args = (p.args as unknown[]) || [];
         try {
@@ -65,7 +69,7 @@ export async function createPlaywrightRuntime(
         }
       }
 
-      case "pointer": {
+      case "page.pointer": {
         const x = (p.x as number) || 0;
         const y = (p.y as number) || 0;
         const action = (p.action as string) || "click";
@@ -78,7 +82,7 @@ export async function createPlaywrightRuntime(
         return {};
       }
 
-      case "keyboard": {
+      case "page.keyboard": {
         const key = (p.key as string) || "";
         const action = (p.action as string) || "press";
         if (action === "type") {
@@ -93,19 +97,19 @@ export async function createPlaywrightRuntime(
         return {};
       }
 
-      case "nav": {
+      case "page.nav": {
         const url = p.url as string;
         await page.goto(url, { waitUntil: "networkidle", timeout: 30000 });
         return {};
       }
 
-      case "wait": {
+      case "page.wait": {
         const ms = (p.ms as number) || 1000;
         await page.waitForTimeout(ms);
         return {};
       }
 
-      case "screenshot": {
+      case "page.screenshot": {
         const buffer = await page.screenshot({ type: "png" });
         const base64 = btoa(
           String.fromCharCode(...new Uint8Array(buffer)),
@@ -113,12 +117,12 @@ export async function createPlaywrightRuntime(
         return { data: base64 };
       }
 
-      case "run": {
+      case "tap.run": {
         // Composition: page.tap() — handled by executor, not here
         throw new Error("tap composition must be wired by executor");
       }
 
-      case "capabilities": {
+      case "page.capabilities": {
         return {
           protocol: "1.0.0",
           runtime: "playwright",
@@ -138,7 +142,7 @@ export async function createPlaywrightRuntime(
       // STDLIB — 16 operations (built on kernel where possible)
       // ================================================================
 
-      case "click": {
+      case "page.click": {
         const target = (p.target || p.selector) as string;
         // Try CSS selector first
         try {
@@ -152,7 +156,7 @@ export async function createPlaywrightRuntime(
         return {};
       }
 
-      case "type": {
+      case "page.type": {
         const selector = p.selector as string;
         const text = p.text as string;
         await page.fill(selector, text);
@@ -169,12 +173,12 @@ export async function createPlaywrightRuntime(
         return {};
       }
 
-      case "hover": {
+      case "page.hover": {
         await page.hover(p.selector as string);
         return {};
       }
 
-      case "scroll": {
+      case "page.scroll": {
         await page.evaluate((sel: string) => {
           document.querySelector(sel)?.scrollIntoView({
             behavior: "smooth",
@@ -184,17 +188,17 @@ export async function createPlaywrightRuntime(
         return {};
       }
 
-      case "pressKey": {
+      case "page.pressKey": {
         await page.keyboard.press(p.key as string);
         return {};
       }
 
-      case "select": {
+      case "page.select": {
         await page.selectOption(p.selector as string, p.value as string);
         return {};
       }
 
-      case "upload": {
+      case "page.upload": {
         const fileInput = await page.$(p.selector as string);
         const files = typeof p.files === "string"
           ? (p.files as string).split(",").map((f: string) => f.trim())
@@ -203,7 +207,7 @@ export async function createPlaywrightRuntime(
         return {};
       }
 
-      case "dialog": {
+      case "page.dialog": {
         // Playwright handles dialogs via event listeners
         page.once("dialog", async (dialog: PW) => {
           if (p.accept !== false) {
@@ -215,7 +219,7 @@ export async function createPlaywrightRuntime(
         return {};
       }
 
-      case "fetch": {
+      case "page.fetch": {
         const url = p.url as string;
         return await page.evaluate(
           async (u: string, o: Record<string, unknown>) => {
@@ -227,7 +231,7 @@ export async function createPlaywrightRuntime(
         );
       }
 
-      case "find": {
+      case "page.find": {
         // Reuse extension's find logic via eval
         return await page.evaluate(
           (q: string, r: string) => {
@@ -304,11 +308,11 @@ export async function createPlaywrightRuntime(
         );
       }
 
-      case "cookies": {
+      case "page.cookies": {
         return await context.cookies();
       }
 
-      case "download": {
+      case "page.download": {
         return await page.evaluate(async (u: string) => {
           const res = await fetch(u, { credentials: "include" });
           const ct = res.headers.get("content-type") || "";
@@ -317,19 +321,19 @@ export async function createPlaywrightRuntime(
         }, p.url as string);
       }
 
-      case "waitFor": {
+      case "page.waitFor": {
         const selector = p.selector as string;
         const ms = (p.ms as number) || 10000;
         await page.waitForSelector(selector, { timeout: ms });
         return {};
       }
 
-      case "waitForNetwork": {
+      case "page.waitForNetwork": {
         await page.waitForLoadState("networkidle");
         return {};
       }
 
-      case "ssrState": {
+      case "page.ssrState": {
         return await page.evaluate((name: string | null) => {
           const sanitize = (obj: unknown) =>
             JSON.parse(
@@ -364,7 +368,7 @@ export async function createPlaywrightRuntime(
         }, (p.name as string) || null);
       }
 
-      case "storage": {
+      case "page.storage": {
         const type = (p.type as string) || "local";
         return await page.evaluate((t: string) => {
           const s = t === "session" ? sessionStorage : localStorage;
@@ -378,7 +382,7 @@ export async function createPlaywrightRuntime(
       }
 
       // Tab management (Playwright context)
-      case "tab_list": {
+      case "tab.list": {
         return context.pages().map((p: PW, i: number) => ({
           tabId: i,
           url: p.url(),
@@ -386,7 +390,7 @@ export async function createPlaywrightRuntime(
         }));
       }
 
-      case "tab_new": {
+      case "tab.new": {
         page = await context.newPage();
         if (p.url) await page.goto(p.url as string);
         return { tabId: context.pages().length - 1, url: p.url || "about:blank" };

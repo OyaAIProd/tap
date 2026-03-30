@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "tap": {
-      "command": "deno",
-      "args": ["run", "--allow-all", "--no-check", "src/cli.ts", "mcp"]
+      "command": "tap",
+      "args": ["mcp"]
     }
   }
 }

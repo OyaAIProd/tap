@@ -44,8 +44,10 @@ export async function loadTap(path: string): Promise<TapModule> {
   return tap as TapModule;
 }
 
-/** Discover all .tap.js files in directories. */
+/** Discover all .tap.js files in directories.
+ *  Dirs are searched in order — first match wins (user taps override skills). */
 export async function listTaps(dirs: string[]): Promise<TapModule[]> {
+  const seen = new Set<string>();
   const taps: TapModule[] = [];
   for (const dir of dirs) {
     try {
@@ -56,6 +58,9 @@ export async function listTaps(dirs: string[]): Promise<TapModule[]> {
           if (!fileEntry.name.endsWith(".tap.js")) continue;
           try {
             const tap = await loadTap(`${sitePath}/${fileEntry.name}`);
+            const key = `${tap.site}/${tap.name}`;
+            if (seen.has(key)) continue; // user tap already registered
+            seen.add(key);
             taps.push(tap);
           } catch {
             // Skip invalid taps
@@ -128,8 +133,12 @@ export async function runTap(
       if (tap.waitFor) await page.waitFor(tap.waitFor);
       const expr = `(${tap.extract.toString()})(${JSON.stringify(resolvedArgs)})`;
       rawRows = (await page.eval(expr)) as unknown[];
+      // Ensure rawRows is array before slicing
+      if (!Array.isArray(rawRows)) {
+        rawRows = rawRows ? [rawRows] : [];
+      }
       if (resolvedArgs.limit) {
-        rawRows = (rawRows as unknown[]).slice(0, resolvedArgs.limit as number);
+        rawRows = rawRows.slice(0, resolvedArgs.limit as number);
       }
     } else {
       throw new Error(`Tap ${tap.site}/${tap.name} must have run() or extract()`);

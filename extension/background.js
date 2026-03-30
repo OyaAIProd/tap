@@ -11,7 +11,7 @@
  */
 
 import { createPage } from './protocol/protocol.js'
-import { listTaps, runTap } from './protocol/executor.js'
+// executor.js removed — Deno executor is the only tap runner (extension = kernel only)
 
 console.log('[tap] kernel ready (8 primitives + CDP relay)')
 
@@ -249,6 +249,7 @@ async function handleBridgeCommand(method, params = {}) {
 
     case 'Bridge.newTab': {
       const tab = await chrome.tabs.create({ url: params.url || 'about:blank' })
+      activeTabId = tab.id
       return { tabId: tab.id, url: tab.url }
     }
 
@@ -284,28 +285,28 @@ async function handleTapCommand(method, params = {}) {
   switch (method) {
     // ---- Kernel primitives — abstract names from page proxy ----
 
-    case 'eval': {
+    case 'page.eval': {
       const tabId = await requireTab(params)
       const page = getPage(tabId)
       // CLI sends string expression — wrap in function for kernel.eval
       return await page.eval(async (expr) => await (0, eval)(expr), params.expression)
     }
 
-    case 'pointer': {
+    case 'page.pointer': {
       const tabId = await requireTab(params)
       const page = getPage(tabId)
       await page.pointer(params.x, params.y, params.action || 'click')
       return {}
     }
 
-    case 'keyboard': {
+    case 'page.keyboard': {
       const tabId = await requireTab(params)
       const page = getPage(tabId)
       await page.keyboard(params.key, params.action || 'press', params.modifiers || 0)
       return {}
     }
 
-    case 'nav': {
+    case 'page.nav': {
       let tabId = params.tabId ? Number(params.tabId) : activeTabId
       if (!tabId) {
         const tab = await chrome.tabs.create({ url: 'about:blank' })
@@ -314,16 +315,38 @@ async function handleTapCommand(method, params = {}) {
       }
       const page = getPage(tabId)
       await page.nav(params.url)
-      return {}
+      return { tabId }
     }
 
-    case 'wait': {
+    case 'page.wait': {
       const ms = params.ms || 1000
       await new Promise(r => setTimeout(r, ms))
       return {}
     }
 
-    case 'screenshot': {
+    case 'page.waitFor': {
+      const tabId = await requireTab(params)
+      const page = getPage(tabId)
+      const selector = params.selector
+      const timeout = params.ms || 30000
+      const start = Date.now()
+      while (Date.now() - start < timeout) {
+        const found = await page.evaluate((sel) => !!document.querySelector(sel), selector)
+        if (found) return { found: true }
+        await new Promise(r => setTimeout(r, 100))
+      }
+      return { found: false }
+    }
+
+    case 'page.waitForNetwork': {
+      const tabId = await requireTab(params)
+      const page = getPage(tabId)
+      const timeout = params.ms || 30000
+      await page.waitForNetworkIdle({ timeoutInMilliseconds: timeout })
+      return {}
+    }
+
+    case 'page.screenshot': {
       const tabId = await requireTab(params)
       const page = getPage(tabId)
       return await page.screenshot()
@@ -331,22 +354,8 @@ async function handleTapCommand(method, params = {}) {
 
     // ---- Core ----
 
-    case 'run': {
-      const { site, name, args = {} } = params
-      if (!site || !name) throw new Error('run: missing site or name')
-      let tabId = params.tabId ? Number(params.tabId) : activeTabId
-      if (!tabId) {
-        const tab = await chrome.tabs.create({ url: 'about:blank' })
-        tabId = tab.id
-        activeTabId = tab.id
-      }
-      return await runTap(site, name, args, tabId, { cdpClick, withDebugger })
-    }
 
-    case 'list':
-      return { taps: listTaps() }
-
-    case 'page': {
+    case 'inspect.page': {
       const tabId = await requireTab(params)
       const tab = await chrome.tabs.get(tabId)
       const [result] = await chrome.scripting.executeScript({
@@ -363,7 +372,7 @@ async function handleTapCommand(method, params = {}) {
 
     // ---- Interaction tools — delegate to protocol.js (single protocol implementation) ----
 
-    case 'click': {
+    case 'page.click': {
       const tabId = await requireTab(params)
       const target = params.target || params.text || params.selector
       if (!target) throw new Error('click: missing target (text or selector)')
@@ -376,7 +385,7 @@ async function handleTapCommand(method, params = {}) {
       return formatFeedback(`clicked "${target}"${nav}`, fb)
     }
 
-    case 'type': {
+    case 'page.type': {
       const tabId = await requireTab(params)
       if (!params.selector || params.text === undefined) throw new Error('type: missing selector or text')
       const page = getPage(tabId)
@@ -388,7 +397,7 @@ async function handleTapCommand(method, params = {}) {
       return formatFeedback(msg, fb)
     }
 
-    case 'hover': {
+    case 'page.hover': {
       const tabId = await requireTab(params)
       if (!params.selector) throw new Error('hover: missing selector')
       const page = getPage(tabId)
@@ -397,7 +406,7 @@ async function handleTapCommand(method, params = {}) {
       return formatFeedback(`hovered "${params.selector}"`, fb)
     }
 
-    case 'scroll': {
+    case 'page.scroll': {
       const tabId = await requireTab(params)
       if (!params.selector) throw new Error('scroll: missing selector')
       const page = getPage(tabId)
@@ -406,7 +415,7 @@ async function handleTapCommand(method, params = {}) {
       return formatFeedback(`scrolled to "${params.selector}"`, fb)
     }
 
-    case 'pressKey': {
+    case 'page.pressKey': {
       const tabId = await requireTab(params)
       if (!params.key) throw new Error('pressKey: missing key')
       const prevUrl = (await chrome.tabs.get(tabId)).url
@@ -418,7 +427,7 @@ async function handleTapCommand(method, params = {}) {
       return formatFeedback(`pressed ${params.key}${nav}`, fb)
     }
 
-    case 'select': {
+    case 'page.select': {
       const tabId = await requireTab(params)
       const { selector, value } = params
       if (!selector || value === undefined) throw new Error('select: missing selector or value')
@@ -428,7 +437,7 @@ async function handleTapCommand(method, params = {}) {
       return formatFeedback(`selected "${value}" in "${selector}"`, fb)
     }
 
-    case 'upload': {
+    case 'page.upload': {
       const tabId = await requireTab(params)
       const { selector, files } = params
       if (!selector || !files) throw new Error('upload: missing selector or files')
@@ -440,14 +449,14 @@ async function handleTapCommand(method, params = {}) {
 
     // ---- Perception tools — find delegates to protocol, rest are forge-only ----
 
-    case 'find': {
+    case 'page.find': {
       const tabId = await requireTab(params)
       if (!params.query) throw new Error('find: missing query')
       const page = getPage(tabId)
       return await page.find(params.query, params.role)
     }
 
-    case 'element': {
+    case 'inspect.element': {
       const tabId = await requireTab(params)
       const selector = params.selector
       if (!selector) throw new Error('element: missing selector')
@@ -476,7 +485,7 @@ async function handleTapCommand(method, params = {}) {
       return result?.result || { error: `"${selector}" not found` }
     }
 
-    case 'ax_tree_interactive': {
+    case 'inspect.a11y': {
       const tabId = await requireTab(params)
       const [result] = await chrome.scripting.executeScript({
         target: { tabId },
@@ -512,7 +521,7 @@ async function handleTapCommand(method, params = {}) {
       return { interactive: result?.result || [] }
     }
 
-    case 'dom': {
+    case 'inspect.dom': {
       const tabId = await requireTab(params)
       const selector = params.selector || 'body'
       const maxDepth = params.depth || 6
@@ -564,13 +573,13 @@ async function handleTapCommand(method, params = {}) {
 
     // ---- State tools ----
 
-    case 'cookies': {
+    case 'page.cookies': {
       const tabId = await requireTab(params)
       const page = getPage(tabId)
       return { cookies: await page.cookies() }
     }
 
-    case 'setCookie': {
+    case 'page.setCookie': {
       await requireTab(params)
       const { url, name, value, domain, path, secure, httpOnly, sameSite, expirationDate } = params
       if (!url || !name) throw new Error('setCookie: missing url or name')
@@ -585,7 +594,7 @@ async function handleTapCommand(method, params = {}) {
       return { set: true, name }
     }
 
-    case 'dialog': {
+    case 'page.dialog': {
       const tabId = await requireTab(params)
       const accept = params.accept !== false
       const page = getPage(tabId)
@@ -593,7 +602,7 @@ async function handleTapCommand(method, params = {}) {
       return { dismissed: true, accepted: accept }
     }
 
-    case 'storage': {
+    case 'page.storage': {
       const tabId = await requireTab(params)
       const type = params.type || 'local'
       const page = getPage(tabId)
@@ -603,7 +612,7 @@ async function handleTapCommand(method, params = {}) {
 
     // ---- Network tools ----
 
-    case 'networkStart': {
+    case 'inspect.networkStart': {
       const tabId = await requireTab(params)
       const netLog = getNetworkLog(tabId)
       netLog.entries = []
@@ -614,7 +623,7 @@ async function handleTapCommand(method, params = {}) {
       return { started: true }
     }
 
-    case 'networkDump': {
+    case 'inspect.networkDump': {
       const tabId = await requireTab(params)
       if (params.bodies) {
         // Return entries with response bodies (was network_log_dump_bodies)
@@ -635,7 +644,7 @@ async function handleTapCommand(method, params = {}) {
       return { count: entries.length, entries }
     }
 
-    case 'apiLog': {
+    case 'inspect.apiLog': {
       const tabId = await requireTab(params)
       const [result] = await chrome.scripting.executeScript({
         target: { tabId },
@@ -649,7 +658,7 @@ async function handleTapCommand(method, params = {}) {
       return result?.result || []
     }
 
-    case 'download': {
+    case 'inspect.download': {
       const tabId = await requireTab(params)
       const { url, output } = params
       if (!url) throw new Error('download: missing url')
@@ -672,7 +681,7 @@ async function handleTapCommand(method, params = {}) {
 
     // ---- Resource inspection ----
 
-    case 'globals': {
+    case 'inspect.globals': {
       const tabId = await requireTab(params)
       const [result] = await chrome.scripting.executeScript({
         target: { tabId },
@@ -690,7 +699,7 @@ async function handleTapCommand(method, params = {}) {
       return result?.result || []
     }
 
-    case 'resources': {
+    case 'inspect.resources': {
       const tabId = await requireTab(params)
       if (params.url) {
         // Was resource_content
@@ -726,7 +735,7 @@ async function handleTapCommand(method, params = {}) {
 
     // ---- Intercept tools ----
 
-    case 'intercept_on': {
+    case 'intercept.on': {
       const tabId = await requireTab(params)
       const patterns = params.patterns || [{ urlPattern: '*' }]
       await withDebugger(tabId, async (tid) => {
@@ -735,7 +744,7 @@ async function handleTapCommand(method, params = {}) {
       return { enabled: true, patterns }
     }
 
-    case 'intercept_off': {
+    case 'intercept.off': {
       const tabId = await requireTab(params)
       await withDebugger(tabId, async (tid) => {
         await chrome.debugger.sendCommand({ tabId: tid }, 'Fetch.disable', {})
@@ -743,11 +752,11 @@ async function handleTapCommand(method, params = {}) {
       return { disabled: true }
     }
 
-    case 'intercept_list': {
+    case 'intercept.list': {
       return { note: 'Intercept patterns are managed via intercept_on. No persistent list.' }
     }
 
-    case 'intercept_continue': {
+    case 'intercept.continue': {
       const tabId = await requireTab(params)
       const { requestId, url, method, headers } = params
       if (!requestId) throw new Error('intercept_continue: missing requestId')
@@ -761,7 +770,7 @@ async function handleTapCommand(method, params = {}) {
       return { continued: true }
     }
 
-    case 'intercept_fulfill': {
+    case 'intercept.fulfill': {
       const tabId = await requireTab(params)
       const { requestId, responseCode, body, responseHeaders } = params
       if (!requestId) throw new Error('intercept_fulfill: missing requestId')
@@ -775,7 +784,7 @@ async function handleTapCommand(method, params = {}) {
       return { fulfilled: true }
     }
 
-    case 'intercept_fail': {
+    case 'intercept.fail': {
       const tabId = await requireTab(params)
       const { requestId, errorReason } = params
       if (!requestId) throw new Error('intercept_fail: missing requestId')
@@ -789,7 +798,7 @@ async function handleTapCommand(method, params = {}) {
 
     // ---- Toast collection ----
 
-    case 'collect_toasts': {
+    case 'inspect.toasts': {
       const tabId = params.tabId ? Number(params.tabId) : activeTabId
       if (!tabId) return []
       try {
@@ -808,17 +817,17 @@ async function handleTapCommand(method, params = {}) {
 
     // --- Tab Management ---
 
-    case 'tab_list': {
+    case 'tab.list': {
       const tabs = await chrome.tabs.query({})
       return tabs.map(t => ({ tabId: t.id, url: t.url || '', title: t.title || '' }))
     }
 
-    case 'tab_new': {
+    case 'tab.new': {
       const tab = await chrome.tabs.create({ url: params.url || 'about:blank' })
       return { tabId: tab.id, url: tab.url || params.url || 'about:blank' }
     }
 
-    case 'tab_close': {
+    case 'tab.close': {
       const tabId = Number(params.tabId)
       if (!tabId) throw new Error('tab_close: missing tabId')
       const session = debuggerSessions.get(tabId)

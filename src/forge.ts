@@ -5,7 +5,7 @@
  * strategy recommendation runs locally. No extension-internal APIs needed.
  */
 
-import { type RpcSend } from "./page.ts";
+import { createPageProxy, type RpcSend } from "./page.ts";
 
 /**
  * Self-contained page analysis function, serialized as a string for page.eval.
@@ -226,20 +226,20 @@ export async function forgeInspect(
   url: string,
   send: RpcSend,
 ): Promise<Record<string, unknown>> {
+  const page = createPageProxy(send);
+
   // Navigate to target page
   if (url) {
-    await send("tool", "nav", { url });
+    await page.nav(url);
   }
 
   // Gather page analysis via eval (runs in page context)
-  const analysis = (await send("tool", "eval", {
-    expression: analyzePageContextSource,
-  })) as Record<string, unknown>;
+  const analysis = (await page.eval(analyzePageContextSource)) as Record<string, unknown>;
 
   // Get cookies for auth detection
   let cookies: Array<Record<string, string>> = [];
   try {
-    const raw = await send("tool", "cookies", {});
+    const raw = await page.cookies();
     if (Array.isArray(raw)) cookies = raw as Array<Record<string, string>>;
   } catch { /* no cookies API */ }
 
