@@ -1,7 +1,8 @@
 <p align="center">
   <img src=".github/logo-woodpecker.svg" width="160" height="160" alt="Tap">
   <h1 align="center">Tap</h1>
-  <p align="center"><b>Make every interface programmable by AI.</b></p>
+  <p align="center"><b>The interface protocol for AI agents</b></p>
+  <p align="center"><i>Forge once, run forever — zero AI at runtime</i></p>
 </p>
 
 <p align="center">
@@ -16,46 +17,54 @@
   <a href="README.zh-CN.md">中文</a>
 </p>
 
-Tap is a universal protocol for AI to operate any interface. Define 8 kernel primitives, get 16 stdlib operations, cover every human-interface interaction. AI forges `.tap.js` scripts once — then any agent runs them deterministically, zero AI at runtime.
+---
 
-**81 skills across 41 sites** — Twitter/X, Reddit, GitHub, YouTube, Bilibili, Zhihu, Xiaohongshu, Weibo, Medium, arXiv, and [many more](https://github.com/LeonTing1010/tap-skills). Works with your Chrome login session. No API keys needed.
+AI agents need to operate interfaces — read data, click buttons, fill forms, compose workflows. But AI is too slow, too expensive, and too unreliable to drive every interaction in real-time.
+
+Tap solves this with a new paradigm: **forging.** AI analyzes a site once, creates a deterministic script, and that script runs forever — no AI, no tokens, no hallucinations.
 
 ```
 forge_inspect → forge_verify → forge_save → tap.run
     AI analyzes      AI tests       AI saves     runs forever, zero AI
 ```
 
-One agent forges a tap, every agent benefits.
+One agent forges a tap. Every agent benefits.
 
-## Why Tap
+**81 ready-to-use skills across 41 sites** — X/Twitter, Reddit, GitHub, YouTube, Bilibili, Zhihu, Xiaohongshu, Weibo, Medium, arXiv, and [many more](https://github.com/LeonTing1010/tap-skills). Uses your real Chrome session. No API keys needed.
 
-Existing browser automation tools require AI at every step, or bind to one language, one runtime. Tap takes a different approach — **the POSIX approach**:
+## The Core Idea
 
-| Problem | Tap's Answer |
-|---------|-------------|
-| AI is slow and expensive at runtime | **Forge once, run forever.** `.tap.js` scripts are deterministic — zero tokens consumed |
-| Every tool reimplements click/type/scroll | **8 kernel primitives.** Implement 8 methods, get 16 stdlib ops for free |
-| Browser-only automation | **Protocol, not implementation.** Chrome today, Android/iOS/Desktop tomorrow |
-| Scripts break when sites change | **Health contracts.** Every tap declares `min_rows` and `non_empty` columns |
-| AI agents can't compose tools | **`page.tap()` composition.** Taps call other taps natively |
+The insight behind Tap: **operating an interface is a solved problem the moment you figure out how.** The hard part is understanding the page — finding the API, locating the right selector, knowing what to click. That's what AI is good at. The easy part is executing the same steps again. That doesn't need AI at all.
 
-### How Tap Compares
+So Tap separates the two:
 
-| Your need | Best tool | Why |
-|-----------|-----------|-----|
-| Deterministic site operations for AI agents | **Tap** | 81 pre-built skills, zero LLM cost at runtime, MCP native |
-| General LLM-driven browsing | Browser-Use, Stagehand | LLM decides each step — flexible but slow and expensive |
-| Large-scale crawling | Crawl4AI, Scrapy | Purpose-built for throughput and scale |
-| CLI wrapper for websites | OpenCLI | Tool collection approach; Tap is a protocol |
-| E2E testing | Playwright, Cypress | Test frameworks, not agent protocols |
+| Phase | Who does it | Cost | Happens |
+|-------|------------|------|---------|
+| **Forge** | AI agent | Tokens (once) | Once per site |
+| **Run** | Deterministic `.tap.js` | $0.00 | Forever |
 
-**What makes Tap different:**
+A forged tap is pure JavaScript. No LLM calls, no prompts, no API keys. It runs in < 1 second, returns structured data, and produces the same result every time.
 
-- **Protocol, not a tool collection** — 8 kernel + 16 stdlib = a universal contract any runtime can implement
-- **MCP native** — first-class integration with Claude Code and any MCP-compatible agent
-- **Forge pipeline** — AI creates taps through inspect/verify/save, then taps run with zero AI
-- **Legitimate Chrome extension** — no headless browser, no anti-detection hacks, no fingerprint spoofing
-- **Composable** — taps call other taps via `page.tap("site", "name")`
+## The Protocol
+
+Tap defines a minimal, complete contract for operating any interface.
+
+**8 kernel primitives** — the irreducible atoms of all human-interface interaction:
+
+```
+eval · pointer · keyboard · nav · wait · screenshot · tap · capabilities
+```
+
+**16 stdlib operations** — composed from the kernel, given to every runtime for free:
+
+```
+click · type · hover · scroll · pressKey · select · upload · dialog
+fetch · find · cookies · download · waitFor · waitForNetwork · ssrState · storage
+```
+
+That's it. 8 + 16 = every interaction a human can perform on any interface.
+
+A new runtime implements 8 methods — instantly gains 16 operations and every existing `.tap.js` script. Today it's Chrome and Playwright. Tomorrow: Android, iOS, desktop apps. **Write a tap once, run it on every platform.**
 
 ## Install
 
@@ -70,7 +79,7 @@ Then install the Chrome extension:
 2. Unzip, open `chrome://extensions/`, enable Developer mode
 3. Click "Load unpacked" and select the unzipped folder
 
-Configure for AI agents (Claude Code, Cursor, etc.):
+Connect to your AI agent (Claude Code, Cursor, Windsurf, OpenClaw, etc.):
 
 ```json
 {
@@ -90,6 +99,9 @@ Configure for AI agents (Claude Code, Cursor, etc.):
 # From source (requires Deno)
 git clone https://github.com/LeonTing1010/tap && cd tap
 deno compile --allow-all --output tap src/cli.ts
+
+# Via GitHub Packages
+npx @LeonTing1010/tap-mcp
 ```
 
 </details>
@@ -103,16 +115,23 @@ tap update      # Update to latest
 
 ## Quick Start
 
-### From any webpage console
+### CLI
 
-```js
-const data = await tap("github/trending", { limit: 5 })
-console.table(data.rows)
-
-await tap.list()  // see all available taps
+```bash
+tap list                        # See all 81 skills
+tap github trending --limit 5   # Get GitHub trending repos
+tap zhihu hot                   # Get Zhihu trending topics
 ```
 
-### From Chrome address bar
+### AI Agent (MCP)
+
+```
+You:  What's trending on GitHub and Hacker News today?
+Agent: [calls tap.run("github", "trending") and tap.run("hackernews", "hot")]
+       Here are today's top repositories and stories...
+```
+
+### Chrome Address Bar
 
 Type `tap` then Tab:
 
@@ -122,22 +141,37 @@ tap weibo/hot
 tap xiaohongshu/search?keyword=AI
 ```
 
-### From CLI
+### Web Console
 
-```bash
-tap list                        # See all skills
-tap github trending --limit 5   # Run a tap
-tap check                       # Health check all taps
+```js
+const data = await tap("github/trending", { limit: 5 })
+console.table(data.rows)
 ```
 
-### From AI agents (MCP)
+## Forge Pipeline
+
+Any AI agent can create new taps through a 3-step pipeline:
 
 ```
-> Use forge.inspect to analyze https://example.com
-> Then forge.verify to test the extraction logic
-> Then forge.save to persist the new tap
-> Now tap.run executes it — forever, zero AI
+forge.inspect(url)      → Detects framework, SSR state, APIs, generates strategy
+forge.verify(url, expr) → Tests extraction logic live, validates output
+forge.save(site, name)  → Persists .tap.js to disk — done forever
 ```
+
+**Example:**
+
+```
+You: forge.inspect https://news.ycombinator.com
+AI:  Found JSON API at /v0/topstories.json, recommends fetch strategy
+
+You: forge.verify https://news.ycombinator.com "fetch('/v0/topstories.json')..."
+AI:  Returns 30 rows, columns: [title, score, author, url] ✓
+
+You: forge.save hackernews hot
+AI:  Saved to hackernews/hot.tap.js ✓
+```
+
+Now `tap hackernews hot` runs forever. No AI. No tokens. No maintenance until the site's API changes.
 
 ## Skills
 
@@ -145,10 +179,10 @@ tap check                       # Health check all taps
 
 ### Trending / Hot
 
-| Site | Tap | Mode |
-|------|-----|------|
-| Hacker News | `hackernews/hot` | Public API |
-| Reddit | `reddit/hot` | Public API |
+| Site | Tap | Strategy |
+|------|-----|----------|
+| Hacker News | `hackernews/hot` | API |
+| Reddit | `reddit/hot` | API |
 | GitHub | `github/trending` | DOM |
 | Product Hunt | `producthunt/hot` | DOM |
 | X / Twitter | `x/trending` | DOM |
@@ -157,7 +191,7 @@ tap check                       # Health check all taps
 | Bilibili | `bilibili/hot` | API |
 | Zhihu | `zhihu/hot` | API |
 | Weibo | `weibo/hot` | API |
-| Xiaohongshu | `xiaohongshu/hot` | SSR State |
+| Xiaohongshu | `xiaohongshu/hot` | SSR |
 | Douyin | `douyin/hot` | API |
 | V2EX | `v2ex/hot` | DOM |
 | Juejin | `juejin/hot` | DOM |
@@ -181,21 +215,21 @@ tap check                       # Health check all taps
 
 ### Search
 
-| Site | Tap | Mode |
-|------|-----|------|
-| Reddit | `reddit/search` | Public API |
-| arXiv | `arxiv/search` | Public API |
+| Site | Tap | Strategy |
+|------|-----|----------|
+| Reddit | `reddit/search` | API |
+| arXiv | `arxiv/search` | API |
 | X / Twitter | `x/search` | DOM |
 | Medium | `medium/search` | DOM |
 | Zhihu | `zhihu/search` | API |
 | Weibo | `weibo/search` | API |
-| Xiaohongshu | `xiaohongshu/search` | SSR State |
+| Xiaohongshu | `xiaohongshu/search` | SSR |
 | Bilibili | `bilibili/search` | API |
 | Douyin | `douyin/search` | API |
 | WeChat | `wechat/search` | DOM |
 | Dictionary | `dictionary/search` | DOM |
 
-### Deep Read (detail + comments)
+### Deep Read
 
 | Site | Taps |
 |------|------|
@@ -207,7 +241,7 @@ tap check                       # Health check all taps
 | WeChat | `detail`, `open` |
 | WeRead | `shelf`, `highlights` |
 
-### Write / Interact
+### Write
 
 | Tap | What it does |
 |-----|-------------|
@@ -217,156 +251,6 @@ tap check                       # Health check all taps
 | `telegraph/publish` | Publish an article |
 | `jimeng/generate` | Generate AI images |
 
-### GitHub
-
-| Tap | What it does |
-|-----|-------------|
-| `github/trending` | Trending repositories |
-| `github/issues` | Repository issues (REST API) |
-| `github/stars` | Your starred repos |
-
-## Forge Pipeline
-
-AI agents create new taps through a 3-step pipeline:
-
-```
-forge.inspect(url)   → Detects framework, SSR state, APIs, generates strategy
-forge.verify(url, expr) → Tests extraction logic live, validates output columns
-forge.save(site, name)  → Persists .tap.js to disk, updates manifest
-```
-
-**Example: forging a new tap for any site**
-
-```
-You: forge.inspect https://news.ycombinator.com
-AI:  Found JSON API at /v0/topstories.json, recommends fetch strategy
-
-You: forge.verify https://news.ycombinator.com "fetch('/v0/topstories.json')..."
-AI:  Returns 30 rows, columns: [title, score, author, url] ✓
-
-You: forge.save hackernews hot
-AI:  Saved to hackernews/hot.tap.js ✓
-```
-
-Now `tap hackernews hot` runs forever with zero AI.
-
-## Protocol Architecture
-
-```
-┌──────────────────────────────────────────────────┐
-│ .tap.js scripts (deterministic, zero AI)          │
-└──────────────────────┬───────────────────────────┘
-┌──────────────────────▼───────────────────────────┐
-│ Stdlib — 16 named operations                      │
-│ Built on kernel. Runtime may override.            │
-│ click, type, hover, scroll, pressKey, select,    │
-│ upload, dialog, fetch, find, cookies, download,   │
-│ waitFor, waitForNetwork, ssrState, storage        │
-└──────────────────────┬───────────────────────────┘
-┌──────────────────────▼───────────────────────────┐
-│ Kernel — 8 irreducible primitives                 │
-│ eval, pointer, keyboard, nav, wait,              │
-│ screenshot, tap, capabilities                     │
-└──────────────────────┬───────────────────────────┘
-┌──────────────────────▼───────────────────────────┐
-│ Runtime #1: Chrome Extension (current)            │
-│ Runtime #N: Android, iOS, Desktop (future)        │
-└──────────────────────────────────────────────────┘
-```
-
-A new runtime implements 8 kernel methods — gets all 16 stdlib operations and every existing `.tap.js` for free.
-
-### Page API
-
-<details>
-<summary>Kernel — 8 primitives (click to expand)</summary>
-
-| Primitive | Description |
-|-----------|-------------|
-| `page.eval(fn, ...args)` | Execute in target context |
-| `page.pointer(x, y, action)` | Pointer event at coordinates |
-| `page.keyboard(key, action, mods?)` | Keyboard event |
-| `page.nav(url)` | Navigate to URL |
-| `page.wait(ms \| condition)` | Wait for time or condition |
-| `page.screenshot()` | Visual capture |
-| `page.tap(site, name, args?)` | Call another tap |
-| `page.capabilities()` | Query runtime capabilities |
-
-</details>
-
-<details>
-<summary>Stdlib — 16 operations (click to expand)</summary>
-
-| Operation | Built from | Description |
-|-----------|-----------|-------------|
-| `page.click(target)` | eval + pointer | Click by selector or visible text |
-| `page.type(sel, text)` | eval + keyboard | Type into an element |
-| `page.hover(sel)` | eval + pointer | Hover over element |
-| `page.scroll(sel)` | eval | Scroll element into view |
-| `page.pressKey(key, mods?)` | keyboard | Single key press |
-| `page.select(sel, value)` | eval | Dropdown selection |
-| `page.upload(sel, files)` | runtime override | File upload |
-| `page.dialog(accept?, text?)` | runtime override | Handle alert/confirm/prompt |
-| `page.fetch(url, opts?)` | eval | API call with session cookies |
-| `page.find(query, role?)` | eval | Find elements by visible text |
-| `page.cookies()` | runtime override | Read cookies |
-| `page.download(url)` | eval | Fetch + parse response |
-| `page.waitFor(sel, ms?)` | wait | Wait for element to appear |
-| `page.waitForNetwork(ms?, idle?)` | eval | Wait for network to settle |
-| `page.ssrState(name?)` | eval | Extract SSR globals |
-| `page.storage(type?)` | eval | Read local/session storage |
-
-</details>
-
-### .tap.js Format
-
-Two forms — **extract** (read data) and **run** (perform actions):
-
-```js
-// Extract form: pure data extraction, API-first
-export default {
-  site: "bilibili",
-  name: "hot",
-  description: "Bilibili trending videos",
-  url: "https://www.bilibili.com",
-  health: { min_rows: 5, non_empty: ["title"] },
-
-  extract: async () => {
-    const res = await fetch('https://api.bilibili.com/x/web-interface/ranking/v2',
-      { credentials: 'include' })
-    const data = await res.json()
-    return data.data.list.map(v => ({
-      title: v.title,
-      author: v.owner.name,
-      views: String(v.stat.view),
-      url: 'https://bilibili.com/video/' + v.bvid
-    }))
-  }
-}
-```
-
-```js
-// Run form: actions via page API
-export default {
-  site: "x",
-  name: "post",
-  description: "Post a tweet on X/Twitter",
-  columns: ["status", "url"],
-  args: { content: { type: "string" } },
-
-  async run(page, args) {
-    await page.nav('https://x.com/compose/post')
-    await page.wait(2000)
-    await page.click('[data-testid="tweetTextarea_0"]')
-    await page.type('[data-testid="tweetTextarea_0"]', args.content)
-    await page.click('[data-testid="tweetButton"]')
-    await page.wait(3000)
-    const url = await page.eval(() => location.href)
-    return [{ status: 'posted', url }]
-  }
-}
-```
-
 ## Architecture
 
 ```
@@ -375,53 +259,96 @@ AI Agent ←→ MCP ←→ Deno Executor ─┤
   CLI / MCP          load + run     └─ Playwright (kernel via pw API)
 ```
 
-**Deno CLI** — MCP server + executor + daemon (~1,800 lines). Zero dependencies.
-**Chrome extension** — Runtime #1. Kernel provider, no tap execution.
-**Playwright** — Runtime #2. Headless capable, no extension needed.
-**.tap.js** — deterministic scripts. Zero AI, zero tokens, runs forever.
+**~1,800 lines. Zero dependencies.** The entire system — CLI, MCP server, executor, daemon, two runtimes — in under 2,000 lines of Deno. No frameworks. No build step. No node_modules.
+
+- **Chrome extension** — Runtime #1. Your real browser with real login sessions. No headless detection, no fingerprint spoofing.
+- **Playwright** — Runtime #2. Headless capable, no extension needed. Server-side automation.
+- **.tap.js** — Deterministic scripts. Pure JavaScript, zero AI, runs forever.
+- **MCP server** — 38 tools exposing the full protocol to any AI agent.
+
+### .tap.js Format
+
+```js
+// API-first: fetch data directly
+export default {
+  site: "bilibili", name: "hot",
+  description: "Bilibili trending videos",
+  health: { min_rows: 5, non_empty: ["title"] },
+
+  extract: async () => {
+    const res = await fetch('https://api.bilibili.com/x/web-interface/ranking/v2',
+      { credentials: 'include' })
+    const data = await res.json()
+    return data.data.list.map(v => ({
+      title: v.title, author: v.owner.name,
+      views: String(v.stat.view),
+      url: 'https://bilibili.com/video/' + v.bvid
+    }))
+  }
+}
+```
+
+```js
+// Action: operate the interface via page API
+export default {
+  site: "x", name: "post",
+  description: "Post a tweet",
+  args: { content: { type: "string" } },
+
+  async run(page, args) {
+    await page.nav('https://x.com/compose/post')
+    await page.type('[data-testid="tweetTextarea_0"]', args.content)
+    await page.click('[data-testid="tweetButton"]')
+    await page.wait(3000)
+    return [{ status: 'posted', url: await page.eval(() => location.href) }]
+  }
+}
+```
 
 ## MCP Tools
 
-38 tools organized by category:
+38 tools across 6 categories — the full interface protocol exposed as MCP:
 
 | Category | Tools |
 |----------|-------|
 | **tap.** | `run`, `list`, `screenshot`, `logs` |
-| **page.** | `click`, `type`, `nav`, `eval`, `hover`, `scroll`, `pressKey`, `select`, `upload`, `find`, `cookies`, `dialog`, `storage`, `setCookie` |
 | **forge.** | `inspect`, `verify`, `save` |
+| **page.** | `click`, `type`, `nav`, `eval`, `hover`, `scroll`, `pressKey`, `select`, `upload`, `find`, `cookies`, `dialog`, `storage`, `setCookie` |
 | **inspect.** | `page`, `a11y`, `dom`, `element`, `apiLog`, `networkStart`, `networkDump`, `globals`, `resources`, `download` |
 | **intercept.** | `on`, `off`, `list`, `continue`, `fulfill`, `fail` |
 | **tab.** | `list`, `new`, `close` |
 
+## How Tap Compares
+
+| Your need | Best tool | Why |
+|-----------|-----------|-----|
+| Deterministic site operations for AI agents | **Tap** | 81 pre-built skills, zero LLM cost at runtime, MCP native |
+| General LLM-driven browsing | Browser-Use, Stagehand | LLM decides each step — flexible but slow and expensive |
+| Large-scale crawling | Crawl4AI, Scrapy | Purpose-built for throughput and scale |
+| CLI wrapper for websites | OpenCLI | Tool collection approach; Tap is a protocol |
+| E2E testing | Playwright, Cypress | Test frameworks, not agent protocols |
+
 ## Building
 
 ```bash
-# Deno tests
-deno test --no-check --allow-all src/test/     # unit constraints
-
-# Extension constraint tests
-node extension/test/tap-format.test.mjs        # format constraints
-node extension/test/architecture.test.mjs      # architecture constraints
-node extension/test/multi-tab.test.mjs         # multi-tab constraints
-
-# Compile binary
-deno compile --allow-all --output tap src/cli.ts
+deno test --no-check --allow-all src/test/       # Unit constraints
+node extension/test/architecture.test.mjs        # Architecture constraints
+node extension/test/multi-tab.test.mjs           # Multi-tab constraints
+node extension/test/tap-format.test.mjs          # Tap format constraints
+deno compile --allow-all --output tap src/cli.ts  # Compile binary
 ```
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for how to:
-
-- **Forge new taps** — the easiest way to contribute (just a `.tap.js` file)
-- **Improve the stdlib** — enhance the 16 operations
-- **Implement a new runtime** — bring Tap to Android, iOS, or Desktop
+See [CONTRIBUTING.md](CONTRIBUTING.md). The easiest way to contribute: **forge a new tap.** It's just a `.tap.js` file.
 
 ## Roadmap
 
-- [x] **tap-skills** — community skills repository (`tap install`)
+- [x] **81 community skills** — `tap install` from [tap-skills](https://github.com/LeonTing1010/tap-skills)
 - [x] **Playwright runtime** — second kernel, headless capable
 - [ ] **Android runtime** — AccessibilityService-based kernel
 - [ ] **Auto-healing** — detect and regenerate broken taps
+- [ ] **Tap registry** — publish and discover taps like packages
 
 ## Star History
 
