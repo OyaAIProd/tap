@@ -109,8 +109,7 @@ npx @LeonTing1010/tap-mcp
 Install community skills:
 
 ```bash
-tap install       # Clone skills from tap-skills repo
-tap update        # Update everything: core + skills + active runtimes
+tap update        # Idempotent: installs skills on first run, updates everything after
 ```
 
 ## Quick Start

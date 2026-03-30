@@ -109,8 +109,7 @@ npx @LeonTing1010/tap-mcp
 安装社区 skills：
 
 ```bash
-tap install       # 从 tap-skills 仓库克隆 skills
-tap update        # 更新一切：核心代码 + skills + 活跃运行时
+tap update        # 幂等：首次运行安装 skills，之后更新一切
 ```
 
 ## 快速开始

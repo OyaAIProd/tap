@@ -123,7 +123,6 @@ Usage:
   tap daemon restart                restart daemon (background)
   tap daemon status                 check daemon status
   tap doctor                        diagnose setup issues
-  tap install                       install community skills
   tap update                        update everything (core + skills + runtimes)
   tap mcp                           start MCP server (stdin/stdout)
 
@@ -145,9 +144,7 @@ switch (command) {
   case "list":
     await cmdList();
     break;
-  case "install":
-    await cmdInstall();
-    break;
+  case "install":   // alias — update is idempotent
   case "update":
   case "self-update": // backward compat
     await cmdUpdate();
@@ -228,30 +225,6 @@ async function cmdList(): Promise<void> {
 
 const SKILLS_REPO = "https://github.com/LeonTing1010/tap-skills.git";
 
-async function cmdInstall(): Promise<void> {
-  const skillsDir = `${tapHome()}/skills`;
-  try {
-    await Deno.stat(skillsDir);
-    console.log("Skills already installed. Run 'tap update' to update.");
-    return;
-  } catch { /* not installed yet */ }
-
-  console.log("Installing tap-skills...");
-  const cmd = new Deno.Command("git", {
-    args: ["clone", "--depth", "1", SKILLS_REPO, skillsDir],
-    stdout: "inherit",
-    stderr: "inherit",
-  });
-  const { code } = await cmd.output();
-  if (code !== 0) {
-    console.error("Failed to install tap-skills.");
-    Deno.exit(1);
-  }
-  const dirs = tapDirs();
-  const taps = await listTaps(dirs);
-  console.log(`Installed ${taps.length} skills.`);
-}
-
 /**
  * tap update — update everything: core code, CLI binary, skills, active runtimes.
  * Runtime reload is broadcast via daemon — each runtime decides how to reload.
@@ -291,20 +264,32 @@ async function cmdUpdate(): Promise<void> {
     steps.push({ name: "compile", ok: false, detail: String(e) });
   }
 
-  // Step 3: Pull skills
+  // Step 3: Skills — idempotent: clone if missing, pull if exists
   const skillsDir = `${tapHome()}/skills`;
   try {
-    await Deno.stat(skillsDir);
-    const cmd = new Deno.Command("git", {
-      args: ["-C", skillsDir, "pull", "--ff-only"],
-      stdout: "piped",
-      stderr: "piped",
-    });
-    const { code, stdout } = await cmd.output();
-    const out = new TextDecoder().decode(stdout).trim();
-    steps.push({ name: "skills", ok: code === 0, detail: out || "up to date" });
-  } catch {
-    steps.push({ name: "skills", ok: true, detail: "not installed (tap install)" });
+    let skillsExist = false;
+    try { await Deno.stat(skillsDir); skillsExist = true; } catch { /* not installed */ }
+
+    if (skillsExist) {
+      const cmd = new Deno.Command("git", {
+        args: ["-C", skillsDir, "pull", "--ff-only"],
+        stdout: "piped", stderr: "piped",
+      });
+      const { code, stdout } = await cmd.output();
+      const out = new TextDecoder().decode(stdout).trim();
+      steps.push({ name: "skills", ok: code === 0, detail: out || "up to date" });
+    } else {
+      const cmd = new Deno.Command("git", {
+        args: ["clone", "--depth", "1", SKILLS_REPO, skillsDir],
+        stdout: "piped", stderr: "piped",
+      });
+      const { code } = await cmd.output();
+      const dirs = tapDirs();
+      const taps = await listTaps(dirs);
+      steps.push({ name: "skills", ok: code === 0, detail: `installed ${taps.length} skills` });
+    }
+  } catch (e) {
+    steps.push({ name: "skills", ok: false, detail: String(e) });
   }
 
   // Step 4: Broadcast reload to all connected runtimes via daemon
