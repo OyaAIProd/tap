@@ -26,7 +26,6 @@ export interface TapModule {
   extract?: (args: Record<string, unknown>) => unknown[];
   waitFor?: string;
   timeout?: number;
-  health?: { min_rows?: number; non_empty?: string[] };
 }
 
 export interface TapResult {
@@ -37,7 +36,6 @@ export interface TapResult {
     run_ms?: number;
     total_ms: number;
   };
-  health?: { min_rows?: number; non_empty?: string[] };
 }
 
 /** Load a single .tap.js from disk via dynamic import. */
@@ -168,8 +166,7 @@ export async function runTap(
     const totalMs = Math.round(performance.now() - start);
     await appendLog({
       event: "run", site: tap.site, name: tap.name,
-      ms: totalMs, rows: 0, health: "error",
-      error: String(e),
+      ms: totalMs, rows: 0, error: String(e),
     });
     throw e;
   }
@@ -195,14 +192,9 @@ export async function runTap(
   // Infer columns from first row if not declared
   const columns = tap.columns ?? (rows.length > 0 ? Object.keys(rows[0]) : []);
 
-  // Log result (health contract checked for diagnostics — Agent reads logs via tap.logs)
-  const h = tap.health;
-  const healthy = !h || (rows.length >= (h.min_rows ?? 0) &&
-    (h.non_empty ?? []).every((col) => rows.some((r) => r[col]?.trim())));
-
   await appendLog({
     event: "run", site: tap.site, name: tap.name,
-    ms: totalMs, rows: rows.length, healthy,
+    ms: totalMs, rows: rows.length,
   });
 
   return {
@@ -210,6 +202,5 @@ export async function runTap(
     rows,
     count: rows.length,
     timing: { run_ms: totalMs, total_ms: totalMs },
-    health: tap.health,
   };
 }
