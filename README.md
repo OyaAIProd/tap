@@ -10,7 +10,7 @@
   <a href="https://github.com/LeonTing1010/tap/releases/latest"><img src="https://img.shields.io/github/v/release/LeonTing1010/tap?style=flat-square" alt="Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/LeonTing1010/tap?style=flat-square" alt="License"></a>
   <a href="https://github.com/LeonTing1010/tap/stargazers"><img src="https://img.shields.io/github/stars/LeonTing1010/tap?style=flat-square" alt="Stars"></a>
-  <a href="https://github.com/LeonTing1010/tap-skills"><img src="https://img.shields.io/badge/skills-81%20across%2041%20sites-blue?style=flat-square" alt="Skills"></a>
+  <a href="https://github.com/LeonTing1010/tap-skills"><img src="https://img.shields.io/badge/skills-106%20across%2050%20sites-blue?style=flat-square" alt="Skills"></a>
 </p>
 
 <p align="center">
@@ -30,7 +30,7 @@ forge_inspect → forge_verify → forge_save → tap.run
 
 One agent forges a tap. Every agent benefits.
 
-**81 ready-to-use skills across 41 sites** — X/Twitter, Reddit, GitHub, YouTube, Bilibili, Zhihu, Xiaohongshu, Weibo, Medium, arXiv, and [many more](https://github.com/LeonTing1010/tap-skills). Uses your real Chrome session. No API keys needed.
+**106 ready-to-use skills across 50 sites** — X/Twitter, Reddit, GitHub, YouTube, Bilibili, Zhihu, Xiaohongshu, Weibo, Medium, arXiv, and [many more](https://github.com/LeonTing1010/tap-skills). Uses your real Chrome session. No API keys needed.
 
 ## The Core Idea
 
@@ -109,7 +109,7 @@ npx @LeonTing1010/tap-mcp
 Install community skills:
 
 ```bash
-tap install       # Clone 81 skills from tap-skills repo
+tap install       # Clone 106 skills from tap-skills repo
 tap update        # Update skills to latest
 tap self-update   # Update everything: core + extension + skills
 ```
@@ -119,7 +119,7 @@ tap self-update   # Update everything: core + extension + skills
 ### CLI
 
 ```bash
-tap list                        # See all 81 skills
+tap list                        # See all 106 skills
 tap github trending --limit 5   # Get GitHub trending repos
 tap zhihu hot                   # Get Zhihu trending topics
 ```
@@ -176,7 +176,7 @@ Now `tap hackernews hot` runs forever. No AI. No tokens. No maintenance until th
 
 ## Skills
 
-**81 skills across 41 sites** in [tap-skills](https://github.com/LeonTing1010/tap-skills). API-first extraction where possible, DOM fallback when necessary.
+**106 skills across 50 sites** in [tap-skills](https://github.com/LeonTing1010/tap-skills). API-first extraction where possible, DOM fallback when necessary.
 
 ### Trending / Hot
 
@@ -357,11 +357,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). The easiest way to contribute: **forge a
 
 ## Roadmap
 
-- [x] **81 community skills** — `tap install` from [tap-skills](https://github.com/LeonTing1010/tap-skills)
+- [x] **106 community skills** — `tap install` from [tap-skills](https://github.com/LeonTing1010/tap-skills)
 - [x] **Playwright runtime** — second kernel, headless capable
 - [x] **Self-update** — `tap self-update` pulls code, recompiles, reloads extension
 - [ ] **Android runtime** — AccessibilityService-based kernel
-- [ ] **Auto-healing** — detect and regenerate broken taps
 - [ ] **Tap registry** — publish and discover taps like packages
 
 ## Star History

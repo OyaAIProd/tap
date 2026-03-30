@@ -10,7 +10,7 @@
   <a href="https://github.com/LeonTing1010/tap/releases/latest"><img src="https://img.shields.io/github/v/release/LeonTing1010/tap?style=flat-square" alt="Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/LeonTing1010/tap?style=flat-square" alt="License"></a>
   <a href="https://github.com/LeonTing1010/tap/stargazers"><img src="https://img.shields.io/github/stars/LeonTing1010/tap?style=flat-square" alt="Stars"></a>
-  <a href="https://github.com/LeonTing1010/tap-skills"><img src="https://img.shields.io/badge/skills-81%20across%2041%20sites-blue?style=flat-square" alt="Skills"></a>
+  <a href="https://github.com/LeonTing1010/tap-skills"><img src="https://img.shields.io/badge/skills-106%20across%2050%20sites-blue?style=flat-square" alt="Skills"></a>
 </p>
 
 <p align="center">
@@ -30,7 +30,7 @@ forge_inspect → forge_verify → forge_save → tap.run
 
 一个 Agent 锻造，所有 Agent 受益。
 
-**81 个开箱即用的 skills 覆盖 41 个站点** — X/Twitter、Reddit、GitHub、YouTube、B站、知乎、小红书、微博、Medium、arXiv [等等](https://github.com/LeonTing1010/tap-skills)。复用你真实的 Chrome 登录态，无需 API Key。
+**106 个开箱即用的 skills 覆盖 50 个站点** — X/Twitter、Reddit、GitHub、YouTube、B站、知乎、小红书、微博、Medium、arXiv [等等](https://github.com/LeonTing1010/tap-skills)。复用你真实的 Chrome 登录态，无需 API Key。
 
 ## 核心思想
 
@@ -109,7 +109,7 @@ npx @LeonTing1010/tap-mcp
 安装社区 skills：
 
 ```bash
-tap install       # 从 tap-skills 仓库克隆 81 个 skills
+tap install       # 从 tap-skills 仓库克隆 106 个 skills
 tap update        # 更新 skills 到最新版本
 tap self-update   # 全量更新：核心代码 + 扩展 + skills
 ```
@@ -119,7 +119,7 @@ tap self-update   # 全量更新：核心代码 + 扩展 + skills
 ### 命令行
 
 ```bash
-tap list                        # 查看全部 81 个 skills
+tap list                        # 查看全部 106 个 skills
 tap github trending --limit 5   # 获取 GitHub 热门仓库
 tap zhihu hot                   # 获取知乎热榜
 ```
@@ -176,7 +176,7 @@ AI：已保存至 hackernews/hot.tap.js ✓
 
 ## Skills
 
-**81 个 skills 覆盖 41 个站点**，详见 [tap-skills](https://github.com/LeonTing1010/tap-skills)。优先 API 提取，必要时 DOM 回退。
+**106 个 skills 覆盖 50 个站点**，详见 [tap-skills](https://github.com/LeonTing1010/tap-skills)。优先 API 提取，必要时 DOM 回退。
 
 ### 热门 / 趋势
 
@@ -357,11 +357,10 @@ deno compile --allow-all --output tap src/cli.ts  # 编译二进制
 
 ## 路线图
 
-- [x] **81 个社区 skills** — 从 [tap-skills](https://github.com/LeonTing1010/tap-skills) `tap install`
+- [x] **106 个社区 skills** — 从 [tap-skills](https://github.com/LeonTing1010/tap-skills) `tap install`
 - [x] **Playwright 运行时** — 第二个内核，支持无头模式
 - [x] **自更新** — `tap self-update` 拉代码、重编译、reload 扩展
 - [ ] **Android 运行时** — 基于 AccessibilityService 的内核
-- [ ] **自动修复** — 检测并重新生成失效的 tap
 - [ ] **Tap 注册中心** — 像 npm 包一样发布和发现 tap
 
 ## Star History

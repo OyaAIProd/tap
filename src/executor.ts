@@ -195,20 +195,14 @@ export async function runTap(
   // Infer columns from first row if not declared
   const columns = tap.columns ?? (rows.length > 0 ? Object.keys(rows[0]) : []);
 
-  // Health check
-  const health = tap.health;
-  let healthStatus = "none";
-  if (health) {
-    const minRows = health.min_rows ?? 0;
-    const nonEmpty = health.non_empty ?? [];
-    const pass = rows.length >= minRows &&
-      nonEmpty.every((col) => rows.some((r) => r[col] && r[col].trim() !== ""));
-    healthStatus = pass ? "pass" : "fail";
-  }
+  // Log result (health contract checked for diagnostics — Agent reads logs via tap.logs)
+  const h = tap.health;
+  const healthy = !h || (rows.length >= (h.min_rows ?? 0) &&
+    (h.non_empty ?? []).every((col) => rows.some((r) => r[col]?.trim())));
 
   await appendLog({
     event: "run", site: tap.site, name: tap.name,
-    ms: totalMs, rows: rows.length, health: healthStatus,
+    ms: totalMs, rows: rows.length, healthy,
   });
 
   return {
