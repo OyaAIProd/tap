@@ -154,6 +154,9 @@ switch (command) {
   case "daemon":
     await cmdDaemon(args[1]);
     break;
+  case "check":
+    await cmdCheck();
+    break;
   case "doctor":
     await cmdDoctor();
     break;
@@ -451,6 +454,64 @@ async function cmdDaemon(sub?: string): Promise<void> {
   await handle.stop();
 }
 
+/**
+ * tap check — run health contracts on all taps with health declarations.
+ * Like fsck for taps. Separate from run — this is ops, not execution.
+ * Outputs: site/name → pass/fail/error for each tap with a health contract.
+ */
+async function cmdCheck(): Promise<void> {
+  const dirs = tapDirs();
+  const allTaps = await listTaps(dirs);
+  const healthTaps = allTaps.filter(t => t.health && (t.extract || t.url));
+
+  if (healthTaps.length === 0) {
+    console.log("No taps with health contracts found.");
+    return;
+  }
+
+  console.log(`Checking ${healthTaps.length} taps with health contracts...\n`);
+
+  let client: BridgeClient | null = null;
+  try {
+    client = await connectToDaemon();
+  } catch {
+    console.error("Cannot connect to daemon. Run 'tap daemon' first.");
+    Deno.exit(1);
+  }
+
+  let passed = 0, failed = 0, errored = 0;
+
+  for (const tap of healthTaps) {
+    const key = `${tap.site}/${tap.name}`;
+    try {
+      const send: RpcSend = (type, method, params) =>
+        client!.sendTap(type, method, params) as Promise<unknown>;
+      const result = await runTap(tap, {}, send, dirs);
+
+      const health = tap.health!;
+      const minRows = health.min_rows ?? 0;
+      const nonEmpty = health.non_empty ?? [];
+      const ok = result.rows.length >= minRows &&
+        nonEmpty.every(col => result.rows.some(r => r[col]?.trim()));
+
+      if (ok) {
+        console.log(`  ✓ ${key} — ${result.count} rows (${result.timing.total_ms}ms)`);
+        passed++;
+      } else {
+        console.log(`  ✗ ${key} — ${result.count} rows (expected ≥${minRows})`);
+        failed++;
+      }
+    } catch (e) {
+      console.log(`  ! ${key} — ${e}`);
+      errored++;
+    }
+  }
+
+  console.log(`\n${passed} passed, ${failed} failed, ${errored} errors out of ${healthTaps.length} taps`);
+  client.close();
+  if (failed + errored > 0) Deno.exit(1);
+}
+
 async function cmdDoctor(): Promise<void> {
   const checks: { name: string; ok: boolean; detail: string }[] = [];
 
@@ -625,11 +686,7 @@ async function cmdTap(
         return rt.send(_type, method, params);
       };
       const result = await runTap(tap, tapArgs, send, dirs);
-      if (result.healthStatus === 'fail') {
-        status.done(`${site}/${name} — ${result.count} row(s) [health: FAIL — may need re-forge]`);
-      } else {
-        status.done(`${site}/${name} — ${result.count} row(s)`);
-      }
+      status.done(`${site}/${name} — ${result.count} row(s)`);
       console.log(JSON.stringify(result, null, 2));
     } catch (e) {
       status.fail(`${site}/${name} — ${e}`);
@@ -648,11 +705,7 @@ async function cmdTap(
         return client.sendTap(type, method, params) as Promise<unknown>;
       };
       const result = await runTap(tap, tapArgs, send, dirs);
-      if (result.healthStatus === 'fail') {
-        status.done(`${site}/${name} — ${result.count} row(s) [health: FAIL — may need re-forge]`);
-      } else {
-        status.done(`${site}/${name} — ${result.count} row(s)`);
-      }
+      status.done(`${site}/${name} — ${result.count} row(s)`);
       console.log(JSON.stringify(result, null, 2));
     } catch (e) {
       status.fail(`${site}/${name} — ${e}`);

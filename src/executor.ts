@@ -38,7 +38,6 @@ export interface TapResult {
     total_ms: number;
   };
   health?: { min_rows?: number; non_empty?: string[] };
-  healthStatus?: string; // "pass" | "fail" | "error" | "none"
 }
 
 /** Load a single .tap.js from disk via dynamic import. */
@@ -218,6 +217,5 @@ export async function runTap(
     count: rows.length,
     timing: { run_ms: totalMs, total_ms: totalMs },
     health: tap.health,
-    healthStatus,
   };
 }
