@@ -73,6 +73,19 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  update-homebrew:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger homebrew-tap update
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          gh api repos/LeonTing1010/homebrew-tap/dispatches \
+            -f event_type=update-formula \
+            -f "client_payload[version]=$VERSION"
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
   publish-npm:
     needs: release
     runs-on: ubuntu-latest
