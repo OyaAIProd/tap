@@ -303,6 +303,17 @@ test('protocol.js does not import from background.js (no upward dependency)', ()
   assert(!src.includes("from './background"), 'protocol must not import from background.js')
 })
 
+test('eval-based inspect tools migrated to Deno (not in background.js)', () => {
+  // Why: inspect.page/element/a11y/dom/globals/download/apiLog/toasts are pure page.eval() —
+  // they must NOT be in background.js. They live in Deno src/inspect.ts.
+  const MIGRATED = ['inspect.page', 'inspect.element', 'inspect.a11y', 'inspect.dom',
+    'inspect.globals', 'inspect.download', 'inspect.apiLog', 'inspect.toasts']
+  for (const tool of MIGRATED) {
+    assert(!bgSrc.includes(`case '${tool}':`),
+      `${tool} must not be in background.js — migrated to Deno inspect.ts`)
+  }
+})
+
 test('Deno mcp.ts tool names all use category.method format', () => {
   // Why: unified naming convention — every tool must have a dot separator
   const mcpSrc = readFileSync(new URL('../../src/mcp.ts', import.meta.url), 'utf-8')

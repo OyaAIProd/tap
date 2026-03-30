@@ -16,6 +16,7 @@ import { connectToDaemon, BridgeClient } from "./bridge.ts";
 import { listTaps, loadTap, runTap, appendLog } from "./executor.ts";
 import { createPageProxy, type RpcSend } from "./page.ts";
 import { forgeInspect } from "./forge.ts";
+import { handleInspectTool } from "./inspect.ts";
 import { handleInitialize, handleToolsList, handlePromptsList, handlePromptsGet, handleResourcesList, buildToolsSchema } from "./mcp.ts";
 
 // --- Status line (stderr, single-line rewrite) ---
@@ -473,7 +474,8 @@ async function handleToolCall(
 ): Promise<{ response: Record<string, unknown>; tabId: number }> {
   const toolName = (params.name as string) || "";
   const args = (params.arguments as Record<string, unknown>) || {};
-  console.error(`[mcp] tool=${toolName}`);
+  // Debug: log to file since stderr may not be visible
+  try { Deno.writeTextFileSync(`${Deno.env.get("HOME")}/.tap/logs/mcp-debug.log`, `tool=${toolName}\n`, { append: true }); } catch {}
 
   try {
     const { result, tabId } = await executeToolCall(toolName, args, client, sessionTabId);
@@ -600,6 +602,18 @@ async function executeToolCall(
         event: "forge_save", site, name: tapName, path,
       });
       return wrap(`saved to ${path}`);
+    }
+    // Inspect tools — eval-based, run in Deno via page.eval()
+    case "inspect.page":
+    case "inspect.element":
+    case "inspect.a11y":
+    case "inspect.dom":
+    case "inspect.globals":
+    case "inspect.download":
+    case "inspect.apiLog":
+    case "inspect.toasts": {
+      const send = createBridgeSend(client, tabId);
+      return wrap(await handleInspectTool(name, args, send));
     }
     default: {
       // Relay to extension — name IS the wire method, no conversion
