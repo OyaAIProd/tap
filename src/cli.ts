@@ -144,9 +144,7 @@ switch (command) {
   case "list":
     await cmdList();
     break;
-  case "install":   // alias — update is idempotent
   case "update":
-  case "self-update": // backward compat
     await cmdUpdate();
     break;
   case "daemon":
