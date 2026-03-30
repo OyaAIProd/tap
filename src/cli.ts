@@ -246,17 +246,24 @@ async function cmdUpdate(): Promise<void> {
     steps.push({ name: "core", ok: false, detail: String(e) });
   }
 
-  // Step 2: Recompile CLI binary
+  // Step 2: Recompile CLI binary — compile to temp, then atomic rename
+  // Direct overwrite kills the running process; rename is safe on macOS/Linux
   try {
     const cliSrc = `${repoDir}/src/cli.ts`;
     const binPath = Deno.execPath();
     const tapBin = binPath.includes("deno") ? `${repoDir}/tap` : binPath;
+    const tmpBin = `${tapBin}.tmp`;
     const cmd = new Deno.Command("deno", {
-      args: ["compile", "--allow-all", "--output", tapBin, cliSrc],
+      args: ["compile", "--allow-all", "--output", tmpBin, cliSrc],
       stdout: "piped",
       stderr: "piped",
     });
     const { code } = await cmd.output();
+    if (code === 0) {
+      await Deno.rename(tmpBin, tapBin);
+    } else {
+      await Deno.remove(tmpBin).catch(() => {});
+    }
     steps.push({ name: "compile", ok: code === 0, detail: tapBin });
   } catch (e) {
     steps.push({ name: "compile", ok: false, detail: String(e) });
