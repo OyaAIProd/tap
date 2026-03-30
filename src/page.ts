@@ -3,6 +3,10 @@
  *
  * Each method is a thin wrapper that sends an RPC message to the extension
  * via the provided `send` function. The extension does the actual work.
+ *
+ * Wire method names use dot notation matching MCP tool names exactly:
+ *   page.eval, page.click, page.nav, etc.
+ * One name everywhere — no conversion.
  */
 
 export type RpcSend = (
@@ -43,38 +47,43 @@ export interface Page {
 export function createPageProxy(send: RpcSend): Page {
   return {
     // Kernel (8) — abstract names, each runtime translates to native API
-    eval: (expression, ...args) =>
-      send("tool", "eval", { expression, args: args.length ? args : undefined }),
+    eval: (expression, ...args) => {
+      // Taps may pass a function (for extension-native eval) — convert to IIFE string
+      const expr = typeof expression === "function"
+        ? `(${expression.toString()})(${args.map(a => JSON.stringify(a)).join(",")})`
+        : String(expression);
+      return send("tool", "page.eval", { expression: expr });
+    },
     pointer: (x, y, action, opts) =>
-      send("tool", "pointer", { x, y, action, ...opts }),
+      send("tool", "page.pointer", { x, y, action, ...opts }),
     keyboard: (key, action, mods) =>
-      send("tool", "keyboard", { key, action, modifiers: mods }),
-    nav: (url) => send("tool", "nav", { url }),
-    wait: (ms) => send("tool", "wait", { ms }),
-    screenshot: (opts) => send("tool", "screenshot", { ...opts }),
+      send("tool", "page.keyboard", { key, action, modifiers: mods }),
+    nav: (url) => send("tool", "page.nav", { url }),
+    wait: (ms) => send("tool", "page.wait", { ms }),
+    screenshot: (opts) => send("tool", "page.screenshot", { ...opts }),
     tap: () => { throw new Error("page.tap() must be wired by executor"); },
-    capabilities: () => send("tool", "capabilities", {}),
+    capabilities: () => send("tool", "page.capabilities", {}),
     // Stdlib (16)
-    click: (target) => send("tool", "click", { target }),
-    type: (selector, text) => send("tool", "type", { selector, text }),
-    hover: (selector) => send("tool", "hover", { selector }),
-    scroll: (selector) => send("tool", "scroll", { selector }),
+    click: (target) => send("tool", "page.click", { target }),
+    type: (selector, text) => send("tool", "page.type", { selector, text }),
+    hover: (selector) => send("tool", "page.hover", { selector }),
+    scroll: (selector) => send("tool", "page.scroll", { selector }),
     pressKey: (key, mods) =>
-      send("tool", "pressKey", { key, modifiers: mods }),
+      send("tool", "page.pressKey", { key, modifiers: mods }),
     select: (selector, value) =>
-      send("tool", "select", { selector, value }),
+      send("tool", "page.select", { selector, value }),
     upload: (selector, files) =>
-      send("tool", "upload", { selector, files }),
+      send("tool", "page.upload", { selector, files }),
     dialog: (accept, text) =>
-      send("tool", "dialog", { accept, prompt_text: text }),
-    fetch: (url, opts) => send("tool", "fetch", { url, ...opts }),
-    find: (query, role) => send("tool", "find", { query, role }),
-    cookies: () => send("tool", "cookies", {}),
-    download: (url) => send("tool", "download", { url }),
-    waitFor: (selector, ms) => send("tool", "waitFor", { selector, ms }),
+      send("tool", "page.dialog", { accept, prompt_text: text }),
+    fetch: (url, opts) => send("tool", "page.fetch", { url, ...opts }),
+    find: (query, role) => send("tool", "page.find", { query, role }),
+    cookies: () => send("tool", "page.cookies", {}),
+    download: (url) => send("tool", "page.download", { url }),
+    waitFor: (selector, ms) => send("tool", "page.waitFor", { selector, ms }),
     waitForNetwork: (ms, idle) =>
-      send("tool", "waitForNetwork", { ms, idle }),
-    ssrState: (name) => send("tool", "ssrState", { name }),
-    storage: (type) => send("tool", "storage", { type }),
+      send("tool", "page.waitForNetwork", { ms, idle }),
+    ssrState: (name) => send("tool", "page.ssrState", { name }),
+    storage: (type) => send("tool", "page.storage", { type }),
   };
 }
