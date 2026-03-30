@@ -321,15 +321,19 @@ function tapHome(): string {
 
 function tapDirs(): string[] {
   const dirs = [`${tapHome()}/taps`];
-  // Also check extension/taps relative to this script
+  // Check installed extension taps (~/.tap/extension/taps)
+  const installedExt = `${tapHome()}/extension/taps`;
+  try {
+    Deno.statSync(installedExt);
+    dirs.push(installedExt);
+  } catch { /* not installed via install.sh */ }
+  // Also check extension/taps relative to this script (dev environment)
   const scriptDir = new URL(".", import.meta.url).pathname;
   const extTaps = `${scriptDir}../extension/taps`;
   try {
     Deno.statSync(extTaps);
-    dirs.push(extTaps);
-  } catch {
-    // Not in dev environment
-  }
+    if (extTaps !== installedExt) dirs.push(extTaps);
+  } catch { /* not in dev environment */ }
   return dirs;
 }
 
