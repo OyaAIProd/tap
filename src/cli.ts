@@ -16,7 +16,97 @@ import { type RpcSend } from "./page.ts";
 import { forgeInspect } from "./forge.ts";
 import { handleInitialize, handleToolsList, handlePromptsList, handlePromptsGet, handleResourcesList, buildToolsSchema } from "./mcp.ts";
 
-const args = Deno.args;
+// --- Status line (stderr, single-line rewrite) ---
+
+const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const isTTY = Deno.stderr.isTerminal?.() ?? false;
+
+class StatusLine {
+  private frame = 0;
+  private timer: number | null = null;
+  private text = "";
+  private startMs = performance.now();
+  private stepStart = performance.now();
+
+  start(label: string) {
+    this.text = label;
+    this.startMs = performance.now();
+    this.stepStart = this.startMs;
+    if (isTTY) {
+      this.timer = setInterval(() => this.render(), 80);
+      this.render();
+    } else {
+      this.log(label);
+    }
+  }
+
+  update(label: string) {
+    const elapsed = this.elapsed(this.stepStart);
+    if (isTTY) {
+      // Print completed step on its own line, then continue spinner
+      this.clearLine();
+      this.log(`  ✔ ${this.text} ${elapsed}`);
+    } else {
+      this.log(`  ✔ ${this.text} ${elapsed}`);
+    }
+    this.text = label;
+    this.stepStart = performance.now();
+    if (isTTY) this.render();
+  }
+
+  done(summary: string) {
+    const elapsed = this.elapsed(this.stepStart);
+    if (isTTY) {
+      this.clearLine();
+      if (this.timer) { clearInterval(this.timer); this.timer = null; }
+    }
+    this.log(`  ✔ ${this.text} ${elapsed}`);
+    const total = this.elapsed(this.startMs);
+    this.log(`✔ ${summary} ${total}`);
+  }
+
+  fail(msg: string) {
+    if (isTTY) {
+      this.clearLine();
+      if (this.timer) { clearInterval(this.timer); this.timer = null; }
+    }
+    this.log(`✘ ${msg} ${this.elapsed(this.startMs)}`);
+  }
+
+  private render() {
+    const spinner = SPINNER[this.frame++ % SPINNER.length];
+    const elapsed = this.elapsed(this.stepStart);
+    const line = `  ${spinner} ${this.text} ${elapsed}`;
+    this.clearLine();
+    const bytes = new TextEncoder().encode(line);
+    Deno.stderr.writeSync(bytes);
+  }
+
+  private clearLine() {
+    Deno.stderr.writeSync(new TextEncoder().encode(`\r\x1b[K`));
+  }
+
+  private log(msg: string) {
+    Deno.stderr.writeSync(new TextEncoder().encode(msg + "\n"));
+  }
+
+  private elapsed(since: number): string {
+    const ms = Math.round(performance.now() - since);
+    if (ms < 1000) return `(${ms}ms)`;
+    return `(${(ms / 1000).toFixed(1)}s)`;
+  }
+}
+
+// Extract --runtime flag before command parsing
+const rawArgs = [...Deno.args];
+let runtime = "extension"; // default
+const rtIdx = rawArgs.indexOf("--runtime");
+if (rtIdx !== -1 && rawArgs[rtIdx + 1]) {
+  runtime = rawArgs[rtIdx + 1];
+  rawArgs.splice(rtIdx, 2);
+}
+
+const args = rawArgs;
 const command = args[0];
 
 if (!command || command === "-h" || command === "--help" || command === "help") {
@@ -28,11 +118,15 @@ Usage:
   tap daemon                        start bridge daemon
   tap mcp                           start MCP server (stdin/stdout)
 
+Options:
+  --runtime extension               use Chrome Extension kernel (default)
+  --runtime playwright              use Playwright kernel (headless capable)
+
 Examples:
   tap weibo hot                     微博热搜
   tap github trending               GitHub trending repos
+  tap --runtime playwright github trending    headless mode
   tap xiaohongshu search --keyword "AI"
-  tap weibo-to-xiaohongshu auto_publish --hot_index 1
 
 Run 'tap list' to see all available taps and their arguments.`);
   Deno.exit(0);
@@ -207,29 +301,100 @@ async function cmdTap(
   name: string,
   tapArgs: Record<string, unknown>,
 ): Promise<void> {
-  const client = await connectToDaemon();
-  try {
-    // Find tap on disk
-    const dirs = tapDirs();
-    let tapPath = "";
-    for (const dir of dirs) {
-      const p = `${dir}/${site}/${name}.tap.js`;
-      try { await Deno.stat(p); tapPath = p; break; } catch { /* next */ }
-    }
-    if (!tapPath) throw new Error(`tap not found: ${site}/${name}`);
+  const status = new StatusLine();
+  status.start(`${site}/${name} [${runtime}] — connecting`);
 
-    const tap = await loadTap(tapPath);
-    const send: RpcSend = (type, method, params) =>
-      client.sendTap(type, method, params) as Promise<unknown>;
-
-    const result = await runTap(tap, tapArgs, send);
-    console.log(JSON.stringify(result, null, 2));
-  } catch (e) {
-    console.error(`error: ${e}`);
-    Deno.exit(1);
-  } finally {
-    client.close();
+  // Find tap on disk
+  const dirs = tapDirs();
+  let tapPath = "";
+  for (const dir of dirs) {
+    const p = `${dir}/${site}/${name}.tap.js`;
+    try { await Deno.stat(p); tapPath = p; break; } catch { /* next */ }
   }
+  if (!tapPath) { status.fail(`tap not found: ${site}/${name}`); Deno.exit(1); }
+
+  const tap = await loadTap(tapPath);
+
+  if (runtime === "playwright") {
+    // --- Playwright runtime: no daemon/extension needed ---
+    const { createPlaywrightRuntime } = await import("./runtime-playwright.ts");
+    const rt = await createPlaywrightRuntime({ headless: tapArgs.headless === true || tapArgs.headless === "true" });
+    try {
+      status.update(`${site}/${name} — running`);
+      const send: RpcSend = (_type, method, params) => {
+        const label = formatStep(_type, method, params);
+        status.update(label);
+        return rt.send(_type, method, params);
+      };
+      const result = await runTap(tap, tapArgs, send);
+      status.done(`${site}/${name} — ${result.count} row(s)`);
+      console.log(JSON.stringify(result, null, 2));
+    } catch (e) {
+      status.fail(`${site}/${name} — ${e}`);
+      Deno.exit(1);
+    } finally {
+      await rt.close();
+    }
+  } else {
+    // --- Extension runtime: connect through daemon ---
+    const client = await connectToDaemon();
+    try {
+      status.update(`${site}/${name} — running`);
+      const send: RpcSend = (type, method, params) => {
+        const label = formatStep(type, method, params);
+        status.update(label);
+        return client.sendTap(type, method, params) as Promise<unknown>;
+      };
+      const result = await runTap(tap, tapArgs, send);
+      status.done(`${site}/${name} — ${result.count} row(s)`);
+      console.log(JSON.stringify(result, null, 2));
+    } catch (e) {
+      status.fail(`${site}/${name} — ${e}`);
+      Deno.exit(1);
+    } finally {
+      client.close();
+    }
+  }
+}
+
+/** Human-readable label for an RPC step. */
+function formatStep(type: string, method: string, params: Record<string, unknown>): string {
+  if (type === "tool" && method === "run") {
+    return `tap ${params.site}/${params.name}`;
+  }
+  if (type === "tool" && method === "nav") {
+    const url = String(params.url || "");
+    // Show just the hostname for brevity
+    try { return `nav ${new URL(url).hostname}`; } catch { return `nav ${url.slice(0, 50)}`; }
+  }
+  if (type === "tool" && method === "click") {
+    return `click "${params.target || ""}"`;
+  }
+  if (type === "tool" && method === "type") {
+    return `type → ${String(params.selector || "").slice(0, 30)}`;
+  }
+  if (type === "tool" && method === "wait") {
+    return `wait ${params.ms}ms`;
+  }
+  if (type === "tool" && method === "eval") {
+    return `eval (${String(params.expression || "").slice(0, 40)}…)`;
+  }
+  if (type === "tool" && method === "upload") {
+    return `upload → ${String(params.selector || "").slice(0, 30)}`;
+  }
+  if (type === "tool" && method === "waitFor") {
+    return `waitFor "${params.selector || ""}"`;
+  }
+  if (type === "tool" && method === "screenshot") {
+    return `screenshot`;
+  }
+  if (type === "tool" && method === "find") {
+    return `find "${params.query || ""}"`;
+  }
+  if (type === "tool" && method === "fetch") {
+    try { return `fetch ${new URL(String(params.url)).hostname}`; } catch { return `fetch`; }
+  }
+  return `${type}/${method}`;
 }
 
 // --- MCP tool dispatch ---
