@@ -9,7 +9,7 @@
   <a href="https://github.com/LeonTing1010/tap/releases/latest"><img src="https://img.shields.io/github/v/release/LeonTing1010/tap?style=flat-square" alt="Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/LeonTing1010/tap?style=flat-square" alt="License"></a>
   <a href="https://github.com/LeonTing1010/tap/stargazers"><img src="https://img.shields.io/github/stars/LeonTing1010/tap?style=flat-square" alt="Stars"></a>
-  <a href="#内置-taps"><img src="https://img.shields.io/badge/taps-77%20across%2040%20sites-blue?style=flat-square" alt="Taps"></a>
+  <a href="https://github.com/LeonTing1010/tap-skills"><img src="https://img.shields.io/badge/skills-81%20across%2041%20sites-blue?style=flat-square" alt="Skills"></a>
 </p>
 
 <p align="center">
@@ -18,7 +18,7 @@
 
 Tap 是一个通用协议，让 AI 可以操控任何界面。定义 8 个内核原语，获得 16 个标准库操作，覆盖所有人机交互。AI 一次性锻造 `.tap.js` 脚本 — 之后任何 Agent 都能确定性地运行，运行时零 AI 消耗。
 
-**77 个 taps 覆盖 40 个站点** — Twitter/X、Reddit、GitHub、YouTube、B站、知乎、小红书、微博、Medium、arXiv [等等](#内置-taps)。复用 Chrome 登录态，无需 API Key。
+**81 个 skills 覆盖 41 个站点** — Twitter/X、Reddit、GitHub、YouTube、B站、知乎、小红书、微博、Medium、arXiv [等等](https://github.com/LeonTing1010/tap-skills)。复用 Chrome 登录态，无需 API Key。
 
 ```
 forge_inspect → forge_verify → forge_save → tap.run
@@ -43,11 +43,19 @@ forge_inspect → forge_verify → forge_save → tap.run
 
 | 你的需求 | 最佳工具 | 原因 |
 |---------|---------|------|
-| AI Agent 的确定性站点操作 | **Tap** | 77 个预置 tap，运行时零 LLM 成本，MCP 原生 |
+| AI Agent 的确定性站点操作 | **Tap** | 81 个预置 skills，运行时零 LLM 成本，MCP 原生 |
 | 通用 LLM 驱动浏览 | Browser-Use, Stagehand | LLM 每步决策 — 灵活但慢且贵 |
 | 大规模爬取 | Crawl4AI, Scrapy | 专为吞吐量和规模构建 |
 | 网站 CLI 封装 | OpenCLI | 工具集合模式；Tap 是协议 |
 | E2E 测试 | Playwright, Cypress | 测试框架，不是 Agent 协议 |
+
+**Tap 的独特之处：**
+
+- **协议，不是工具集合** — 8 内核 + 16 标准库 = 任何运行时都可实现的通用契约
+- **MCP 原生** — 与 Claude Code 及任何 MCP 兼容 Agent 一流集成
+- **锻造流程** — AI 通过 inspect/verify/save 创建 tap，然后零 AI 运行
+- **合法 Chrome 扩展** — 无 headless 浏览器，无反检测，无指纹伪造
+- **可组合** — tap 通过 `page.tap("site", "name")` 调用其他 tap
 
 ## 安装
 
@@ -79,17 +87,19 @@ curl -fsSL https://raw.githubusercontent.com/LeonTing1010/tap/master/install.sh 
 <summary>其他安装方式</summary>
 
 ```bash
-# 从源码安装
-cargo install --git https://github.com/LeonTing1010/tap
-
-# 或本地构建
+# 从源码安装（需要 Deno）
 git clone https://github.com/LeonTing1010/tap && cd tap
-cargo install --path .
-
-# Windows — 从 Releases 下载 tap-x86_64-pc-windows-msvc.zip
+deno compile --allow-all --output tap src/cli.ts
 ```
 
 </details>
+
+安装社区 skills：
+
+```bash
+tap install     # 从 tap-skills 仓库克隆 81 个 skills
+tap update      # 更新到最新版本
+```
 
 ## 快速开始
 
@@ -115,7 +125,7 @@ tap xiaohongshu/search?keyword=AI
 ### 从命令行
 
 ```bash
-tap list                        # 查看全部 77 个 taps
+tap list                        # 查看全部 skills
 tap github trending --limit 5   # 运行 tap
 tap check                       # 健康检查所有 taps
 ```
@@ -129,9 +139,9 @@ tap check                       # 健康检查所有 taps
 > 现在 tap.run 永远执行，零 AI
 ```
 
-## 内置 Taps
+## Skills
 
-**77 个 taps 覆盖 40 个站点。** 优先 API 提取，必要时 DOM 回退。
+**81 个 skills 覆盖 41 个站点** 在 [tap-skills](https://github.com/LeonTing1010/tap-skills)。优先 API 提取，必要时 DOM 回退。
 
 ### 热门 / 趋势
 
@@ -277,7 +287,7 @@ AI：已保存至 hackernews/hot.tap.js ✓
 | `page.pointer(x, y, action)` | 指针事件 |
 | `page.keyboard(key, action, mods?)` | 键盘事件 |
 | `page.nav(url)` | 导航到 URL |
-| `page.wait(ms \| condition)` | 等待时间或条件 |
+| `page.wait(ms | condition)` | 等待时间或条件 |
 | `page.screenshot()` | 视觉截图 |
 | `page.tap(site, name, args?)` | 调用另一个 tap |
 | `page.capabilities()` | 查询运行时能力 |
@@ -360,13 +370,14 @@ export default {
 ## 架构
 
 ```
-AI Agent ←→ MCP (stdin/stdout) ←→ Bridge (ws://9333) ←→ Chrome 扩展
-              Rust 二进制              WebSocket            内核 + 标准库
-              ~2,900 行               自动重连              运行时 #1
+                    ┌─ Chrome Extension (kernel via CDP)
+AI Agent ←→ MCP ←→ Deno Executor ─┤
+  CLI / MCP          load + run     └─ Playwright (kernel via pw API)
 ```
 
-**Rust 二进制** — 轻量 MCP 网关。无浏览器逻辑，无 CDP 依赖。
-**Chrome 扩展** — 运行时 #1。所有浏览器操作通过合法扩展 API。
+**Deno CLI** — MCP 服务器 + 执行器 + 守护进程（~1,800 行）。零依赖。
+**Chrome 扩展** — 运行时 #1。内核提供者，无 tap 执行逻辑。
+**Playwright** — 运行时 #2。支持无头模式，无需扩展。
 **.tap.js** — 确定性脚本。零 AI，零 token，永久运行。
 
 ## MCP 工具
@@ -385,15 +396,17 @@ AI Agent ←→ MCP (stdin/stdout) ←→ Bridge (ws://9333) ←→ Chrome 扩�
 ## 构建
 
 ```bash
-cargo build && cargo test     # 47 个 Rust 测试
-cargo clippy -- -D warnings   # 零警告
+# Deno tests
+deno test --no-check --allow-all src/test/     # unit constraints
 
-# 扩展约束测试
-node extension/test/tap-format.test.mjs   # 933 条约束
-node extension/test/protocol.test.mjs     # 86 条约束
+# Extension constraint tests
+node extension/test/tap-format.test.mjs        # format constraints
+node extension/test/architecture.test.mjs      # architecture constraints
+node extension/test/multi-tab.test.mjs         # multi-tab constraints
+
+# 编译为二进制
+deno compile --allow-all --output tap src/cli.ts
 ```
-
-总计 **1,066 个自动化检查**，零失败。
 
 ## 贡献
 
@@ -405,10 +418,10 @@ node extension/test/protocol.test.mjs     # 86 条约束
 
 ## 路线图
 
-- [ ] **Tap 注册表** — 社区 tap 发现和分享
+- [x] **tap-skills** — 社区 skills 仓库（`tap install`）
+- [x] **Playwright 运行时** — 第二个内核，支持无头模式
 - [ ] **Android 运行时** — 基于 AccessibilityService 的内核
 - [ ] **自动修复** — 检测并重新生成失效的 tap
-- [ ] **Tap 组合** — 编排多站点工作流的高阶 tap
 
 ## Star History
 

@@ -50,7 +50,7 @@ export function createPageProxy(send: RpcSend): Page {
     eval: (expression, ...args) => {
       // Taps may pass a function (for extension-native eval) — convert to IIFE string
       const expr = typeof expression === "function"
-        ? `(${expression.toString()})(${args.map(a => JSON.stringify(a)).join(",")})`
+        ? `(${String(expression)})(${args.map(a => JSON.stringify(a)).join(",")})`
         : String(expression);
       return send("tool", "page.eval", { expression: expr });
     },

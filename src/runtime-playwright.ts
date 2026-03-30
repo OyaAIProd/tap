@@ -340,7 +340,7 @@ export async function createPlaywrightRuntime(
               JSON.stringify(obj, (_, v) => v === undefined ? null : v),
             );
           if (name) {
-            const val = (window as Record<string, unknown>)[name];
+            const val = (window as unknown as Record<string, unknown>)[name];
             if (val === undefined) return null;
             try {
               return sanitize(val);
@@ -356,10 +356,10 @@ export async function createPlaywrightRuntime(
           ];
           const found: Record<string, unknown> = {};
           for (const n of SSR_NAMES) {
-            if ((window as Record<string, unknown>)[n] !== undefined) {
+            if ((window as unknown as Record<string, unknown>)[n] !== undefined) {
               try {
                 found[n] = sanitize(
-                  (window as Record<string, unknown>)[n],
+                  (window as unknown as Record<string, unknown>)[n],
                 );
               } catch { /* skip */ }
             }

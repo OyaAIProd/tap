@@ -18,7 +18,7 @@ TAP_HOME="${TAP_HOME:-$HOME/.tap}"
 echo "Installing tap..."
 TMPDIR=$(mktemp -d)
 git clone --depth 1 "https://github.com/$REPO.git" "$TMPDIR/tap"
-deno compile --allow-all --output "$INSTALL_DIR/tap" "$TMPDIR/tap/src/cli.ts"
+deno compile --no-check --allow-all --output "$INSTALL_DIR/tap" "$TMPDIR/tap/src/cli.ts"
 
 # Install Chrome extension
 mkdir -p "$TAP_HOME"

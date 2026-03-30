@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
-    "strict": false
+    "strict": false,
+    "lib": ["deno.window", "dom", "dom.iterable", "dom.asynciterable"]
   },
   "test": {
     "include": ["src/test/"]
