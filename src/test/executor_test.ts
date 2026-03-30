@@ -158,9 +158,9 @@ Deno.test("[safety/what] runTap executes extract-format tap via page.nav + page.
   const calls: Array<{ type: string; method: string; params: Record<string, unknown> }> = [];
   const send = (type: string, method: string, params: Record<string, unknown>) => {
     calls.push({ type, method, params });
-    if (method === "eval") {
-      // Simulate extract returning data
-      return Promise.resolve([{ title: "hello", score: "99" }]);
+    if (method === "Runtime.evaluate") {
+      // Simulate extract returning data (page.eval unwraps result.value)
+      return Promise.resolve({ result: { value: [{ title: "hello", score: "99" }] } });
     }
     return Promise.resolve({});
   };
@@ -179,17 +179,17 @@ Deno.test("[safety/what] runTap executes extract-format tap via page.nav + page.
 
   const result = await runTap(tap, {}, send);
 
-  // Must have called nav first
-  const navCall = calls.find(c => c.method === "nav");
+  // Must have called nav (now CDP Page.navigate)
+  const navCall = calls.find(c => c.method === "Page.navigate");
   assertEquals(navCall?.params?.url, "https://example.com/trending");
 
   // Must have called waitFor
   const waitCall = calls.find(c => c.method === "waitFor");
   assertEquals(waitCall?.params?.selector, ".item");
 
-  // Must have called eval with the extract function
-  const evalCall = calls.find(c => c.method === "eval");
-  assertExists(evalCall, "must call page.eval with extract function");
+  // Must have called eval (now CDP Runtime.evaluate)
+  const evalCall = calls.find(c => c.method === "Runtime.evaluate");
+  assertExists(evalCall, "must call page.eval via Runtime.evaluate");
 
   // Must return normalized rows
   assertEquals(result.rows.length >= 1, true);
@@ -200,7 +200,7 @@ Deno.test("[safety/what] runTap extract with dynamic url function", async () => 
   const calls: Array<{ type: string; method: string; params: Record<string, unknown> }> = [];
   const send = (type: string, method: string, params: Record<string, unknown>) => {
     calls.push({ type, method, params });
-    if (method === "eval") return Promise.resolve([{ r: "1" }]);
+    if (method === "Runtime.evaluate") return Promise.resolve({ result: { value: [{ r: "1" }] } });
     return Promise.resolve({});
   };
 
@@ -213,7 +213,7 @@ Deno.test("[safety/what] runTap extract with dynamic url function", async () => 
   };
 
   const result = await runTap(tap, { query: "rust" }, send);
-  const navCall = calls.find(c => c.method === "nav");
+  const navCall = calls.find(c => c.method === "Page.navigate");
   assertEquals(navCall?.params?.url, "https://example.com/search?q=rust");
   assertEquals(result.count >= 1, true);
 });
@@ -221,8 +221,8 @@ Deno.test("[safety/what] runTap extract with dynamic url function", async () => 
 Deno.test("[safety/what] runTap extract applies limit arg", async () => {
   // Why: runtime must honor limit to avoid returning thousands of rows
   const send = (_t: string, method: string, _p: Record<string, unknown>) => {
-    if (method === "eval") {
-      return Promise.resolve(Array.from({ length: 50 }, (_, i) => ({ n: String(i) })));
+    if (method === "Runtime.evaluate") {
+      return Promise.resolve({ result: { value: Array.from({ length: 50 }, (_, i) => ({ n: String(i) })) } });
     }
     return Promise.resolve({});
   };

@@ -359,39 +359,27 @@ async function cmdTap(
 
 /** Human-readable label for an RPC step. */
 function formatStep(type: string, method: string, params: Record<string, unknown>): string {
-  if (type === "tool" && method === "run") {
-    return `tap ${params.site}/${params.name}`;
-  }
-  if (type === "tool" && method === "nav") {
+  // CDP kernel methods
+  if (method === "Page.navigate") {
     const url = String(params.url || "");
-    // Show just the hostname for brevity
     try { return `nav ${new URL(url).hostname}`; } catch { return `nav ${url.slice(0, 50)}`; }
   }
-  if (type === "tool" && method === "click") {
-    return `click "${params.target || ""}"`;
+  if (method === "Runtime.evaluate") {
+    const expr = String(params.expression || "");
+    if (expr.startsWith("(async") || expr.startsWith("((")) return `extract`;
+    return `eval`;
   }
-  if (type === "tool" && method === "type") {
-    return `type → ${String(params.selector || "").slice(0, 30)}`;
-  }
-  if (type === "tool" && method === "wait") {
-    return `wait ${params.ms}ms`;
-  }
-  if (type === "tool" && method === "eval") {
-    return `eval (${String(params.expression || "").slice(0, 40)}…)`;
-  }
-  if (type === "tool" && method === "upload") {
-    return `upload → ${String(params.selector || "").slice(0, 30)}`;
-  }
-  if (type === "tool" && method === "waitFor") {
-    return `waitFor "${params.selector || ""}"`;
-  }
-  if (type === "tool" && method === "screenshot") {
-    return `screenshot`;
-  }
-  if (type === "tool" && method === "find") {
-    return `find "${params.query || ""}"`;
-  }
-  if (type === "tool" && method === "fetch") {
+  if (method === "Page.captureScreenshot") return `screenshot`;
+  if (method === "Input.dispatchMouseEvent") return `pointer ${params.x},${params.y}`;
+  if (method === "Input.dispatchKeyEvent") return `key ${params.key || ""}`;
+  // Tool commands
+  if (method === "run") return `tap ${params.site}/${params.name}`;
+  if (method === "click") return `click "${params.target || ""}"`;
+  if (method === "type") return `type → ${String(params.selector || "").slice(0, 30)}`;
+  if (method === "upload") return `upload → ${String(params.selector || "").slice(0, 30)}`;
+  if (method === "waitFor") return `waitFor "${params.selector || ""}"`;
+  if (method === "find") return `find "${params.query || ""}"`;
+  if (method === "fetch") {
     try { return `fetch ${new URL(String(params.url)).hostname}`; } catch { return `fetch`; }
   }
   return `${type}/${method}`;

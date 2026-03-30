@@ -12,12 +12,25 @@ export const CLIENT_PORT = 9334;
 interface PendingRequest {
   clientSend: (msg: string) => void;
   originalId: unknown;
+  method: string;
+  sentAt: number;
 }
 
 interface DaemonHandle {
   stop: () => Promise<void>;
   extensionPort: number;
   clientPort: number;
+}
+
+/** Append a line to the daemon log file. */
+function logMsg(direction: string, id: unknown, type: string, method: string, extra = "") {
+  const ts = new Date().toISOString().slice(11, 23); // HH:mm:ss.SSS
+  const line = `${ts} ${direction} id=${id} ${type}/${method}${extra ? " " + extra : ""}`;
+  const home = Deno.env.get("TAP_HOME") || `${Deno.env.get("HOME")}/.tap`;
+  const logPath = `${home}/logs/daemon.log`;
+  try {
+    Deno.writeTextFileSync(logPath, line + "\n", { append: true });
+  } catch { /* ignore write errors */ }
 }
 
 export async function startDaemon(
@@ -45,6 +58,9 @@ export async function startDaemon(
         const req = pending.get(id);
         if (req) {
           pending.delete(id);
+          const elapsed = Math.round(performance.now() - req.sentAt);
+          const hasError = msg.error ? `err="${msg.error.message || "unknown"}"` : "";
+          logMsg("◂ ext→cli", req.originalId, "", req.method, `${elapsed}ms${hasError ? " " + hasError : ""}`);
           msg.id = req.originalId;
           req.clientSend(JSON.stringify(msg));
         }
@@ -67,8 +83,11 @@ export async function startDaemon(
       socket.onmessage = (e) => {
         const msg = JSON.parse(e.data);
         const originalId = msg.id;
+        const msgType = msg.type || "";
+        const msgMethod = msg.method || "";
 
         if (!extensionWs || extensionWs.readyState !== WebSocket.OPEN) {
+          logMsg("✕ no-ext", originalId, msgType, msgMethod);
           socket.send(JSON.stringify({
             id: originalId,
             error: { code: -32000, message: "extension not connected" },
@@ -78,12 +97,15 @@ export async function startDaemon(
 
         // Rewrite ID and forward
         const daemonId = nextId++;
+        logMsg("▸ cli→ext", originalId, msgType, msgMethod);
         msg.id = daemonId;
         pending.set(daemonId, {
           clientSend: (m) => {
             if (socket.readyState === WebSocket.OPEN) socket.send(m);
           },
           originalId,
+          method: `${msgType}/${msgMethod}`,
+          sentAt: performance.now(),
         });
         extensionWs.send(JSON.stringify(msg));
       };

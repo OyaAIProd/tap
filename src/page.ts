@@ -42,20 +42,36 @@ export interface Page {
 
 export function createPageProxy(send: RpcSend): Page {
   return {
-    // Kernel
-    eval: (expression, ...args) =>
-      send("tool", "eval", { expression, args: args.length ? args : undefined }),
+    // Kernel — route through CDP, not tool handler
+    eval: async (expression, ...args) => {
+      // Extension's Runtime.evaluate wraps in chrome.scripting.executeScript
+      const r = await send("cdp", "Runtime.evaluate", {
+        expression,
+        returnByValue: true,
+        awaitPromise: true,
+      }) as Record<string, unknown>;
+      // Unwrap: extension returns { result: { value } } or scripting wrapper
+      const result = r?.result as Record<string, unknown> | undefined;
+      return result?.value ?? r;
+    },
     pointer: (x, y, action, opts) =>
-      send("tool", "pointer", { x, y, action, ...opts }),
+      send("cdp", "Input.dispatchMouseEvent", {
+        type: action === "click" ? "mousePressed" : action,
+        x, y, button: "left", clickCount: 1, ...opts,
+      }),
     keyboard: (key, action, mods) =>
-      send("tool", "keyboard", { key, action, modifiers: mods }),
-    nav: (url) => send("tool", "nav", { url }),
-    wait: (ms) => send("tool", "wait", { ms }),
-    screenshot: (opts) => send("tool", "screenshot", { ...opts }),
+      send("cdp", "Input.dispatchKeyEvent", {
+        type: action === "down" ? "keyDown" : action === "up" ? "keyUp" : "char",
+        key, modifiers: mods,
+      }),
+    nav: (url) => send("cdp", "Page.navigate", { url }),
+    wait: (ms) => new Promise((r) => setTimeout(r, ms as number)),
+    screenshot: (opts) =>
+      send("cdp", "Page.captureScreenshot", { format: "jpeg", quality: 50, ...opts }),
     tap: (site, name, args) =>
       send("tool", "run", { site, name, args }),
     capabilities: () => send("tool", "capabilities", {}),
-    // Stdlib
+    // Stdlib — these are tool commands the extension handles
     click: (target) => send("tool", "click", { target }),
     type: (selector, text) => send("tool", "type", { selector, text }),
     hover: (selector) => send("tool", "hover", { selector }),

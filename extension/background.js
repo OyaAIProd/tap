@@ -11,6 +11,7 @@
  */
 
 import { createPage } from './protocol/protocol.js'
+import { listTaps, runTap } from './protocol/executor.js'
 
 console.log('[tap] kernel ready (8 primitives + CDP relay)')
 
@@ -277,6 +278,21 @@ function getPage(tabId) {
 async function handleTapCommand(method, params = {}) {
   switch (method) {
     // ---- Core ----
+
+    case 'run': {
+      const { site, name, args = {} } = params
+      if (!site || !name) throw new Error('run: missing site or name')
+      let tabId = params.tabId ? Number(params.tabId) : activeTabId
+      if (!tabId) {
+        const tab = await chrome.tabs.create({ url: 'about:blank' })
+        tabId = tab.id
+        activeTabId = tab.id
+      }
+      return await runTap(site, name, args, tabId, { cdpClick, withDebugger })
+    }
+
+    case 'list':
+      return { taps: listTaps() }
 
     case 'page': {
       const tabId = await requireTab(params)

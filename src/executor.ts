@@ -98,7 +98,8 @@ export async function runTap(
     const navUrl = typeof tap.url === "function" ? tap.url(resolvedArgs) : tap.url;
     if (navUrl) await page.nav(navUrl);
     if (tap.waitFor) await page.waitFor(tap.waitFor);
-    rawRows = (await page.eval(tap.extract.toString(), resolvedArgs)) as unknown[];
+    const expr = `(${tap.extract.toString()})(${JSON.stringify(resolvedArgs)})`;
+    rawRows = (await page.eval(expr)) as unknown[];
     if (resolvedArgs.limit) {
       rawRows = (rawRows as unknown[]).slice(0, resolvedArgs.limit as number);
     }
