@@ -87,6 +87,8 @@ export async function createPlaywrightRuntime(
         const action = (p.action as string) || "press";
         if (action === "type") {
           await page.keyboard.type(key);
+        } else if (action === "insertText") {
+          await page.keyboard.insertText(key);
         } else if (action === "press") {
           await page.keyboard.press(key);
         } else if (action === "down") {

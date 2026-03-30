@@ -43,7 +43,7 @@ export const PROTOCOL_VERSION = '1.0.0'
  * This is the runtime-specific layer. A different runtime (Android, iOS)
  * would provide a different createKernel with the same interface.
  */
-function createKernel(tabId, { cdpClick, withDebugger } = {}) {
+function createKernel(tabId, { cdpClick, withDebugger, cdp } = {}) {
   let currentUrl = ''
   const wd = withDebugger || _fallbackWithDebugger
 
@@ -113,6 +113,10 @@ function createKernel(tabId, { cdpClick, withDebugger } = {}) {
               type: 'keyUp', key: char, code: `Key${char.toUpperCase()}`
             })
           }
+        } else if (action === 'insertText') {
+          // Bulk text insertion via IME-style input — works with rich text editors
+          // (Draft.js, CodeMirror, ProseMirror) and avoids char-by-char timeout
+          await chrome.debugger.sendCommand({ tabId }, 'Input.insertText', { text: key })
         } else if (action === 'down') {
           await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
             type: 'keyDown', modifiers, ...mapped
@@ -199,6 +203,7 @@ function createKernel(tabId, { cdpClick, withDebugger } = {}) {
     // Expose for stdlib use
     _wd: wd,
     _tabId: tabId,
+    _cdp: cdp,
     _getCurrentUrl: () => currentUrl || chrome.tabs.get(tabId).then(t => t.url),
   }
 }
@@ -260,39 +265,48 @@ function createStdlib(kernel) {
 
     /**
      * Type text into an element.
-     * Stdlib: eval(focus + select) → keyboard(Backspace) → keyboard(text, 'type') → eval(trigger reactivity)
+     * CSP-safe: uses CDP DOM methods to find/focus element, insertText for bulk input.
+     * Works with standard inputs, textareas, contentEditable, and rich text editors.
      */
     async type(selector, text) {
-      await kernel.eval((sel) => {
-        const el = document.querySelector(sel)
-        if (!el) return
-        el.scrollIntoView({ block: 'center', behavior: 'instant' })
-        el.focus()
-        el.click()
-        if (el.select) el.select()
-        else if (el.contentEditable === 'true') {
-          const range = document.createRange()
-          range.selectNodeContents(el)
-          const selection = window.getSelection()
-          selection.removeAllRanges()
-          selection.addRange(range)
-        }
-      }, selector)
-      await kernel.wait(100)
+      // Step 1: Find, scroll, focus, click via CDP DOM methods (CSP-safe)
+      const doc = await kernel._cdp('DOM.getDocument', {})
+      const node = await kernel._cdp('DOM.querySelector', { nodeId: doc.root.nodeId, selector })
+      if (!node?.nodeId) throw new Error(`type: "${selector}" not found`)
+      await kernel._cdp('DOM.scrollIntoViewIfNeeded', { nodeId: node.nodeId })
+      await kernel._cdp('DOM.focus', { nodeId: node.nodeId })
+      // Click to activate (needed for contentEditable / rich text editors)
+      const box = await kernel._cdp('DOM.getBoxModel', { nodeId: node.nodeId })
+      if (box?.model?.content) {
+        const q = box.model.content
+        const cx = (q[0] + q[2] + q[4] + q[6]) / 4
+        const cy = (q[1] + q[3] + q[5] + q[7]) / 4
+        await kernel.pointer(cx, cy, 'click')
+      }
+      // Step 2: Select all + delete existing content
+      await kernel.keyboard('a', 'press', 4) // Meta+A (select all)
+      await kernel.wait(50)
       await kernel.keyboard('Backspace', 'press')
-      await kernel.keyboard(text, 'type')
-      // Trigger framework reactivity (Vue, React)
-      await kernel.eval((sel, val) => {
-        const el = document.querySelector(sel)
-        if (!el) return
-        if ('value' in el) {
-          const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
-          const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
-          if (setter) setter.call(el, val)
-        }
-        el.dispatchEvent(new Event('input', { bubbles: true }))
-        el.dispatchEvent(new Event('change', { bubbles: true }))
-      }, selector, text)
+      await kernel.wait(50)
+      // Step 3: Bulk insert text (single CDP command, works with rich text editors)
+      await kernel.keyboard(text, 'insertText')
+      // Step 4: Trigger framework reactivity (best-effort, bypasses CSP via debugger)
+      try {
+        await kernel._cdp('Runtime.evaluate', {
+          expression: `(() => {
+            const el = document.querySelector(${JSON.stringify(selector)});
+            if (!el) return;
+            if ('value' in el) {
+              const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+              const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+              if (setter) setter.call(el, ${JSON.stringify(text)});
+            }
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          })()`,
+          returnByValue: true
+        })
+      } catch { /* insertText already handled input — reactivity trigger is best-effort */ }
     },
 
     /**

@@ -277,7 +277,8 @@ async function requireTab(params = {}) {
 function getPage(tabId) {
   return createPage(tabId, {
     cdpClick,
-    withDebugger: (fn) => withDebugger(tabId, fn)
+    withDebugger: (fn) => withDebugger(tabId, fn),
+    cdp: (method, params = {}) => withDebugger(tabId, () => chrome.debugger.sendCommand({ tabId }, method, params)),
   })
 }
 
@@ -288,8 +289,18 @@ async function handleTapCommand(method, params = {}) {
     case 'page.eval': {
       const tabId = await requireTab(params)
       const page = getPage(tabId)
-      // CLI sends string expression — wrap in function for kernel.eval
-      return await page.eval(async (expr) => await (0, eval)(expr), params.expression)
+      // Wrap result in a plain object to ensure serialization across scripting boundary
+      const wrapped = await page.eval(async (expr) => {
+        try {
+          const result = await (0, eval)(expr)
+          return { __ok: true, value: JSON.parse(JSON.stringify(result ?? null)) }
+        } catch (e) {
+          return { __ok: false, error: String(e.message || e) }
+        }
+      }, params.expression)
+      if (wrapped?.__ok) return wrapped.value
+      if (wrapped?.__ok === false) throw new Error(wrapped.error)
+      return wrapped
     }
 
     case 'page.pointer': {
