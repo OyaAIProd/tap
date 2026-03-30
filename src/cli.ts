@@ -231,28 +231,42 @@ const SKILLS_REPO = "https://github.com/LeonTing1010/tap-skills.git";
 async function cmdUpdate(): Promise<void> {
   const steps: { name: string; ok: boolean; detail: string }[] = [];
 
-  // Step 1: Pull core repo
+  // Step 1: Update core — detect install mode
+  // Dev mode (deno run from repo): git pull works
+  // Installed binary (install.sh): no repo, re-run install.sh
   const repoDir = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
+  let hasRepo = false;
   try {
-    const cmd = new Deno.Command("git", {
-      args: ["-C", repoDir, "pull", "--ff-only"],
-      stdout: "piped",
-      stderr: "piped",
-    });
-    const { code, stdout } = await cmd.output();
-    const out = new TextDecoder().decode(stdout).trim();
-    steps.push({ name: "core", ok: code === 0, detail: out || "up to date" });
-  } catch (e) {
-    steps.push({ name: "core", ok: false, detail: String(e) });
-  }
+    await Deno.stat(`${repoDir}/.git`);
+    hasRepo = true;
+  } catch { /* no git repo — compiled binary from install.sh */ }
 
-  // Step 2: Check if recompile needed
-  // A running binary can't replace itself — just detect and advise.
-  // If running via `deno run`, source is always latest after git pull.
-  const binPath = Deno.execPath();
-  const isCompiled = !binPath.includes("deno");
-  if (isCompiled) {
-    steps.push({ name: "compile", ok: true, detail: "run: deno compile --allow-all --output tap src/cli.ts" });
+  if (hasRepo) {
+    try {
+      const cmd = new Deno.Command("git", {
+        args: ["-C", repoDir, "pull", "--ff-only"],
+        stdout: "piped", stderr: "piped",
+      });
+      const { code, stdout } = await cmd.output();
+      const out = new TextDecoder().decode(stdout).trim();
+      steps.push({ name: "core", ok: code === 0, detail: out || "up to date" });
+    } catch (e) {
+      steps.push({ name: "core", ok: false, detail: String(e) });
+    }
+  } else {
+    // Installed via install.sh — update by re-running the installer
+    try {
+      const cmd = new Deno.Command("sh", {
+        args: ["-c", "curl -fsSL https://raw.githubusercontent.com/LeonTing1010/tap/master/install.sh | sh"],
+        stdout: "piped", stderr: "piped",
+      });
+      const { code, stdout } = await cmd.output();
+      const out = new TextDecoder().decode(stdout).trim();
+      const lastLine = out.split("\n").pop() || "";
+      steps.push({ name: "core", ok: code === 0, detail: lastLine || "reinstalled" });
+    } catch (e) {
+      steps.push({ name: "core", ok: false, detail: String(e) });
+    }
   }
 
   // Step 3: Skills — idempotent: clone if missing, pull if exists
