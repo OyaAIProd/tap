@@ -43,7 +43,7 @@ export const PROTOCOL_VERSION = '1.0.0'
  * This is the runtime-specific layer. A different runtime (Android, iOS)
  * would provide a different createKernel with the same interface.
  */
-function createKernel(tabId, { cdpClick, withDebugger, withDebuggerNav, cdp } = {}) {
+function createKernel(tabId, { cdpClick, withDebugger, withDebuggerNav, cdp, cdpNav } = {}) {
   let currentUrl = ''
   const wd = withDebugger || _fallbackWithDebugger
   const wdNav = withDebuggerNav || wd  // falls back to wd if runtime doesn't provide it
@@ -76,29 +76,14 @@ function createKernel(tabId, { cdpClick, withDebugger, withDebuggerNav, cdp } = 
      */
     async pointer(x, y, action = 'click') {
       if (action === 'click') {
-        if (cdpClick) {
-          await cdpClick(tabId, x, y)
-        } else {
-          await _fallbackClick(tabId, x, y)
-        }
+        if (!cdpClick) throw new Error('pointer: cdpClick not injected')
+        await cdpClick(tabId, x, y)
       } else if (action === 'move') {
-        await wd(async () => {
-          await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
-            type: 'mouseMoved', x, y
-          })
-        })
+        await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
       } else if (action === 'down') {
-        await wd(async () => {
-          await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
-            type: 'mousePressed', x, y, button: 'left', clickCount: 1
-          })
-        })
+        await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 })
       } else if (action === 'up') {
-        await wd(async () => {
-          await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
-            type: 'mouseReleased', x, y, button: 'left', clickCount: 1
-          })
-        })
+        await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 })
       }
     },
 
@@ -122,39 +107,26 @@ function createKernel(tabId, { cdpClick, withDebugger, withDebuggerNav, cdp } = 
         if (cmd) commands.push(cmd)
       }
 
-      await wdNav(async () => {
-        if (action === 'type') {
-          // Type a string character by character
-          for (const char of key) {
-            await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
-              type: 'keyDown', text: char, key: char, code: `Key${char.toUpperCase()}`
-            })
-            await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
-              type: 'keyUp', key: char, code: `Key${char.toUpperCase()}`
-            })
-          }
-        } else if (action === 'insertText') {
-          // Bulk text insertion via IME-style input — works with rich text editors
-          // (Draft.js, CodeMirror, ProseMirror) and avoids char-by-char timeout
-          await chrome.debugger.sendCommand({ tabId }, 'Input.insertText', { text: key })
-        } else if (action === 'down') {
-          await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
-            type: 'keyDown', modifiers, commands, ...mapped
-          })
-        } else if (action === 'up') {
-          await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
-            type: 'keyUp', modifiers, ...mapped
-          })
-        } else {
-          // 'press' = down + up
-          await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
-            type: 'keyDown', modifiers, commands, ...mapped
-          })
-          await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
-            type: 'keyUp', modifiers, ...mapped
-          })
+      const kcdp = cdpNav || cdp
+      if (action === 'type') {
+        // Type a string character by character
+        for (const char of key) {
+          await kcdp('Input.dispatchKeyEvent', { type: 'keyDown', text: char, key: char, code: `Key${char.toUpperCase()}` })
+          await kcdp('Input.dispatchKeyEvent', { type: 'keyUp', key: char, code: `Key${char.toUpperCase()}` })
         }
-      })
+      } else if (action === 'insertText') {
+        // Bulk text insertion via IME-style input — works with rich text editors
+        // (Draft.js, CodeMirror, ProseMirror) and avoids char-by-char timeout
+        await kcdp('Input.insertText', { text: key })
+      } else if (action === 'down') {
+        await kcdp('Input.dispatchKeyEvent', { type: 'keyDown', modifiers, commands, ...mapped })
+      } else if (action === 'up') {
+        await kcdp('Input.dispatchKeyEvent', { type: 'keyUp', modifiers, ...mapped })
+      } else {
+        // 'press' = down + up
+        await kcdp('Input.dispatchKeyEvent', { type: 'keyDown', modifiers, commands, ...mapped })
+        await kcdp('Input.dispatchKeyEvent', { type: 'keyUp', modifiers, ...mapped })
+      }
     },
 
     /** Navigate to URL. Waits for load or SPA URL change. Detects error pages immediately. */
@@ -458,18 +430,12 @@ function createStdlib(kernel) {
      */
     async upload(selector, files) {
       const fileList = typeof files === 'string' ? files.split(',').map(f => f.trim()) : files
-      await kernel._wd(async () => {
-        const doc = await chrome.debugger.sendCommand({ tabId }, 'DOM.getDocument', {})
-        const node = await chrome.debugger.sendCommand({ tabId }, 'DOM.querySelector', {
-          nodeId: doc.root.nodeId, selector
-        })
-        // Strip webkitdirectory/directory attributes that block single-file upload
-        try { await chrome.debugger.sendCommand({ tabId }, 'DOM.removeAttribute', { nodeId: node.nodeId, name: 'webkitdirectory' }) } catch {}
-        try { await chrome.debugger.sendCommand({ tabId }, 'DOM.removeAttribute', { nodeId: node.nodeId, name: 'directory' }) } catch {}
-        await chrome.debugger.sendCommand({ tabId }, 'DOM.setFileInputFiles', {
-          nodeId: node.nodeId, files: fileList
-        })
-      })
+      const doc = await cdp('DOM.getDocument', {})
+      const node = await cdp('DOM.querySelector', { nodeId: doc.root.nodeId, selector })
+      // Strip webkitdirectory/directory attributes that block single-file upload
+      try { await cdp('DOM.removeAttribute', { nodeId: node.nodeId, name: 'webkitdirectory' }) } catch {}
+      try { await cdp('DOM.removeAttribute', { nodeId: node.nodeId, name: 'directory' }) } catch {}
+      await cdp('DOM.setFileInputFiles', { nodeId: node.nodeId, files: fileList })
     },
 
     /**
@@ -477,11 +443,9 @@ function createStdlib(kernel) {
      * Chrome override: uses CDP Page.handleJavaScriptDialog.
      */
     async dialog(accept = true, promptText) {
-      await kernel._wd(async () => {
-        const params = { accept }
-        if (promptText !== undefined) params.promptText = promptText
-        await chrome.debugger.sendCommand({ tabId }, 'Page.handleJavaScriptDialog', params)
-      })
+      const params = { accept }
+      if (promptText !== undefined) params.promptText = promptText
+      await cdp('Page.handleJavaScriptDialog', params)
     },
 
     /**
@@ -739,20 +703,6 @@ function waitForTabLoad(tabId, targetUrl) {
     chrome.tabs.onUpdated.addListener(onUpdated)
     setTimeout(finish, 30000)
   })
-}
-
-/** Fallback click when no cdpClick injected. */
-async function _fallbackClick(tabId, x, y) {
-  await chrome.debugger.attach({ tabId }, '1.3')
-  try {
-    const params = { x, y, button: 'left', clickCount: 1 }
-    // mouseMoved first — triggers mouseenter/mouseover (required for React synthetic events)
-    await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
-    await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mousePressed', ...params })
-    await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...params })
-  } finally {
-    await chrome.debugger.detach({ tabId }).catch(() => {})
-  }
 }
 
 /** Fallback withDebugger when none injected. */

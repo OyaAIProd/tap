@@ -304,6 +304,7 @@ function getPage(tabId) {
     withDebugger: (fn) => withDebugger(tabId, fn),
     withDebuggerNav: (fn) => withDebuggerNav(tabId, fn),
     cdp: (method, params = {}) => withDebugger(tabId, () => chrome.debugger.sendCommand({ tabId }, method, params)),
+    cdpNav: (method, params = {}) => withDebuggerNav(tabId, () => chrome.debugger.sendCommand({ tabId }, method, params)),
   })
 }
 
