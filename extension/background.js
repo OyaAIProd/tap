@@ -655,6 +655,16 @@ async function handleTapCommand(method, params = {}) {
       return page.capabilities()
     }
 
+    // ---- Tap execution (via WebSocket bridge to Deno daemon) ----
+
+    case 'list': {
+      return bridgeInvoke('list', params)
+    }
+
+    case 'run': {
+      return bridgeInvoke('run', params)
+    }
+
     default:
       throw new Error(`Unknown Tap command: ${method}`)
   }
@@ -689,6 +699,32 @@ async function handleMessage(msg) {
   // --- Internal messages (chrome.runtime: popup, omnibox, content-script) ---
   if (msg.action === 'ping') {
     return { pong: true }
+  }
+  if (msg.action === 'list') {
+    return bridgeInvoke('list', {})
+  }
+  if (msg.action === 'run') {
+    let site, name, args
+    if (msg.url) {
+      // Parse tap://site/name?args format
+      const hash = msg.url.replace('tap://', '')
+      const [path, queryString] = hash.split('?')
+      ;[site, name] = path.split('/')
+      args = {}
+      if (queryString) {
+        for (const pair of queryString.split('&')) {
+          const [k, v] = pair.split('=')
+          args[decodeURIComponent(k)] = decodeURIComponent(v || '')
+        }
+      }
+    } else if (msg.site && msg.name) {
+      site = msg.site
+      name = msg.name
+      args = msg.args || {}
+    }
+    if (site && name) {
+      return bridgeInvoke('run', { site, name, args })
+    }
   }
   if (msg.action === 'showResults') {
     const hash = msg.url.replace('tap://', '')
@@ -749,6 +785,21 @@ function connectBridge() {
     try { msg = JSON.parse(event.data) } catch { return }
 
     const { id } = msg
+
+    // Check if this is a response to our request
+    if (id && pendingCallbacks.has(id)) {
+      const pending = pendingCallbacks.get(id)
+      pendingCallbacks.delete(id)
+      clearTimeout(pending.timer)
+      if (msg.error) {
+        pending.reject(new Error(msg.error.message || msg.error))
+      } else {
+        pending.resolve(msg.result || msg)
+      }
+      return
+    }
+
+    // Otherwise, handle as a request from daemon
     try {
       const result = await handleMessage(msg)
       if (id !== undefined) bridgeSend({ id, result: result || {} })
@@ -782,7 +833,31 @@ function bridgeSend(msg) {
   }
 }
 
-// --- Helpers ---
+const pendingCallbacks = new Map()
+
+function bridgeInvoke(method, params = {}, timeout = 30000) {
+  return new Promise((resolve, reject) => {
+    if (!bridgeSocket || bridgeSocket.readyState !== WebSocket.OPEN) {
+      reject(new Error('daemon not connected — run "tap daemon" first'))
+      return
+    }
+
+    const id = Date.now()
+    const pending = { resolve, reject, timer: setTimeout(() => {
+      pendingCallbacks.delete(id)
+      reject(new Error(`bridge timeout after ${timeout}ms`))
+    }, timeout) }
+    pendingCallbacks.set(id, pending)
+
+    bridgeSocket.send(JSON.stringify({
+      protocol: 'tap/1.0',
+      type: 'tool',
+      method,
+      params,
+      id
+    }))
+  })
+}
 
 function waitForTabLoad(tabId) {
   return new Promise(resolve => {
