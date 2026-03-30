@@ -11,7 +11,7 @@
 
 import { startDaemon, EXTENSION_PORT, CLIENT_PORT } from "./daemon.ts";
 import { connectToDaemon, BridgeClient } from "./bridge.ts";
-import { listTaps, loadTap, runTap } from "./executor.ts";
+import { listTaps, loadTap, runTap, appendLog } from "./executor.ts";
 import { type RpcSend } from "./page.ts";
 import { forgeInspect } from "./forge.ts";
 import { handleInitialize, handleToolsList, handlePromptsList, handlePromptsGet, handleResourcesList, buildToolsSchema } from "./mcp.ts";
@@ -482,18 +482,32 @@ async function executeToolCall(
     }
     case "forge.inspect": {
       const url = args.url as string || "";
+      const t0 = performance.now();
       const send: RpcSend = (type, method, params) =>
         client.sendTap(type, method, params, tabId) as Promise<unknown>;
-      return await forgeInspect(url, send);
+      const result = await forgeInspect(url, send);
+      const strategies = (result as Record<string, unknown>)?.strategies;
+      await appendLog({
+        event: "forge_inspect", url,
+        ms: Math.round(performance.now() - t0),
+        strategies: Array.isArray(strategies) ? strategies.length : 0,
+      });
+      return result;
     }
     case "forge.verify": {
       const url = args.url as string;
+      const t0 = performance.now();
       await client.sendTap("cdp", "Page.navigate", { url }, tabId);
       await new Promise((r) => setTimeout(r, (args.wait_ms as number) || 2000));
-      return await client.sendTap("cdp", "Runtime.evaluate", {
+      const result = await client.sendTap("cdp", "Runtime.evaluate", {
         expression: args.expression,
         returnByValue: true,
       }, tabId);
+      await appendLog({
+        event: "forge_verify", url,
+        ms: Math.round(performance.now() - t0),
+      });
+      return result;
     }
     case "forge.save": {
       const site = args.site as string;
@@ -503,6 +517,9 @@ async function executeToolCall(
       await Deno.mkdir(dir, { recursive: true });
       const path = `${dir}/${tapName}.tap.js`;
       await Deno.writeTextFile(path, code);
+      await appendLog({
+        event: "forge_save", site, name: tapName, path,
+      });
       return `saved to ${path}`;
     }
     default: {

@@ -71,14 +71,41 @@ export async function listTaps(dirs: string[]): Promise<TapModule[]> {
   );
 }
 
+/** Append a log entry to ~/.tap/logs/tap.jsonl */
+export async function appendLog(entry: Record<string, unknown>): Promise<void> {
+  try {
+    const home = Deno.env.get("TAP_HOME") || `${Deno.env.get("HOME")}/.tap`;
+    const dir = `${home}/logs`;
+    await Deno.mkdir(dir, { recursive: true }).catch(() => {});
+    const line = JSON.stringify({ ...entry, ts: Date.now() }) + "\n";
+    await Deno.writeTextFile(`${dir}/tap.jsonl`, line, { append: true });
+  } catch { /* logging must never break execution */ }
+}
+
 /** Run a tap with a page proxy, normalize results. */
 export async function runTap(
   tap: TapModule,
   args: Record<string, unknown>,
   send: RpcSend,
+  tapDirs?: string[],
 ): Promise<TapResult> {
   const page = createPageProxy(send);
   const start = performance.now();
+
+  // Wire page.tap() for composition — load sub-taps from disk, run locally
+  if (tapDirs) {
+    page.tap = async (site: string, name: string, subArgs: Record<string, unknown> = {}) => {
+      let tapPath = "";
+      for (const dir of tapDirs) {
+        const p = `${dir}/${site}/${name}.tap.js`;
+        try { await Deno.stat(p); tapPath = p; break; } catch { /* next */ }
+      }
+      if (!tapPath) throw new Error(`tap not found: ${site}/${name}`);
+      const subTap = await loadTap(tapPath);
+      const result = await runTap(subTap, subArgs, send, tapDirs);
+      return result.rows;
+    };
+  }
 
   // Resolve args with defaults
   const resolvedArgs: Record<string, unknown> = { ...args };
@@ -91,20 +118,30 @@ export async function runTap(
   }
 
   let rawRows: unknown[];
-  if (tap.run) {
-    rawRows = (await tap.run(page, resolvedArgs)) as unknown[];
-  } else if (tap.extract) {
-    // Extract format: nav → waitFor → eval(extract) → limit
-    const navUrl = typeof tap.url === "function" ? tap.url(resolvedArgs) : tap.url;
-    if (navUrl) await page.nav(navUrl);
-    if (tap.waitFor) await page.waitFor(tap.waitFor);
-    const expr = `(${tap.extract.toString()})(${JSON.stringify(resolvedArgs)})`;
-    rawRows = (await page.eval(expr)) as unknown[];
-    if (resolvedArgs.limit) {
-      rawRows = (rawRows as unknown[]).slice(0, resolvedArgs.limit as number);
+  try {
+    if (tap.run) {
+      rawRows = (await tap.run(page, resolvedArgs)) as unknown[];
+    } else if (tap.extract) {
+      // Extract format: nav → waitFor → eval(extract) → limit
+      const navUrl = typeof tap.url === "function" ? tap.url(resolvedArgs) : tap.url;
+      if (navUrl) await page.nav(navUrl);
+      if (tap.waitFor) await page.waitFor(tap.waitFor);
+      const expr = `(${tap.extract.toString()})(${JSON.stringify(resolvedArgs)})`;
+      rawRows = (await page.eval(expr)) as unknown[];
+      if (resolvedArgs.limit) {
+        rawRows = (rawRows as unknown[]).slice(0, resolvedArgs.limit as number);
+      }
+    } else {
+      throw new Error(`Tap ${tap.site}/${tap.name} must have run() or extract()`);
     }
-  } else {
-    throw new Error(`Tap ${tap.site}/${tap.name} must have run() or extract()`);
+  } catch (e) {
+    const totalMs = Math.round(performance.now() - start);
+    await appendLog({
+      event: "run", site: tap.site, name: tap.name,
+      ms: totalMs, rows: 0, health: "error",
+      error: String(e),
+    });
+    throw e;
   }
 
   const totalMs = Math.round(performance.now() - start);
@@ -127,6 +164,22 @@ export async function runTap(
 
   // Infer columns from first row if not declared
   const columns = tap.columns ?? (rows.length > 0 ? Object.keys(rows[0]) : []);
+
+  // Health check
+  const health = tap.health;
+  let healthStatus = "none";
+  if (health) {
+    const minRows = health.min_rows ?? 0;
+    const nonEmpty = health.non_empty ?? [];
+    const pass = rows.length >= minRows &&
+      nonEmpty.every((col) => rows.some((r) => r[col] && r[col].trim() !== ""));
+    healthStatus = pass ? "pass" : "fail";
+  }
+
+  await appendLog({
+    event: "run", site: tap.site, name: tap.name,
+    ms: totalMs, rows: rows.length, health: healthStatus,
+  });
 
   return {
     columns,
