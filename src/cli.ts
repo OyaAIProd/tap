@@ -248,65 +248,76 @@ const SKILLS_REPO = "https://github.com/LeonTing1010/tap-skills.git";
  */
 async function cmdUpdate(): Promise<void> {
   const steps: { name: string; ok: boolean; detail: string }[] = [];
-
-  // Step 1: Detect environment
-  const repoDir = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
-  let hasRepo = false;
-  try { await Deno.stat(`${repoDir}/.git`); hasRepo = true; } catch {}
   const platform = `${Deno.build.os}-${Deno.build.arch}`;
+  const target = TARGETS[platform];
 
-  // Step 2: Update core
-  if (hasRepo) {
-    // Dev mode: git pull (fastest)
-    try {
-      const cmd = new Deno.Command("git", {
-        args: ["-C", repoDir, "pull", "--ff-only"],
-        stdout: "piped", stderr: "piped",
-      });
-      const { code, stdout } = await cmd.output();
-      const out = new TextDecoder().decode(stdout).trim();
-      steps.push({ name: "core", ok: code === 0, detail: `${VERSION} (dev) ${out || "up to date"}` });
-    } catch (e) {
-      steps.push({ name: "core", ok: false, detail: String(e) });
-    }
+  // 1. Core — check version, download if newer
+  if (!target) {
+    steps.push({ name: "core", ok: false, detail: `unsupported: ${platform}` });
   } else {
-    // Compiled binary: check version → download from GitHub Releases
-    steps.push(...await updateBinary(platform));
+    let latest = "";
+    try {
+      const { stdout } = await new Deno.Command("curl", {
+        args: ["-fsSL", REPO_API], stdout: "piped", stderr: "piped",
+      }).output();
+      latest = (JSON.parse(new TextDecoder().decode(stdout)).tag_name as string || "").replace(/^v/, "");
+    } catch {}
+
+    if (!latest) {
+      steps.push({ name: "core", ok: false, detail: "cannot reach GitHub" });
+    } else if (latest === VERSION) {
+      steps.push({ name: "core", ok: true, detail: `v${VERSION} (latest)` });
+    } else {
+      // Download binary + extension
+      const asset = `tap-${target}.tar.gz`;
+      const binPath = Deno.execPath();
+      const tmpDir = await Deno.makeTempDir();
+      try {
+        const baseUrl = `https://github.com/LeonTing1010/tap/releases/download/v${latest}`;
+        const { code } = await new Deno.Command("sh", {
+          args: ["-c", `cd "${tmpDir}" && curl -fsSL -o "${asset}" "${baseUrl}/${asset}" && tar -xzf "${asset}" && rm -f "${binPath}" && mv tap "${binPath}" && chmod +x "${binPath}"`],
+          stdout: "piped", stderr: "piped",
+        }).output();
+
+        if (code === 0) {
+          // Update extension
+          const extDir = `${tapHome()}/extension`;
+          await new Deno.Command("sh", {
+            args: ["-c", `curl -fsSL -o "${tmpDir}/ext.zip" "${baseUrl}/tap-extension.zip" && rm -rf "${extDir}" && mkdir -p "${extDir}" && cd "${extDir}" && unzip -qo "${tmpDir}/ext.zip"`],
+            stdout: "piped", stderr: "piped",
+          }).output();
+          steps.push({ name: "core", ok: true, detail: `v${VERSION} → v${latest}` });
+        } else {
+          steps.push({ name: "core", ok: false, detail: "download failed" });
+        }
+      } finally {
+        await Deno.remove(tmpDir, { recursive: true }).catch(() => {});
+      }
+    }
   }
 
-  // Step 3: Skills — idempotent: clone if missing, pull if exists
+  // 2. Skills — clone if missing, pull if exists
   const skillsDir = `${tapHome()}/skills`;
   try {
-    let skillsExist = false;
-    try { await Deno.stat(skillsDir); skillsExist = true; } catch { /* not installed */ }
-
-    if (skillsExist) {
-      const cmd = new Deno.Command("git", {
-        args: ["-C", skillsDir, "pull", "--ff-only"],
-        stdout: "piped", stderr: "piped",
-      });
-      const { code, stdout } = await cmd.output();
-      const out = new TextDecoder().decode(stdout).trim();
-      steps.push({ name: "skills", ok: code === 0, detail: out || "up to date" });
+    let exists = false;
+    try { await Deno.stat(skillsDir); exists = true; } catch {}
+    if (exists) {
+      const { code, stdout } = await new Deno.Command("git", {
+        args: ["-C", skillsDir, "pull", "--ff-only"], stdout: "piped", stderr: "piped",
+      }).output();
+      steps.push({ name: "skills", ok: code === 0, detail: new TextDecoder().decode(stdout).trim() || "up to date" });
     } else {
-      const cmd = new Deno.Command("git", {
-        args: ["clone", "--depth", "1", SKILLS_REPO, skillsDir],
-        stdout: "piped", stderr: "piped",
-      });
-      const { code } = await cmd.output();
-      const dirs = tapDirs();
-      const taps = await listTaps(dirs);
+      const { code } = await new Deno.Command("git", {
+        args: ["clone", "--depth", "1", SKILLS_REPO, skillsDir], stdout: "piped", stderr: "piped",
+      }).output();
+      const taps = await listTaps(tapDirs());
       steps.push({ name: "skills", ok: code === 0, detail: `installed ${taps.length} skills` });
     }
   } catch (e) {
     steps.push({ name: "skills", ok: false, detail: String(e) });
   }
 
-  // Step 4: Broadcast reload to all connected runtimes via daemon
-  // Daemon forwards to every runtime. Each runtime handles reload its own way:
-  //   Chrome Extension → chrome.runtime.reload()
-  //   Playwright → no-op (stateless, always uses latest code)
-  //   Future runtimes → their own reload mechanism
+  // 3. Runtimes — broadcast reload
   try {
     const { connectToDaemon } = await import("./bridge.ts");
     const bridge = await connectToDaemon();
@@ -321,59 +332,6 @@ async function cmdUpdate(): Promise<void> {
   console.log("tap update:");
   for (const s of steps) {
     console.log(`  ${s.ok ? "✓" : "✗"} ${s.name}: ${s.detail}`);
-  }
-}
-
-async function updateBinary(platform: string): Promise<{ name: string; ok: boolean; detail: string }[]> {
-  const target = TARGETS[platform];
-  if (!target) return [{ name: "core", ok: false, detail: `unsupported: ${platform}` }];
-
-  // 1. Check latest version from GitHub
-  let latest = "";
-  try {
-    const cmd = new Deno.Command("curl", {
-      args: ["-fsSL", REPO_API],
-      stdout: "piped", stderr: "piped",
-    });
-    const { stdout } = await cmd.output();
-    const json = JSON.parse(new TextDecoder().decode(stdout));
-    latest = (json.tag_name as string || "").replace(/^v/, "");
-  } catch {
-    return [{ name: "core", ok: false, detail: "cannot reach GitHub API" }];
-  }
-
-  // 2. Compare versions
-  if (!latest) return [{ name: "core", ok: false, detail: "no release found" }];
-  if (latest === VERSION) return [{ name: "core", ok: true, detail: `v${VERSION} (latest)` }];
-
-  // 3. Download + replace
-  const ext = platform.startsWith("windows") ? "zip" : "tar.gz";
-  const asset = `tap-${target}.${ext}`;
-  const url = `https://github.com/LeonTing1010/tap/releases/download/v${latest}/${asset}`;
-  const binPath = Deno.execPath();
-  const tmpDir = await Deno.makeTempDir();
-
-  try {
-    const script = `cd "${tmpDir}" && curl -fsSL -o "${asset}" "${url}" && tar -xzf "${asset}" && rm -f "${binPath}" && mv tap "${binPath}" && chmod +x "${binPath}"`;
-    const { code } = await new Deno.Command("sh", {
-      args: ["-c", script], stdout: "piped", stderr: "piped",
-    }).output();
-
-    if (code !== 0) {
-      return [{ name: "core", ok: false, detail: `download failed: ${url}` }];
-    }
-
-    // Update extension
-    const extUrl = `https://github.com/LeonTing1010/tap/releases/download/v${latest}/tap-extension.zip`;
-    const extDir = `${tapHome()}/extension`;
-    await new Deno.Command("sh", {
-      args: ["-c", `curl -fsSL -o "${tmpDir}/ext.zip" "${extUrl}" && rm -rf "${extDir}" && mkdir -p "${extDir}" && cd "${extDir}" && unzip -qo "${tmpDir}/ext.zip"`],
-      stdout: "piped", stderr: "piped",
-    }).output();
-
-    return [{ name: "core", ok: true, detail: `v${VERSION} → v${latest}` }];
-  } finally {
-    await Deno.remove(tmpDir, { recursive: true }).catch(() => {});
   }
 }
 
