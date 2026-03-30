@@ -157,6 +157,9 @@ switch (command) {
   case "doctor":
     await cmdDoctor();
     break;
+  case "self-update":
+    await cmdSelfUpdate();
+    break;
   case "mcp":
     await cmdMcp();
     break;
@@ -274,6 +277,72 @@ async function cmdUpdate(): Promise<void> {
   const dirs = tapDirs();
   const taps = await listTaps(dirs);
   console.log(`Updated. ${taps.length} skills available.`);
+}
+
+async function cmdSelfUpdate(): Promise<void> {
+  const steps: { name: string; ok: boolean; detail: string }[] = [];
+
+  // Step 1: Git pull the main repo
+  const repoDir = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
+  console.log(`Updating tap core from ${repoDir}...`);
+  try {
+    const cmd = new Deno.Command("git", {
+      args: ["-C", repoDir, "pull", "--ff-only"],
+      stdout: "piped",
+      stderr: "piped",
+    });
+    const { code, stdout } = await cmd.output();
+    const out = new TextDecoder().decode(stdout).trim();
+    steps.push({ name: "git pull", ok: code === 0, detail: out || "up to date" });
+  } catch (e) {
+    steps.push({ name: "git pull", ok: false, detail: String(e) });
+  }
+
+  // Step 2: Recompile CLI binary
+  console.log("Recompiling CLI binary...");
+  try {
+    const cliSrc = `${repoDir}/src/cli.ts`;
+    // Find where the current binary is
+    const binPath = Deno.execPath();
+    const tapBin = binPath.includes("deno") ? `${repoDir}/tap` : binPath;
+    const cmd = new Deno.Command("deno", {
+      args: ["compile", "--allow-all", "--output", tapBin, cliSrc],
+      stdout: "piped",
+      stderr: "piped",
+    });
+    const { code } = await cmd.output();
+    steps.push({ name: "compile CLI", ok: code === 0, detail: tapBin });
+  } catch (e) {
+    steps.push({ name: "compile CLI", ok: false, detail: String(e) });
+  }
+
+  // Step 3: Reload extension via daemon
+  console.log("Reloading Chrome extension...");
+  try {
+    const { connectToDaemon } = await import("./bridge.ts");
+    const bridge = await connectToDaemon();
+    const result = await bridge.sendTap("tool", "tap.reload", {});
+    bridge.close();
+    steps.push({ name: "extension reload", ok: true, detail: JSON.stringify(result) });
+  } catch (e) {
+    steps.push({ name: "extension reload", ok: false, detail: String(e) });
+  }
+
+  // Step 4: Update skills too
+  console.log("Updating skills...");
+  try {
+    await cmdUpdate();
+    steps.push({ name: "skills update", ok: true, detail: "done" });
+  } catch (e) {
+    steps.push({ name: "skills update", ok: false, detail: String(e) });
+  }
+
+  // Summary
+  console.log("\n  Self-update results:");
+  for (const s of steps) {
+    const icon = s.ok ? "✓" : "✗";
+    console.log(`  ${icon} ${s.name}: ${s.detail}`);
+  }
 }
 
 /** Kill any process listening on the daemon ports. */
@@ -556,7 +625,11 @@ async function cmdTap(
         return rt.send(_type, method, params);
       };
       const result = await runTap(tap, tapArgs, send, dirs);
-      status.done(`${site}/${name} — ${result.count} row(s)`);
+      if (result.healthStatus === 'fail') {
+        status.done(`${site}/${name} — ${result.count} row(s) [health: FAIL — may need re-forge]`);
+      } else {
+        status.done(`${site}/${name} — ${result.count} row(s)`);
+      }
       console.log(JSON.stringify(result, null, 2));
     } catch (e) {
       status.fail(`${site}/${name} — ${e}`);
@@ -575,7 +648,11 @@ async function cmdTap(
         return client.sendTap(type, method, params) as Promise<unknown>;
       };
       const result = await runTap(tap, tapArgs, send, dirs);
-      status.done(`${site}/${name} — ${result.count} row(s)`);
+      if (result.healthStatus === 'fail') {
+        status.done(`${site}/${name} — ${result.count} row(s) [health: FAIL — may need re-forge]`);
+      } else {
+        status.done(`${site}/${name} — ${result.count} row(s)`);
+      }
       console.log(JSON.stringify(result, null, 2));
     } catch (e) {
       status.fail(`${site}/${name} — ${e}`);
@@ -641,6 +718,9 @@ async function handleToolCall(
       tabId,
     };
   } catch (e) {
+    const errMsg = String(e);
+    // Reset session tab if it became invalid
+    const resetTab = /No tab|tab.*closed|tab.*not found/i.test(errMsg);
     return {
       response: {
         jsonrpc: "2.0",
@@ -650,7 +730,7 @@ async function handleToolCall(
           isError: true,
         },
       },
-      tabId: sessionTabId,
+      tabId: resetTab ? -1 : sessionTabId,
     };
   }
 }
