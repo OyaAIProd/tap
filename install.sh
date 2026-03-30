@@ -20,15 +20,21 @@ TMPDIR=$(mktemp -d)
 git clone --depth 1 "https://github.com/$REPO.git" "$TMPDIR/tap"
 deno compile --allow-all --output "$INSTALL_DIR/tap" "$TMPDIR/tap/src/cli.ts"
 
-# Install Chrome extension to ~/.tap/extension/
+# Install Chrome extension
 mkdir -p "$TAP_HOME"
 rm -rf "$TAP_HOME/extension"
 cp -r "$TMPDIR/tap/extension" "$TAP_HOME/extension"
+
+# Copy bundled taps to ~/.tap/taps/ (merge, don't wipe — preserves user taps)
+mkdir -p "$TAP_HOME/taps"
+cp -r "$TMPDIR/tap/extension/taps"/*/ "$TAP_HOME/taps/"
+
 rm -rf "$TMPDIR"
 
 echo ""
 echo "tap installed to $INSTALL_DIR/tap"
 echo "Chrome extension at $TAP_HOME/extension"
+echo "Bundled taps at $TAP_HOME/taps/"
 echo ""
 echo "Next: load the Chrome extension"
 echo "  1. Open chrome://extensions/"

@@ -17,9 +17,23 @@ import { handleInitialize, handleToolsList, handlePromptsList, handlePromptsGet,
 const args = Deno.args;
 const command = args[0];
 
-if (!command) {
-  console.log("usage: tap <list|daemon|mcp|site name> [--arg value ...]");
-  Deno.exit(1);
+if (!command || command === "-h" || command === "--help" || command === "help") {
+  console.log(`tap — universal protocol for AI to operate any interface
+
+Usage:
+  tap list                          list all available taps
+  tap <site> <name> [--arg value]   run a tap
+  tap daemon                        start bridge daemon
+  tap mcp                           start MCP server (stdin/stdout)
+
+Examples:
+  tap weibo hot                     微博热搜
+  tap github trending               GitHub trending repos
+  tap xiaohongshu search --keyword "AI"
+  tap weibo-to-xiaohongshu auto_publish --hot_index 1
+
+Run 'tap list' to see all available taps and their arguments.`);
+  Deno.exit(0);
 }
 
 switch (command) {
@@ -33,10 +47,23 @@ switch (command) {
     await cmdMcp();
     break;
   default:
-    // tap <site> <name> [--args]
+    // tap <site> — list taps for that site
     if (args.length < 2) {
-      console.error("usage: tap <site> <name> [--arg value ...]");
-      Deno.exit(1);
+      const site = args[0];
+      const dirs = tapDirs();
+      const allTaps = await listTaps(dirs);
+      const siteTaps = allTaps.filter((t) => t.site === site);
+      if (siteTaps.length === 0) {
+        console.error(`No taps found for site "${site}". Run 'tap list' to see all.`);
+        Deno.exit(1);
+      }
+      console.log(`Available taps for ${site}:\n`);
+      for (const t of siteTaps) {
+        const argStr = t.args ? Object.keys(t.args).map((k) => `--${k}`).join(" ") : "";
+        console.log(`  tap ${t.site} ${t.name} ${argStr}`.trimEnd());
+        if (t.description) console.log(`      ${t.description}`);
+      }
+      Deno.exit(0);
     }
     await cmdTap(args[0], args[1], parseArgs(args.slice(2)));
     break;
@@ -321,18 +348,12 @@ function tapHome(): string {
 
 function tapDirs(): string[] {
   const dirs = [`${tapHome()}/taps`];
-  // Check installed extension taps (~/.tap/extension/taps)
-  const installedExt = `${tapHome()}/extension/taps`;
-  try {
-    Deno.statSync(installedExt);
-    dirs.push(installedExt);
-  } catch { /* not installed via install.sh */ }
-  // Also check extension/taps relative to this script (dev environment)
+  // Dev environment: also scan extension/taps relative to source
   const scriptDir = new URL(".", import.meta.url).pathname;
   const extTaps = `${scriptDir}../extension/taps`;
   try {
     Deno.statSync(extTaps);
-    if (extTaps !== installedExt) dirs.push(extTaps);
+    dirs.push(extTaps);
   } catch { /* not in dev environment */ }
   return dirs;
 }
