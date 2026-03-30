@@ -285,7 +285,7 @@ export function buildToolsSchema() {
     // Page
     {
       name: "page.nav",
-      description: "Navigate to a URL. Returns {tabId, url, title}. If url differs from requested, a redirect occurred.",
+      description: "Navigate to a URL. Before calling this, check tap.list — if a tap exists for this site/task, use tap.run instead. Returns {tabId, url, title}. If url differs from requested, a redirect occurred.",
       inputSchema: {
         type: "object",
         properties: { url: { type: "string" } },
