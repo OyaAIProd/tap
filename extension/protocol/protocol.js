@@ -43,9 +43,10 @@ export const PROTOCOL_VERSION = '1.0.0'
  * This is the runtime-specific layer. A different runtime (Android, iOS)
  * would provide a different createKernel with the same interface.
  */
-function createKernel(tabId, { cdpClick, withDebugger, cdp } = {}) {
+function createKernel(tabId, { cdpClick, withDebugger, withDebuggerNav, cdp } = {}) {
   let currentUrl = ''
   const wd = withDebugger || _fallbackWithDebugger
+  const wdNav = withDebuggerNav || wd  // falls back to wd if runtime doesn't provide it
 
   return {
     /** Execute a function in the page's JS context. CSP fallback via CDP Runtime.evaluate. */
@@ -121,7 +122,7 @@ function createKernel(tabId, { cdpClick, withDebugger, cdp } = {}) {
         if (cmd) commands.push(cmd)
       }
 
-      await wd(async () => {
+      await wdNav(async () => {
         if (action === 'type') {
           // Type a string character by character
           for (const char of key) {

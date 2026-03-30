@@ -302,6 +302,7 @@ function getPage(tabId) {
   return createPage(tabId, {
     cdpClick,
     withDebugger: (fn) => withDebugger(tabId, fn),
+    withDebuggerNav: (fn) => withDebuggerNav(tabId, fn),
     cdp: (method, params = {}) => withDebugger(tabId, () => chrome.debugger.sendCommand({ tabId }, method, params)),
   })
 }
@@ -735,7 +736,7 @@ async function handleTapCommand(method, params = {}) {
 
 // --- CDP Click Helper ---
 async function cdpClick(tabId, x, y) {
-  await withDebugger(tabId, async (tid) => {
+  await withDebuggerNav(tabId, async (tid) => {
     const p = { x, y, button: 'left', clickCount: 1 }
     // mouseMoved first — triggers mouseenter/mouseover (required for React synthetic events)
     await chrome.debugger.sendCommand({ tabId: tid }, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
@@ -1000,6 +1001,24 @@ async function withDebugger(tabId, fn) {
       debuggerSessions.delete(tabId)
       await ensureDebugger(tabId)
       return await fn(tabId)
+    }
+    throw e
+  }
+}
+
+// Navigation-safe wrapper: re-attaches on detach but does NOT retry the action.
+// Use for pointer/keyboard — navigation is a valid side-effect of input events.
+// withDebugger retries (correct for expired sessions); this one doesn't (correct for nav).
+async function withDebuggerNav(tabId, fn) {
+  await ensureDebugger(tabId)
+  try {
+    return await fn(tabId)
+  } catch (e) {
+    if (String(e).includes('Detached') || String(e).includes('detached') || String(e).includes('not attached') || String(e).includes('Debugger')) {
+      // Navigation destroyed the context mid-command — re-attach to new page, don't re-execute
+      debuggerSessions.delete(tabId)
+      await ensureDebugger(tabId)
+      return {}
     }
     throw e
   }
