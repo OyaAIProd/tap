@@ -20,8 +20,11 @@ export default {
       return [{ status: "already_liked" }]
     }
 
-    // Click the like button (heart icon in note detail)
-    await page.click('[name="like-active"], .like-wrapper .like-icon, span.like-wrapper')
+    // JS click like button — CDP pointer causes detach on this page
+    await page.eval(() => {
+      const btn = document.querySelector('[name="like-active"], .like-wrapper .like-icon, span.like-wrapper')
+      btn?.click()
+    })
     await page.wait(1500)
 
     // Verify liked state

@@ -2,85 +2,62 @@ export default {
   site: "xiaohongshu",
   name: "my_notes",
   description: "读取自己发布的笔记列表及互动数据",
-  url: "https://creator.xiaohongshu.com/creator/content/manage",
+  columns: ["title", "views", "likes", "collects", "comments", "shares", "publish_date"],
+  args: { limit: { type: "int", default: 20 } },
   health: { min_rows: 1, non_empty: ["title"] },
 
-  extract: async () => {
-    // API first: creator content management endpoint
-    try {
-      const res = await fetch(
-        'https://creator.xiaohongshu.com/api/galaxy/creator/note/user/posted?page=1&page_size=30',
-        {
-          method: 'GET',
-          credentials: 'include',
-          headers: { 'Accept': 'application/json' }
-        }
-      )
-      if (res.ok) {
-        const data = await res.json()
-        const notes = data?.data?.note_list || data?.data?.notes || data?.data?.list || []
-        if (Array.isArray(notes) && notes.length > 0) {
-          return notes.map(note => ({
-            title: String(note.title || note.display_title || note.displayTitle || ''),
-            likes: String(note.liked_count ?? note.likedCount ?? note.like_count ?? note.likeCount ?? 0),
-            collects: String(note.collected_count ?? note.collectedCount ?? note.collect_count ?? note.collectCount ?? 0),
-            comments: String(note.comment_count ?? note.commentCount ?? note.comments_count ?? note.commentsCount ?? 0),
-            publish_date: String(note.publish_time ?? note.publishTime ?? note.time ?? note.create_time ?? note.createTime ?? '')
-          })).filter(item => item.title.length > 0)
-        }
-      }
-    } catch (e) { /* fall through to DOM */ }
+  async run(page, args) {
+    await page.nav("https://creator.xiaohongshu.com/new/home")
+    await page.waitFor('[class*="nav"], .menu, .sidebar, [class*="side"]', 8000)
 
-    // DOM fallback: extract from content management table
-    const rows = document.querySelectorAll(
-      '.content-item, .note-item, [class*="noteItem"], [class*="content-card"], table tbody tr, .manage-list .item'
-    )
-    if (rows.length > 0) {
-      return Array.from(rows).map(row => {
-        const title = row.querySelector(
-          '.title, [class*="title"], .note-title, a[class*="name"], .name'
-        )?.textContent?.trim() || ''
-        const stats = row.querySelectorAll(
-          '.count, .num, [class*="count"], [class*="num"], [class*="data"] span, td'
-        )
-        const statValues = Array.from(stats).map(el => el.textContent?.trim() || '0')
-        const dateEl = row.querySelector(
-          '.date, .time, [class*="date"], [class*="time"], time'
-        )
-        return {
-          title,
-          likes: statValues[0] || '0',
-          collects: statValues[1] || '0',
-          comments: statValues[2] || '0',
-          publish_date: dateEl?.textContent?.trim() || ''
-        }
-      }).filter(item => item.title.length > 0)
-    }
+    // JS click "笔记管理" — CDP pointer causes detach on creator pages
+    await page.eval(() => {
+      const el = Array.from(document.querySelectorAll('*'))
+        .find(e => e.children.length === 0 && e.innerText?.trim() === '笔记管理')
+      el?.click()
+    })
+    await page.waitFor('[class*="note-list"], [class*="noteList"], .note-item, [class*="content-list"]', 8000)
 
-    // Broadest fallback: labeled stat pairs
-    const noteEls = document.querySelectorAll('[class*="note"], [class*="content"], [class*="card"]')
-    return Array.from(noteEls).map(el => {
-      const title = el.querySelector('[class*="title"], .title, a')?.textContent?.trim() || ''
-      if (!title || title.length > 200) return null
-      const getText = (keywords) => {
-        for (const child of el.querySelectorAll('span, div, td, p')) {
-          const t = child.textContent?.trim() || ''
-          for (const kw of keywords) {
-            if (t.includes(kw)) {
-              const numMatch = t.match(/[\d,.]+[万]?/)
-              return numMatch ? numMatch[0] : '0'
-            }
+    // Extract note list from DOM
+    const notes = await page.eval(() => {
+      const text = document.body?.innerText || ""
+      const lines = text.split("\n").map(l => l.trim()).filter(Boolean)
+      const results = []
+
+      for (let i = 0; i < lines.length; i++) {
+        // Match "发布于 YYYY年MM月DD日 HH:mm"
+        if (/^发布于\s+\d{4}年/.test(lines[i])) {
+          const publishDate = lines[i].replace("发布于 ", "")
+          // Title is the line(s) before the date
+          let title = ""
+          for (let j = i - 1; j >= 0; j--) {
+            if (/^\d+$/.test(lines[j]) || /^(权限|置顶|编辑|删除|已发布|审核|未通过|全部笔记)/.test(lines[j])) break
+            title = lines[j] + (title ? " " + title : "")
+            // Don't go back more than 3 lines
+            if (i - j >= 3) break
+          }
+          // Stats are the 5 numbers after the date line
+          const stats = []
+          for (let j = i + 1; j < lines.length && stats.length < 5; j++) {
+            if (/^\d+$/.test(lines[j])) stats.push(lines[j])
+            else break
+          }
+          if (title) {
+            results.push({
+              title,
+              views: stats[0] || "0",
+              likes: stats[1] || "0",
+              collects: stats[2] || "0",
+              comments: stats[3] || "0",
+              shares: stats[4] || "0",
+              publish_date: publishDate
+            })
           }
         }
-        return '0'
       }
-      return {
-        title,
-        likes: getText(['赞', 'like']),
-        collects: getText(['收藏', 'collect']),
-        comments: getText(['评论', 'comment']),
-        publish_date: getText(['发布', '时间', 'date'])
-      }
-    }).filter(Boolean).filter(item => item.title.length > 0)
+      return results
+    })
+
+    return notes.slice(0, args.limit)
   }
 }

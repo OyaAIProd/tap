@@ -2,64 +2,54 @@ export default {
   site: "xiaohongshu",
   name: "profile",
   description: "读取小红书创作者中心的账号数据",
-  url: "https://creator.xiaohongshu.com/creator/home",
+  columns: ["followers", "following", "likes_collects", "views", "likes", "comments", "collects", "shares"],
   health: { min_rows: 1, non_empty: ["followers"] },
 
-  extract: async () => {
-    // API first: creator center uses this endpoint for dashboard stats
-    try {
-      const res = await fetch(
-        'https://creator.xiaohongshu.com/api/galaxy/creator/home/personal_info',
-        {
-          method: 'GET',
-          credentials: 'include',
-          headers: { 'Accept': 'application/json' }
+  async run(page) {
+    await page.nav("https://creator.xiaohongshu.com/new/home")
+    // Wait for stats to render — more reliable than fixed wait
+    await page.waitFor('[class*="count"], [class*="data"], [class*="overview"], .fans-count', 8000)
+
+    return await page.eval(() => {
+      const text = document.body?.innerText || ""
+
+      // Parse "label\nvalue" pairs from page text
+      const pairs = {}
+      const lines = text.split("\n").map(l => l.trim()).filter(Boolean)
+      for (let i = 0; i < lines.length - 1; i++) {
+        // "关注数" → next line is value, "粉丝数" → next line is value
+        if (/^(关注数|粉丝数|获赞与收藏)$/.test(lines[i])) {
+          pairs[lines[i]] = lines[i + 1]
         }
-      )
-      if (res.ok) {
-        const data = await res.json()
-        const info = data?.data || {}
-        if (info.fans_count !== undefined || info.fansCount !== undefined) {
-          return [{
-            followers: String(info.fans_count ?? info.fansCount ?? 0),
-            likes: String(info.liked_count ?? info.likedCount ?? info.like_count ?? info.likeCount ?? 0),
-            collects: String(info.collected_count ?? info.collectedCount ?? info.collect_count ?? info.collectCount ?? 0),
-            notes: String(info.note_count ?? info.noteCount ?? info.notes_count ?? info.notesCount ?? 0)
-          }]
+        // Stats section: "曝光数" etc in the data dashboard
+        if (/^(曝光数|观看数|点赞数|评论数|收藏数|分享数|净涨粉|新增关注|取消关注|主页访客)$/.test(lines[i])) {
+          pairs[lines[i]] = lines[i + 1]
         }
       }
-    } catch (e) { /* fall through to DOM */ }
 
-    // DOM fallback: extract stats from the creator dashboard page
-    const statEls = document.querySelectorAll(
-      '.data-info .count, .home-card .data-content .num, [class*="dataItem"] .value, [class*="data-card"] .num, [class*="statistic"] .value'
-    )
-    if (statEls.length >= 4) {
+      // Also try: "N\n粉丝数" pattern (value before label)
+      for (let i = 1; i < lines.length; i++) {
+        if (lines[i] === "粉丝数" && /^[\d,]+$/.test(lines[i - 1])) {
+          pairs["粉丝数"] = lines[i - 1]
+        }
+        if (lines[i] === "关注数" && /^[\d,]+$/.test(lines[i - 1])) {
+          pairs["关注数"] = lines[i - 1]
+        }
+        if (lines[i] === "获赞与收藏" && /^[\d,]+$/.test(lines[i - 1])) {
+          pairs["获赞与收藏"] = lines[i - 1]
+        }
+      }
+
       return [{
-        followers: statEls[0]?.textContent?.trim() || '0',
-        likes: statEls[1]?.textContent?.trim() || '0',
-        collects: statEls[2]?.textContent?.trim() || '0',
-        notes: statEls[3]?.textContent?.trim() || '0'
+        followers: pairs["粉丝数"] || "0",
+        following: pairs["关注数"] || "0",
+        likes_collects: pairs["获赞与收藏"] || "0",
+        views: pairs["曝光数"] || "0",
+        likes: pairs["点赞数"] || "0",
+        comments: pairs["评论数"] || "0",
+        collects: pairs["收藏数"] || "0",
+        shares: pairs["分享数"] || "0"
       }]
-    }
-
-    // Broader DOM fallback: look for labeled stat pairs
-    const labels = document.querySelectorAll('[class*="label"], [class*="title"], .data-name, .name')
-    const row = { followers: '0', likes: '0', collects: '0', notes: '0' }
-    for (const label of labels) {
-      const text = (label.textContent || '').trim()
-      const valueEl = label.nextElementSibling || label.parentElement?.querySelector('[class*="num"], [class*="count"], [class*="value"]')
-      const value = valueEl?.textContent?.trim() || ''
-      if (!value) continue
-      if (text.includes('粉丝')) row.followers = value
-      else if (text.includes('获赞')) row.likes = value
-      else if (text.includes('收藏')) row.collects = value
-      else if (text.includes('笔记')) row.notes = value
-    }
-    if (row.followers !== '0' || row.likes !== '0') {
-      return [row]
-    }
-
-    return [{ followers: '0', likes: '0', collects: '0', notes: '0' }]
+    })
   }
 }

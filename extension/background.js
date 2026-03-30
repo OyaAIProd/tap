@@ -328,11 +328,10 @@ async function handleTapCommand(method, params = {}) {
       }, safeExpr)
       if (wrapped?.__ok) return wrapped.value
       // CSP blocks eval() — fall back to CDP Runtime.evaluate (bypasses CSP)
-      await ensureDebugger(tabId)
-      const cdpResult = await chrome.debugger.sendCommand(
+      const cdpResult = await withDebugger(tabId, () => chrome.debugger.sendCommand(
         { tabId }, 'Runtime.evaluate',
         { expression: safeExpr, returnByValue: true, awaitPromise: true }
-      )
+      ))
       if (cdpResult?.exceptionDetails) {
         throw new Error(cdpResult.exceptionDetails.exception?.description || 'eval failed')
       }
@@ -976,20 +975,33 @@ async function ensureDebugger(tabId) {
 
   if (!session?.attached) {
     // Attach to this tab
-    await chrome.debugger.attach({ tabId }, '1.3')
-    await chrome.debugger.sendCommand({ tabId }, 'DOM.enable', {})
-    await chrome.debugger.sendCommand({ tabId }, 'Page.enable', {})
+    await chrome.debugger.attach({ tabId }, '1.3').catch(e => {
+      if (!String(e).includes('Already')) throw e
+    })
+    await chrome.debugger.sendCommand({ tabId }, 'DOM.enable', {}).catch(() => {})
+    await chrome.debugger.sendCommand({ tabId }, 'Page.enable', {}).catch(() => {})
     debuggerSessions.set(tabId, { attached: true, detachTimer: null })
     console.log(`[tap] debugger attached to ${tabId}`)
   }
 
-  // Schedule auto-detach after 500ms idle
+  // Auto-detach timer is set by withDebugger/withDebuggerNav AFTER command completes.
+  // Never set it here — it would fire mid-command and cause "Detached while handling command."
+}
+
+function scheduleDetach(tabId) {
   const s = debuggerSessions.get(tabId)
+  if (!s) return
+  if (s.detachTimer) clearTimeout(s.detachTimer)
   s.detachTimer = setTimeout(async () => {
     await chrome.debugger.detach({ tabId }).catch(() => {})
     debuggerSessions.delete(tabId)
     console.log(`[tap] debugger detached from ${tabId} (idle)`)
-  }, 500)
+  }, 2000)
+}
+
+function isDetachError(e) {
+  const s = String(e)
+  return s.includes('etached') || s.includes('not attached') || s.includes('Debugger')
 }
 
 async function withDebugger(tabId, fn) {
@@ -997,13 +1009,13 @@ async function withDebugger(tabId, fn) {
   try {
     return await fn(tabId)
   } catch (e) {
-    // Debugger detached between ensure and fn — retry once
-    if (String(e).includes('detached') || String(e).includes('not attached') || String(e).includes('Debugger')) {
-      debuggerSessions.delete(tabId)
-      await ensureDebugger(tabId)
-      return await fn(tabId)
-    }
-    throw e
+    if (!isDetachError(e)) throw e
+    // Debugger detached — re-attach and retry once
+    debuggerSessions.delete(tabId)
+    await ensureDebugger(tabId)
+    return await fn(tabId)
+  } finally {
+    scheduleDetach(tabId)
   }
 }
 
@@ -1015,13 +1027,13 @@ async function withDebuggerNav(tabId, fn) {
   try {
     return await fn(tabId)
   } catch (e) {
-    if (String(e).includes('Detached') || String(e).includes('detached') || String(e).includes('not attached') || String(e).includes('Debugger')) {
-      // Navigation destroyed the context mid-command — re-attach to new page, don't re-execute
-      debuggerSessions.delete(tabId)
-      await ensureDebugger(tabId)
-      return {}
-    }
-    throw e
+    if (!isDetachError(e)) throw e
+    // Navigation destroyed the context — re-attach to new page, don't re-execute
+    debuggerSessions.delete(tabId)
+    await ensureDebugger(tabId)
+    return {}
+  } finally {
+    scheduleDetach(tabId)
   }
 }
 

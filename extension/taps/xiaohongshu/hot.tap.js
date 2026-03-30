@@ -8,11 +8,15 @@ export default {
 
   async run(page, args) {
     await page.nav("https://www.xiaohongshu.com/explore")
-    await page.wait(4000)
+    await page.waitFor("input[placeholder*='搜索'], .search-input", 8000)
 
-    // CDP native click to reveal trending searches
-    await page.click("input[placeholder*='搜索']")
-    await page.wait(2000)
+    // JS click to reveal trending searches — CDP pointer causes detach
+    await page.eval(() => {
+      const el = document.querySelector("input[placeholder*='搜索']")
+      el?.focus()
+      el?.click()
+    })
+    await page.wait(1500)
 
     const items = await page.eval(() => {
       const items = []

@@ -29,9 +29,13 @@ export default {
       return [{ status: "already_followed", user: info.nickname }]
     }
 
-    // Click the follow button in the note detail
-    await page.click("关注")
-    await page.wait(2000)
+    // JS click — text search avoids CDP detach
+    await page.eval(() => {
+      const el = Array.from(document.querySelectorAll('*'))
+        .find(e => e.children.length === 0 && e.innerText?.trim() === '关注')
+      el?.click()
+    })
+    await page.wait(1500)
 
     // Verify follow state changed
     const after = await page.eval(() => {

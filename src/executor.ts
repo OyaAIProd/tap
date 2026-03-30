@@ -41,7 +41,11 @@ export interface TapResult {
 /** Load a single .tap.js from disk via dynamic import. */
 export async function loadTap(path: string): Promise<TapModule> {
   // Convert to file:// URL for Deno import
-  const url = path.startsWith("file://") ? path : `file://${path}`;
+  const base = path.startsWith("file://") ? path : `file://${path}`;
+  // Cache-bust with mtime so tap edits are picked up without daemon restart
+  const stat = await Deno.stat(path).catch(() => null);
+  const mtime = stat?.mtime?.getTime() ?? Date.now();
+  const url = `${base}?t=${mtime}`;
   const mod = await import(url);
   const tap = mod.default;
   if (!tap || !tap.site || !tap.name) {

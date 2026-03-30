@@ -12,16 +12,28 @@ export default {
       return [{ status: "error", comment: "missing comment arg" }]
     }
 
-    // Click comment input to activate
-    await page.click("#content-textarea")
+    // JS click — CDP pointer causes detach on this page
+    await page.eval(() => {
+      const el = document.querySelector("#content-textarea")
+      el?.focus()
+      el?.click()
+    })
     await page.wait(500)
 
-    // Type comment
-    await page.type("#content-textarea", args.comment)
-    await page.wait(500)
+    // Fill comment — execCommand for non-React textareas
+    await page.eval((text) => {
+      const el = document.querySelector("#content-textarea")
+      el?.focus()
+      document.execCommand('selectAll')
+      document.execCommand('insertText', false, text)
+    }, args.comment)
+    await page.wait(300)
 
-    // Submit — use selector to avoid matching wrong "发送" text
-    await page.click("button.submit")
+    // JS click submit — CDP pointer causes detach
+    await page.eval(() => {
+      const btn = document.querySelector("button.submit")
+      btn?.click()
+    })
     await page.wait(2000)
 
     return [{ status: "sent", comment: args.comment }]

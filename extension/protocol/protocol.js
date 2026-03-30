@@ -53,10 +53,7 @@ function createKernel(tabId, { cdpClick, withDebugger, withDebuggerNav, cdp, cdp
     async eval(fn, ...args) {
       try {
         const results = await chrome.scripting.executeScript({
-          target: { tabId },
-          func: fn,
-          args,
-          world: 'MAIN'
+          target: { tabId }, func: fn, args, world: 'MAIN'
         })
         return results?.[0]?.result
       } catch (e) {
@@ -220,6 +217,7 @@ function createKernel(tabId, { cdpClick, withDebugger, withDebuggerNav, cdp, cdp
  */
 function createStdlib(kernel) {
   const tabId = kernel._tabId
+  const cdp = kernel._cdp
 
   return {
     /**
@@ -539,8 +537,10 @@ function createStdlib(kernel) {
     async waitFor(selector, timeoutMs = 10000) {
       const start = Date.now()
       while (Date.now() - start < timeoutMs) {
-        const found = await kernel.eval((sel) => !!document.querySelector(sel), selector)
-        if (found) return
+        try {
+          const found = await kernel.eval((sel) => !!document.querySelector(sel), selector)
+          if (found) return
+        } catch { /* page mid-navigation — retry */ }
         await kernel.wait(300)
       }
       throw new Error(`waitFor: "${selector}" not found within ${timeoutMs}ms`)
@@ -626,8 +626,8 @@ function createStdlib(kernel) {
  * @param {function} opts.withDebugger - Debugger wrapper (fn) => Promise from background.js
  * @returns {object} page API object — kernel + stdlib merged into a flat namespace
  */
-export function createPage(tabId, { cdpClick, withDebugger, cdp } = {}) {
-  const kernel = createKernel(tabId, { cdpClick, withDebugger, cdp })
+export function createPage(tabId, { cdpClick, withDebugger, withDebuggerNav, cdp, cdpNav } = {}) {
+  const kernel = createKernel(tabId, { cdpClick, withDebugger, withDebuggerNav, cdp, cdpNav })
   const stdlib = createStdlib(kernel)
 
   // Merge into flat page object: kernel primitives + stdlib operations

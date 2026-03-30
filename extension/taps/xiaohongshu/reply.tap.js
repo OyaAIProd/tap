@@ -18,16 +18,28 @@ export default {
     const commentSel = `.comment-item:nth-child(${args.comment_index})`
     await page.waitFor(commentSel, 10000)
 
-    // Click "回复" on the target comment to focus the reply input
-    await page.click(`${commentSel} .reply-btn`)
+    // JS click "回复" — CDP pointer causes detach on this page
+    await page.eval((sel) => {
+      const comment = document.querySelector(sel)
+      const replyBtn = comment?.querySelector('.reply-btn')
+      replyBtn?.click()
+    }, commentSel)
     await page.wait(500)
 
-    // Type the reply text into the active input
-    await page.type("#content-textarea", args.text)
-    await page.wait(500)
+    // Fill reply — execCommand for non-React textareas
+    await page.eval((text) => {
+      const el = document.querySelector("#content-textarea")
+      el?.focus()
+      document.execCommand('selectAll')
+      document.execCommand('insertText', false, text)
+    }, args.text)
+    await page.wait(300)
 
-    // Submit the reply
-    await page.click("button.submit")
+    // JS click submit — CDP pointer causes detach
+    await page.eval(() => {
+      const btn = document.querySelector("button.submit")
+      btn?.click()
+    })
     await page.wait(2000)
 
     return [{ status: "sent" }]
