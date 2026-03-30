@@ -254,16 +254,44 @@ async function cmdUpdate(): Promise<void> {
       steps.push({ name: "core", ok: false, detail: String(e) });
     }
   } else {
-    // Compiled binary — re-run install.sh (rm + compile = safe on Unix)
+    // Compiled binary — keep a local repo at ~/.tap/repo for fast git pull
+    const localRepo = `${tapHome()}/repo`;
     try {
+      let repoExists = false;
+      try { await Deno.stat(`${localRepo}/.git`); repoExists = true; } catch {}
+
+      if (repoExists) {
+        // Fast path: git pull (~1s)
+        const cmd = new Deno.Command("git", {
+          args: ["-C", localRepo, "pull", "--ff-only"],
+          stdout: "piped", stderr: "piped",
+        });
+        await cmd.output();
+      } else {
+        // First time: shallow clone (~3s)
+        const cmd = new Deno.Command("git", {
+          args: ["clone", "--depth", "1", SKILLS_REPO.replace("tap-skills", "tap"), localRepo],
+          stdout: "piped", stderr: "piped",
+        });
+        await cmd.output();
+      }
+
+      // Compile from local repo (rm + compile = safe on Unix)
+      const binPath = Deno.execPath();
       const cmd = new Deno.Command("sh", {
-        args: ["-c", "curl -fsSL https://raw.githubusercontent.com/LeonTing1010/tap/master/install.sh | sh"],
+        args: ["-c", `rm -f "${binPath}" && deno compile --allow-all --output "${binPath}" "${localRepo}/src/cli.ts"`],
         stdout: "piped", stderr: "piped",
       });
-      const { code, stdout } = await cmd.output();
-      const out = new TextDecoder().decode(stdout).trim();
-      const installed = out.match(/tap installed to (.+)/)?.[1];
-      steps.push({ name: "core", ok: code === 0, detail: installed || "updated" });
+      const { code } = await cmd.output();
+
+      // Update extension from local repo
+      const extDir = `${tapHome()}/extension`;
+      await new Deno.Command("sh", {
+        args: ["-c", `rm -rf "${extDir}" && cp -r "${localRepo}/extension" "${extDir}"`],
+        stdout: "piped", stderr: "piped",
+      }).output();
+
+      steps.push({ name: "core", ok: code === 0, detail: code === 0 ? binPath : "compile failed" });
     } catch (e) {
       steps.push({ name: "core", ok: false, detail: String(e) });
     }
