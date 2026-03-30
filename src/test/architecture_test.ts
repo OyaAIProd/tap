@@ -176,13 +176,13 @@ Deno.test("[safety/what] Deno sources must never reference CDP method names", as
 
 // --- Quality: architecture summary ---
 
-Deno.test("[quality/what] Deno has exactly 9 source modules", async () => {
+Deno.test("[quality/what] Deno has exactly 10 source modules", async () => {
   // Why: detect accidental module sprawl — new modules should be deliberate
   const sources = await readDenoSources();
   const names = sources.map((s) => s.file).sort();
   assertEquals(
     names,
-    ["bridge.ts", "cli.ts", "daemon.ts", "executor.ts", "forge.ts", "inspect.ts", "mcp.ts", "page.ts", "runtime-playwright.ts"],
-    `Expected 9 modules, got: ${names.join(", ")}`,
+    ["bridge.ts", "cli.ts", "daemon.ts", "executor.ts", "forge.ts", "inspect.ts", "mcp.ts", "page.ts", "runtime-macos.ts", "runtime-playwright.ts"],
+    `Expected 10 modules, got: ${names.join(", ")}`,
   );
 });

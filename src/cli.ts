@@ -633,6 +633,26 @@ async function cmdTap(
     } finally {
       await rt.close();
     }
+  } else if (runtime === "macos") {
+    // --- macOS runtime: native app automation via Accessibility API ---
+    const { createMacOSRuntime } = await import("./runtime-macos.ts");
+    const rt = await createMacOSRuntime({ app: tapArgs.app as string });
+    try {
+      status.update(`${site}/${name} — running`);
+      const send: RpcSend = (_type, method, params) => {
+        const label = formatStep(_type, method, params);
+        status.update(label);
+        return rt.send(_type, method, params);
+      };
+      const result = await runTap(tap, tapArgs, send, dirs);
+      status.done(`${site}/${name} — ${result.count} row(s)`);
+      console.log(JSON.stringify(result, null, 2));
+    } catch (e) {
+      status.fail(`${site}/${name} — ${e}`);
+      Deno.exit(1);
+    } finally {
+      await rt.close();
+    }
   } else {
     // --- Extension runtime: connect through daemon ---
     const client = await connectToDaemon();
