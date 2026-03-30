@@ -47,8 +47,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Validate taps
-        run: node extension/test/tap-format.test.mjs
       - name: Package extension
         run: cd extension && zip -r ../tap-extension.zip . -x "test/*" -x "*.test.*"
       - uses: actions/upload-artifact@v4

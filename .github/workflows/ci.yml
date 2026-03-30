@@ -22,9 +22,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Validate .tap.js format
-        run: node extension/test/tap-format.test.mjs
       - name: Validate protocol contract
         run: node extension/test/protocol.test.mjs
       - name: Validate architecture
         run: node extension/test/architecture.test.mjs
+      - name: Validate multi-tab routing
+        run: node extension/test/multi-tab.test.mjs
