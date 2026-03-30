@@ -46,6 +46,7 @@ export class BridgeClient {
     method: string,
     params: Record<string, unknown> = {},
     tabId = -1,
+    timeoutMs = 60000,
   ): Promise<unknown> {
     const id = this.nextId++;
     const envelope: Record<string, unknown> = {
@@ -58,7 +59,14 @@ export class BridgeClient {
     if (tabId >= 0) envelope.tabId = tabId;
 
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`timeout: ${type}/${method} after ${timeoutMs}ms`));
+      }, timeoutMs);
+      this.pending.set(id, {
+        resolve: (v) => { clearTimeout(timer); resolve(v); },
+        reject: (e) => { clearTimeout(timer); reject(e); },
+      });
       this.ws.send(JSON.stringify(envelope));
     });
   }

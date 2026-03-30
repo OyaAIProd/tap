@@ -282,5 +282,47 @@ async function checkDuplicateExtraction() {
 
 await checkDuplicateExtraction()
 
+// ═══════════════════════════════════════════════════════════
+// Rule 6: Tool Layer Must Not Bypass Kernel
+// Why: handleTapCommand is the tool dispatch layer. It must delegate to
+//      kernel (page.eval, page.nav, etc.) — never call routeCDP or
+//      chrome.scripting/chrome.debugger directly. Bypassing the kernel
+//      breaks runtime portability and creates invisible coupling.
+// ═══════════════════════════════════════════════════════════
+
+console.log('\n  ── Rule 6: Tool Layer Must Not Bypass Kernel ──\n')
+
+{
+  // Extract handleTapCommand body
+  const start = BACKGROUND_SRC.indexOf('async function handleTapCommand(')
+  const bodyStart = BACKGROUND_SRC.indexOf('{', start)
+  // Find matching closing brace by counting braces
+  let depth = 0, end = bodyStart
+  for (let i = bodyStart; i < BACKGROUND_SRC.length; i++) {
+    if (BACKGROUND_SRC[i] === '{') depth++
+    if (BACKGROUND_SRC[i] === '}') depth--
+    if (depth === 0) { end = i + 1; break }
+  }
+  const cmdBody = BACKGROUND_SRC.substring(bodyStart, end)
+
+  test('handleTapCommand does not call routeCDP directly', () => {
+    // Why: tool layer must go through kernel (getPage), not bypass to CDP
+    assert(!cmdBody.includes('routeCDP('),
+      'handleTapCommand calls routeCDP() — must use getPage() kernel methods instead')
+  })
+
+  test('handleTapCommand does not use chrome.scripting directly', () => {
+    // Why: chrome.scripting belongs to kernel; tool layer uses page.eval()
+    assert(!cmdBody.includes('chrome.scripting.'),
+      'handleTapCommand uses chrome.scripting — must delegate to kernel via getPage()')
+  })
+
+  test('handleTapCommand does not use chrome.debugger directly', () => {
+    // Why: chrome.debugger belongs to kernel; tool layer uses page.pointer/keyboard
+    assert(!cmdBody.includes('chrome.debugger.'),
+      'handleTapCommand uses chrome.debugger — must delegate to kernel via getPage()')
+  })
+}
+
 console.log(`\n${passed + failed} constraints, ${passed} passed, ${failed} failed\n`)
 process.exit(failed > 0 ? 1 : 0)

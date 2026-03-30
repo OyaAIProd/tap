@@ -285,10 +285,10 @@ async function handleTapCommand(method, params = {}) {
     // ---- Kernel primitives — abstract names from page proxy ----
 
     case 'eval': {
-      const tabId = params.tabId ? Number(params.tabId) : activeTabId
-      if (!tabId) throw new Error('eval: no tab available')
+      const tabId = await requireTab(params)
       const page = getPage(tabId)
-      return await page.eval(params.expression, ...(params.args || []))
+      // CLI sends string expression — wrap in function for kernel.eval
+      return await page.eval(async (expr) => await (0, eval)(expr), params.expression)
     }
 
     case 'pointer': {

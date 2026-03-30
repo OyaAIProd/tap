@@ -350,6 +350,7 @@ async function cmdTap(
       console.log(JSON.stringify(result, null, 2));
     } catch (e) {
       status.fail(`${site}/${name} — ${e}`);
+      if (e instanceof Error && e.stack) console.error(e.stack);
       Deno.exit(1);
     } finally {
       client.close();
@@ -380,7 +381,7 @@ function formatStep(_type: string, method: string, params: Record<string, unknow
   if (method === "fetch") {
     try { return `fetch ${new URL(String(params.url)).hostname}`; } catch { return `fetch`; }
   }
-  return `${type}/${method}`;
+  return `${_type}/${method}`;
 }
 
 // --- MCP tool dispatch ---

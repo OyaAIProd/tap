@@ -24,12 +24,20 @@ export default {
     await page.nav("https://creator.xiaohongshu.com/publish/publish?source=official")
     await page.wait(4000)
     
-    // Step 3: 发布笔记（纯文字，无图）
-    const result = await page.tap("xiaohongshu", "publish", {
-      title: noteContent.title,
-      content: noteContent.content,
-      images: ""
-    })
+    // Step 3: 发布笔记（纯文字，跳过图片上传）
+    // 直接在当前页面填写标题和内容
+    if (noteContent.title) {
+      await page.type("input.d-text", noteContent.title)
+      await page.wait(500)
+    }
+    if (noteContent.content) {
+      await page.type(".tiptap.ProseMirror", noteContent.content)
+      await page.wait(500)
+    }
+    await page.click("发布")
+    await page.wait(5000)
+    const url = await page.eval("location.href")
+    const result = [{ status: url.includes("/publish/publish") ? "check-browser" : "published", url }]
     
     return [{
       status: result[0]?.status || "published",
