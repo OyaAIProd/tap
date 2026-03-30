@@ -121,13 +121,13 @@ Deno.test("[safety/what] forge prompt requires url and capability", () => {
   assertEquals(argNames.includes("capability"), true);
 });
 
-Deno.test("[safety/what] prompts/get forge returns workflow with forge_inspect/verify/save", () => {
+Deno.test("[safety/what] prompts/get forge returns workflow with forge.inspect/verify/save", () => {
   // Why: the prompt content IS the workflow — must mention all forge steps
   const resp = handlePromptsGet(1, { name: "forge", arguments: { url: "https://x.com", capability: "trending" } });
   const text = resp.result.messages[0].content.text;
-  assertEquals(text.includes("forge_inspect"), true);
-  assertEquals(text.includes("forge_verify"), true);
-  assertEquals(text.includes("forge_save"), true);
+  assertEquals(text.includes("forge.inspect"), true);
+  assertEquals(text.includes("forge.verify"), true);
+  assertEquals(text.includes("forge.save"), true);
 });
 
 Deno.test("[safety/what] prompts/get debug mentions logs and re-inspect", () => {
@@ -135,6 +135,25 @@ Deno.test("[safety/what] prompts/get debug mentions logs and re-inspect", () => 
   const text = resp.result.messages[0].content.text;
   assertEquals(text.includes("tap.logs") || text.includes("tap_logs"), true);
   assertEquals(text.includes("forge_inspect"), true);
+});
+
+// --- Quality: prompt retry loops ---
+
+Deno.test("[quality/what] forge prompt includes verify retry loop with diagnostics", () => {
+  // Why: without structured retry, AI gives up after 1 failure instead of self-correcting
+  const resp = handlePromptsGet(1, { name: "forge", arguments: { url: "https://x.com", capability: "trending" } });
+  const text = resp.result.messages[0].content.text;
+  assertEquals(text.includes("3"), true, "forge prompt must mention bounded retry (3)");
+  assertEquals(text.includes("diagnostics"), true, "forge prompt must reference diagnostics");
+});
+
+Deno.test("[quality/what] run prompt includes retry with diagnostics", () => {
+  // Why: run prompt is the primary entry — must guide AI through tap-first + auto-forge-retry
+  const resp = handlePromptsGet(1, { name: "run", arguments: { url: "https://x.com", task: "trending" } });
+  const text = resp.result.messages[0].content.text;
+  assertEquals(text.includes("3"), true, "run prompt must mention bounded retry");
+  assertEquals(text.includes("diagnostics"), true, "run prompt must reference diagnostics");
+  assertEquals(text.includes("similar_taps"), true, "run prompt must mention similar_taps");
 });
 
 // --- Safety: Resources ---

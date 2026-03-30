@@ -83,28 +83,31 @@ Capability: ${cap}
 
 ## Workflow
 
-1. **Inspect**: \`forge_inspect(url="${url}")\` → review framework, SSR state, APIs, strategies.
+1. **Inspect**: \`forge.inspect(url="${url}")\` → review strategies AND similar_taps for reference code.
 
-2. **Pick strategy** (priority):
-   - SSR: \`__INITIAL_STATE__\` / \`__NEXT_DATA__\` → \`page.eval(() => window.__STATE__)\`
-   - API: endpoints in api_hints → \`page.fetch(apiUrl)\`
-   - DOM: fallback → \`page.eval(() => querySelectorAll(...))\`
+2. **Pick strategy** (priority: SSR > API > DOM).
+   Use similar_taps code as a starting template — don't write from scratch.
 
-3. **Write tap** using the strategy template from forge_inspect.
+3. **Write tap** with:
+   - \`health: { min_rows: N, non_empty: ["field"] }\`
+   - \`credentials: "include"\` on all fetch calls
+   - \`String()\` coercion and \`?.\` chaining on all field access
+   - \`.filter()\` to remove empty rows
 
-4. **Verify**: \`forge_verify(url, expression)\` — check rows, columns, sample data.
+4. **Verify** (max 3 attempts per strategy):
+   \`forge.verify(url, expression)\` — check result.
+   - If \`ok: false\`, read \`diagnostics.suggestion\`:
+     - "empty" → add waitFor, check selectors, try auth
+     - "error" → fix expression syntax, check data path
+   - After 3 failures → switch to next strategy and retry.
 
-5. **Iterate** if needed:
-   - Empty data → add \`page.waitFor(selector)\` before eval
-   - Auth → \`page.nav(domain)\` first for session cookies
-
-6. **Save**: \`forge_save(site, name, code)\`
+5. **Save**: \`forge.save(site, name, code)\` — review warnings, fix and re-save if needed.
 
 ## Rules
 - API > DOM. Always prefer \`page.fetch()\` over \`page.eval(querySelectorAll)\`.
-- \`page.click()\` = CDP native. Never JS \`.click()\` in eval.
-- All row values must be strings.
-- Health contract required for read taps.`;
+- All row values must be strings. Use \`String()\` coercion.
+- Health contract required for read taps.
+- Use similar_taps from forge.inspect as reference — proven patterns beat guessing.`;
       break;
     }
     case "debug": {
@@ -141,19 +144,29 @@ URL: ${url}
 1. **Check existing taps**: \`tap.list()\` — scan for a tap matching this site and task.
 
 2. **If match found** → \`tap.run(site, name)\`. Done.
-   - If result looks wrong (empty rows, stale data) → go to debug prompt.
+   - If result looks wrong (empty rows, stale data) → go to step 3 as debug.
 
-3. **If no match** → forge a new tap:
-   - \`forge.inspect(url="${url}")\` → pick strategy (SSR > API > DOM).
-   - Write tap, \`forge.verify\` to confirm, \`forge.save\` to persist.
-   - \`tap.run\` the saved tap.
+3. **If no match** → forge a new tap (max 3 attempts per strategy):
+   a. \`forge.inspect(url="${url}")\` — review strategies AND similar_taps for reference.
+   b. Pick strategy (SSR > API > DOM). Use similar_taps code as template.
+   c. Write tap with health contract, credentials, defensive patterns.
+   d. \`forge.verify(url, expression)\` — check result.
+   e. **If verify.ok = false**: read \`diagnostics.suggestion\`:
+      - "empty" → add waitFor, check selectors, check auth
+      - "error" → fix syntax, check data path
+      After adjusting, retry verify (max 3 per strategy).
+   f. **If still failing** → switch to next strategy and restart from (c).
+   g. \`forge.save(site, name, code)\` — review warnings, fix and re-save if needed.
+   h. \`tap.run\` the saved tap to confirm end-to-end.
 
 4. **Only use page.* tools directly** when the task is one-off (no reuse value)
-   or requires interactive steps a tap can't encode (login flows, multi-step forms).
+   or requires interactive steps a tap can't encode.
 
 ## Rules
 - tap.run > page.* always. A saved tap runs zero AI at runtime — faster and stable.
-- If you forge a new tap, it is now available for all future requests on this site.`;
+- If you forge a new tap, it is now available for all future requests on this site.
+- Always check forge.verify diagnostics before giving up — they tell you what to fix.
+- Use similar_taps from forge.inspect as reference — don't write from scratch.`;
       break;
     }
     default:

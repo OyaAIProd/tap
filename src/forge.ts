@@ -6,6 +6,38 @@
  */
 
 import { createPageProxy, type RpcSend } from "./page.ts";
+import { listTaps, type TapModule } from "./executor.ts";
+
+/**
+ * Find similar taps as reference for forge. Scores by site match and strategy type.
+ * Returns top 3 with serialized code snippets for few-shot context.
+ */
+export function findSimilarTaps(
+  url: string,
+  strategies: Array<Record<string, unknown>>,
+  taps: TapModule[],
+): Array<{ site: string; name: string; strategy: string; code: string }> {
+  let hostname = "";
+  try { hostname = new URL(url).hostname.replace(/^www\./, ""); } catch { /* */ }
+  const site = hostname.split(".")[0] || "";
+  const strategyTypes = strategies.map((s) => s.type as string);
+
+  const scored = taps.map((tap) => {
+    let score = 0;
+    if (tap.site === site) score += 10;
+    const code = tap.extract?.toString() || tap.run?.toString() || "";
+    let strategy = "dom";
+    if (code.includes("fetch(") || code.includes("fetch (")) strategy = "api";
+    else if (code.includes("__NEXT_DATA__") || code.includes("__INITIAL") || code.includes("__NUXT")) strategy = "ssr";
+    if (strategyTypes.includes(strategy)) score += 5;
+    return { site: tap.site, name: tap.name, strategy, code, score };
+  });
+
+  return scored
+    .filter((s) => s.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+}
 
 /**
  * Self-contained page analysis function, serialized as a string for page.eval.
@@ -133,6 +165,24 @@ export const analyzePageContextSource = `(() => {
 })()`;
 
 /**
+ * Check tap code quality before saving. Returns warnings (non-blocking).
+ * Like a linter — save always succeeds, but AI sees what to fix.
+ */
+export function checkTapQuality(code: string): string[] {
+  const warnings: string[] = [];
+  if (!code.includes("health:") && !code.includes("health :")) {
+    warnings.push("Missing health contract — add health: { min_rows: N, non_empty: ['field'] }");
+  }
+  if (code.includes("fetch(") && !code.includes("credentials")) {
+    warnings.push("API fetch without credentials: 'include' — authenticated endpoints will fail silently");
+  }
+  if (code.includes("querySelectorAll") && !code.includes("fetch(")) {
+    warnings.push("DOM-only extraction is fragile — consider API or SSR state if available");
+  }
+  return warnings;
+}
+
+/**
  * Recommend extraction strategies based on page analysis.
  * Runs in Deno (no browser access needed — pure logic).
  */
@@ -162,11 +212,18 @@ export function recommendStrategies(
   site: "${site}", name: "TODO",
   description: "TODO",
   url: "${url}",
+  health: { min_rows: 5, non_empty: ["title"] },
   extract: () => {
     const state = window.${primaryGlobal}
     // Keys: ${topKeys}
-    const items = Array.isArray(state) ? state : Object.values(state)
-    return items.map(item => ({ /* TODO */ }))
+    // Vue/Nuxt: unwrap refs if needed
+    let data = state?.props?.pageProps || state
+    if (data?._rawValue) data = data._rawValue
+    const items = data?.items || data?.list || (Array.isArray(data) ? data : Object.values(data || {}))
+    return items.map(item => ({
+      title: String(item?.title || item?.name || ''),
+      /* TODO: map fields with String() coercion and ?. chaining */
+    })).filter(item => item.title)
   }
 }`,
     });
@@ -189,10 +246,17 @@ export function recommendStrategies(
   site: "${site}", name: "TODO",
   description: "TODO",
   url: "${url}",
+  health: { min_rows: 5, non_empty: ["title"] },
   extract: async () => {
     const res = await fetch("${bestAPI.url}", { credentials: "include" })
     const data = await res.json()
-    return data.map(item => ({ /* TODO */ }))
+    // Unwrap nested data (common: data.data.list, data.items, data.result)
+    const items = data?.data?.list || data?.data?.items || data?.data || data?.items || data
+    if (!Array.isArray(items)) return []
+    return items.map(item => ({
+      title: String(item?.title || item?.name || ''),
+      /* TODO: map fields with String() coercion and ?. chaining */
+    })).filter(item => item.title)
   }
 }`,
     });
@@ -208,14 +272,79 @@ export function recommendStrategies(
   description: "TODO",
   url: "${url}",
   waitFor: "TODO_selector",
+  health: { min_rows: 3, non_empty: ["title"] },
   extract: () => {
-    return Array.from(document.querySelectorAll("TODO_selector"))
-      .map(el => ({ /* TODO */ }))
+    const seen = new Set()
+    return Array.from(document.querySelectorAll("TODO_primary, TODO_fallback"))
+      .map((el, i) => ({
+        rank: String(i + 1),
+        title: el.querySelector('a, h3, h2, strong')?.textContent?.trim() || '',
+        /* TODO: map fields with ?.textContent?.trim() */
+      }))
+      .filter(item => {
+        if (!item.title || seen.has(item.title)) return false
+        seen.add(item.title)
+        return true
+      })
   }
 }`,
   });
 
   return strategies;
+}
+
+/**
+ * Verify extraction logic on a live page. Returns diagnostics on failure
+ * so the AI can self-correct without human intervention.
+ */
+export async function forgeVerify(
+  url: string,
+  expression: string,
+  send: RpcSend,
+  waitMs = 2000,
+): Promise<Record<string, unknown>> {
+  const page = createPageProxy(send);
+  await page.nav(url);
+  await page.wait(waitMs);
+
+  let result: unknown;
+  let evalError: string | null = null;
+  try {
+    result = await page.eval(expression);
+  } catch (e) {
+    evalError = String(e);
+    result = null;
+  }
+
+  const isEmpty = result === null || result === undefined ||
+    (Array.isArray(result) && result.length === 0);
+
+  if (!isEmpty && !evalError) {
+    return { result, ok: true };
+  }
+
+  // Gather diagnostics from the page to help AI self-correct
+  let diagnostics: Record<string, unknown> = {};
+  try {
+    diagnostics = (await page.eval(`(() => ({
+      page_url: location.href,
+      page_title: document.title,
+      ready_state: document.readyState,
+      element_count: document.querySelectorAll('*').length,
+      visible_text_sample: document.body?.innerText?.substring(0, 300) || ''
+    }))()`)) as Record<string, unknown>;
+  } catch { /* diagnostics are best-effort */ }
+
+  if (evalError) {
+    diagnostics.error_message = evalError;
+    diagnostics.suggestion =
+      "Expression threw error — check syntax and that referenced elements/APIs exist on this page.";
+  } else {
+    diagnostics.suggestion =
+      "Result is empty — check selectors, page load timing, or authentication.";
+  }
+
+  return { result, ok: false, diagnostics };
 }
 
 /**
@@ -225,6 +354,7 @@ export function recommendStrategies(
 export async function forgeInspect(
   url: string,
   send: RpcSend,
+  tapDirs?: string[],
 ): Promise<Record<string, unknown>> {
   const page = createPageProxy(send);
 
@@ -255,6 +385,15 @@ export async function forgeInspect(
 
   const strategies = recommendStrategies(analysis, url);
 
+  // Find similar taps as reference (few-shot context for AI)
+  let similar_taps: Array<{ site: string; name: string; strategy: string; code: string }> = [];
+  if (tapDirs && tapDirs.length > 0) {
+    try {
+      const allTaps = await listTaps(tapDirs);
+      similar_taps = findSimilarTaps(url, strategies, allTaps);
+    } catch { /* non-critical */ }
+  }
+
   return {
     url,
     framework: analysis.framework,
@@ -264,5 +403,6 @@ export async function forgeInspect(
     auth,
     meta: analysis.meta,
     strategies,
+    similar_taps,
   };
 }

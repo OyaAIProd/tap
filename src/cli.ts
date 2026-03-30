@@ -17,7 +17,7 @@ import { startDaemon, EXTENSION_PORT, CLIENT_PORT } from "./daemon.ts";
 import { connectToDaemon, BridgeClient, isDaemonRunning } from "./bridge.ts";
 import { listTaps, loadTap, runTap, appendLog } from "./executor.ts";
 import { createPageProxy, type RpcSend } from "./page.ts";
-import { forgeInspect } from "./forge.ts";
+import { forgeInspect, forgeVerify, checkTapQuality } from "./forge.ts";
 import { handleInspectTool } from "./inspect.ts";
 import { handleInitialize, handleToolsList, handlePromptsList, handlePromptsGet, handleResourcesList, buildToolsSchema } from "./mcp.ts";
 
@@ -799,7 +799,7 @@ async function executeToolCall(
       const url = args.url as string || "";
       const t0 = performance.now();
       const send = createBridgeSend(client, tabId);
-      const result = await forgeInspect(url, send);
+      const result = await forgeInspect(url, send, tapDirs());
       const strategies = (result as Record<string, unknown>)?.strategies;
       await appendLog({
         event: "forge_inspect", url,
@@ -812,13 +812,11 @@ async function executeToolCall(
       const url = args.url as string;
       const t0 = performance.now();
       const send = createBridgeSend(client, tabId);
-      const page = createPageProxy(send);
-      await page.nav(url);
-      await page.wait((args.wait_ms as number) || 2000);
-      const result = await page.eval(args.expression as string);
+      const result = await forgeVerify(url, args.expression as string, send, (args.wait_ms as number) || 2000);
       await appendLog({
         event: "forge_verify", url,
         ms: Math.round(performance.now() - t0),
+        ok: result.ok,
       });
       return wrap(result);
     }
@@ -826,14 +824,16 @@ async function executeToolCall(
       const site = args.site as string;
       const tapName = args.name as string;
       const code = args.code as string;
+      const warnings = checkTapQuality(code);
       const dir = `${tapHome()}/taps/${site}`;
       await Deno.mkdir(dir, { recursive: true });
       const path = `${dir}/${tapName}.tap.js`;
       await Deno.writeTextFile(path, code);
       await appendLog({
         event: "forge_save", site, name: tapName, path,
+        warnings: warnings.length,
       });
-      return wrap(`saved to ${path}`);
+      return wrap({ saved: path, warnings });
     }
     // Inspect tools — eval-based, run in Deno via page.eval()
     case "inspect.page":
