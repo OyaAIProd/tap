@@ -1,0 +1,171 @@
+/**
+ * Constraint: Tap executor (safety / what)
+ * Why: executor is the bridge between .tap.js files and the page proxy.
+ * Wrong loading, missing format support, or bad normalization = broken taps.
+ *
+ * Run: deno test deno/test/executor_test.ts --allow-read --allow-write
+ */
+
+import {
+  assertEquals,
+  assertExists,
+  assertRejects,
+} from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { listTaps, loadTap, runTap } from "../executor.ts";
+
+// --- Safety: dynamic tap loading ---
+
+Deno.test("[safety/what] loadTap dynamically imports .tap.js from disk", async () => {
+  // Why: this is THE core capability — static imports in extension are eliminated
+  const tmpDir = await Deno.makeTempDir();
+  const tapPath = `${tmpDir}/test/hello.tap.js`;
+  await Deno.mkdir(`${tmpDir}/test`, { recursive: true });
+  await Deno.writeTextFile(
+    tapPath,
+    `export default {
+      site: "test", name: "hello",
+      description: "test tap",
+      columns: ["msg"],
+      async run(page, args) { return [{ msg: "hi" }] }
+    }`,
+  );
+
+  const tap = await loadTap(tapPath);
+  assertEquals(tap.site, "test");
+  assertEquals(tap.name, "hello");
+  assertExists(tap.run);
+  await Deno.remove(tmpDir, { recursive: true });
+});
+
+Deno.test("[safety/what] loadTap rejects non-existent file", async () => {
+  // Why: clear error on missing tap beats silent failure
+  await assertRejects(
+    () => loadTap("/nonexistent/path/foo.tap.js"),
+    Error,
+  );
+});
+
+// --- Safety: tap discovery ---
+
+Deno.test("[safety/what] listTaps discovers taps from directory tree", async () => {
+  // Why: CLI `tap list` and MCP tools/list depend on discovery
+  const tmpDir = await Deno.makeTempDir();
+  await Deno.mkdir(`${tmpDir}/weibo`, { recursive: true });
+  await Deno.mkdir(`${tmpDir}/github`, { recursive: true });
+  await Deno.writeTextFile(
+    `${tmpDir}/weibo/hot.tap.js`,
+    `export default { site:"weibo", name:"hot", description:"微博热搜",
+       columns:["title"], async run(p) { return [] } }`,
+  );
+  await Deno.writeTextFile(
+    `${tmpDir}/github/trending.tap.js`,
+    `export default { site:"github", name:"trending", description:"GitHub trending",
+       columns:["repo"], async run(p) { return [] } }`,
+  );
+
+  const taps = await listTaps([tmpDir]);
+  assertEquals(taps.length, 2);
+  const sites = taps.map((t) => t.site).sort();
+  assertEquals(sites, ["github", "weibo"]);
+  await Deno.remove(tmpDir, { recursive: true });
+});
+
+Deno.test("[safety/what] listTaps merges multiple directories", async () => {
+  // Why: bundled taps (extension/taps) + user taps (~/.tap/taps) must coexist
+  const dir1 = await Deno.makeTempDir();
+  const dir2 = await Deno.makeTempDir();
+  await Deno.mkdir(`${dir1}/a`, { recursive: true });
+  await Deno.mkdir(`${dir2}/b`, { recursive: true });
+  await Deno.writeTextFile(
+    `${dir1}/a/x.tap.js`,
+    `export default { site:"a", name:"x", description:"", columns:[], async run() { return [] } }`,
+  );
+  await Deno.writeTextFile(
+    `${dir2}/b/y.tap.js`,
+    `export default { site:"b", name:"y", description:"", columns:[], async run() { return [] } }`,
+  );
+
+  const taps = await listTaps([dir1, dir2]);
+  assertEquals(taps.length, 2);
+  await Deno.remove(dir1, { recursive: true });
+  await Deno.remove(dir2, { recursive: true });
+});
+
+// --- Safety: run format execution ---
+
+Deno.test("[safety/what] runTap executes run-format tap with page proxy", async () => {
+  // Why: run format is the primary execution path for interactive taps
+  const tap = {
+    site: "test",
+    name: "run_format",
+    description: "test",
+    columns: ["col"],
+    async run(
+      _page: unknown,
+      _args: Record<string, unknown>,
+    ) {
+      return [{ col: "value" }];
+    },
+  };
+
+  const result = await runTap(tap, {}, () => Promise.resolve({}));
+  assertEquals(result.rows.length, 1);
+  assertEquals(result.rows[0].col, "value");
+  assertExists(result.timing.total_ms);
+});
+
+// --- Quality: row normalization ---
+
+Deno.test("[quality/what] runTap normalizes all row values to strings", async () => {
+  // Why: downstream consumers (CLI table, MCP) expect uniform string values
+  const tap = {
+    site: "test",
+    name: "normalize",
+    description: "test",
+    columns: ["num", "bool", "nul"],
+    async run() {
+      return [{ num: 42, bool: true, nul: null }];
+    },
+  };
+
+  const result = await runTap(tap, {}, () => Promise.resolve({}));
+  assertEquals(result.rows[0].num, "42");
+  assertEquals(result.rows[0].bool, "true");
+  assertEquals(result.rows[0].nul, "");
+});
+
+// --- Quality: column inference ---
+
+Deno.test("[quality/what] runTap infers columns from first row when not declared", async () => {
+  // Why: extract-format taps omit columns — executor must infer from data
+  const tap = {
+    site: "test",
+    name: "infer",
+    description: "test",
+    async run() {
+      return [{ title: "hello", score: "99" }];
+    },
+  };
+
+  const result = await runTap(tap, {}, () => Promise.resolve({}));
+  assertEquals(result.columns.sort(), ["score", "title"]);
+});
+
+// --- Safety: timing is always present ---
+
+Deno.test("[safety/what] runTap result includes timing.total_ms", async () => {
+  // Why: logging and health monitoring depend on timing data
+  const tap = {
+    site: "test",
+    name: "timing",
+    description: "test",
+    columns: ["x"],
+    async run() {
+      return [{ x: "1" }];
+    },
+  };
+
+  const result = await runTap(tap, {}, () => Promise.resolve({}));
+  assertEquals(typeof result.timing.total_ms, "number");
+  assertEquals(result.timing.total_ms >= 0, true);
+});

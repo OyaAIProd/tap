@@ -54,6 +54,7 @@
   "weibo/hot.tap.js",
   "weibo/open.tap.js",
   "weibo/search.tap.js",
+  "weibo-to-xiaohongshu/auto_publish.tap.js",
   "weread/highlights.tap.js",
   "weread/shelf.tap.js",
   "wikipedia/most-read.tap.js",

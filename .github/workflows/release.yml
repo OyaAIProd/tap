@@ -23,18 +23,18 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: denoland/setup-deno@v2
         with:
-          targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release --target ${{ matrix.target }}
+          deno-version: v2.x
+      - name: Compile
+        run: deno compile --allow-all --target ${{ matrix.target }} --output tap src/cli.ts
       - name: Package (unix)
         if: runner.os != 'Windows'
-        run: tar -czf tap-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release tap
+        run: tar -czf tap-${{ matrix.target }}.tar.gz tap
       - name: Package (windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path target/${{ matrix.target }}/release/tap.exe -DestinationPath tap-${{ matrix.target }}.zip
+        run: Compress-Archive -Path tap.exe -DestinationPath tap-${{ matrix.target }}.zip
       - uses: actions/upload-artifact@v4
         with:
           name: tap-${{ matrix.target }}

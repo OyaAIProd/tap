@@ -58,27 +58,38 @@ Tap follows the **POSIX design philosophy**: minimal kernel, maximal possibility
 ## Architecture
 
 ```
-Claude Code ←→ MCP (stdin/stdout) ←→ Bridge (ws://9333) ←→ Chrome Extension
-                 mcp.rs                 bridge.rs              background.js
-                 tool dispatch           WebSocket              routeCDP +
-                 + forge tools           auto-reconnect         kernel + stdlib
+Claude Code ←→ MCP (stdin/stdout) ←→ Daemon (ws) ←→ Chrome Extension
+                 cli.ts / mcp.ts       daemon.ts        background.js
+                 tool dispatch          relay :9333       kernel + stdlib
+                 + forge tools          + :9334           routeCDP
 ```
 
-**Rust binary** = thin MCP bridge (~2,200 lines). No direct browser access.
+**Deno CLI** = MCP server + CLI + daemon (~1,200 lines). Zero dependencies.
 **Chrome extension** = Runtime #1. All browser ops go through it.
 **.tap.js** = deterministic scripts using page API (8 kernel + 16 stdlib). Zero AI at runtime.
+
+### Daemon Architecture
+
+```
+Extension (Chrome) ──ws──▶ :9333 (extension port)
+CLI / MCP           ──ws──▶ :9334 (client port)
+```
+
+Daemon is a dumb WebSocket relay with ID rewriting for multiplexing.
+CLI auto-forks the daemon if not running.
 
 ## Project Structure
 
 ```
 src/
-  main.rs       — CLI: mcp, list, check, completions, <site> <name>
-  mcp.rs        — MCP server: ~35 tools over stdin/stdout JSON-RPC
-  cdp.rs        — WebSocket JSON-RPC client (bridge transport layer)
-  bridge.rs     — WebSocket server on localhost:9333 (extension connects here)
-  tap.rs        — .tap.js discovery, metadata extraction, health contracts
-  health.rs     — Output validation (min_rows, non_empty columns)
-  output.rs     — CLI output formatter (table/json/csv)
+  cli.ts          — CLI: list, daemon, mcp, <site> <name>
+  mcp.ts          — MCP tools schema (35+ tools)
+  daemon.ts       — WebSocket relay (:9333 extension, :9334 clients)
+  bridge.ts       — WebSocket client + auto-fork daemon
+  executor.ts     — Dynamic .tap.js loader + runner
+  page.ts         — Page proxy: 24 methods → RPC to extension
+  test/           — Constraint tests (44 unit + 5 e2e)
+deno.json           — Deno config (root)
 
 extension/
   manifest.json       — Chrome MV3 manifest
@@ -90,7 +101,7 @@ extension/
   tap-client.js       — Page-world client SDK (window.tap() API)
   content-script.js   — tap:// link handler + tap-client injector
   results.html/js     — Tap output display page
-  taps/               — 45 bundled .tap.js files
+  taps/               — 76 bundled .tap.js files
     manifest.json     — Auto-generated registry of all taps
   test/               — Format + API contract tests
 ```
@@ -121,29 +132,31 @@ forge.save(site, name)  → persist to ~/.tap/taps/ + extension/taps/
 ## Build & Development
 
 ```bash
-cargo build              # Build Rust binary
-cargo test               # Run all Rust tests (35)
-cargo clippy             # Lint
-cargo fmt                # Format
+# Run CLI
+deno run --allow-all src/cli.ts list
+deno run --allow-all src/cli.ts <site> <name> [--arg value]
+deno run --allow-all src/cli.ts daemon
+deno run --allow-all src/cli.ts mcp
 
-# Extension tests
-node extension/test/tap-format.test.mjs   # 447 format constraints
-node extension/test/protocol.test.mjs      # protocol contract checks
+# Compile to binary
+deno compile --allow-all --output tap src/cli.ts
+
+# Tests
+deno test --no-check --allow-all src/test/     # 44 unit + 5 e2e constraints
+node extension/test/tap-format.test.mjs          # 943 format constraints
+node extension/test/protocol.test.mjs            # 88 protocol constraints
 ```
 
 ## Verification Gates
 
 | Gate | Command | Checks |
 |------|---------|--------|
-| typecheck | `cargo check` | Rust compiler |
-| lint | `cargo clippy -- -D warnings` | Zero warnings |
-| format | `cargo fmt -- --check` | Rustfmt |
-| rust tests | `cargo test` | 47 unit tests |
-| tap format | `node extension/test/tap-format.test.mjs` | 933 constraints |
-| protocol | `node extension/test/protocol.test.mjs` | 86 constraints (kernel + stdlib + versioning) |
+| deno tests | `deno test --no-check --allow-all src/test/` | 44 unit constraints |
+| tap format | `node extension/test/tap-format.test.mjs` | 943 constraints |
+| protocol | `node extension/test/protocol.test.mjs` | 88 constraints |
 
 ## Test Conventions
 
-Rust: `#[cfg(test)] mod tests` inside each source file. Filter: `cargo test tap::tests`.
+Deno: `Deno.test()` in `src/test/`. Classified by `[safety/what]` or `[quality/what]`.
 
 Extension: Node.js test scripts in `extension/test/`. Constraint-driven — each test asserts a property that must hold across all taps or the page API.

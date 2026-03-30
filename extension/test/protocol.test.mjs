@@ -297,22 +297,44 @@ test('protocol.js does not import from background.js (no upward dependency)', ()
   assert(!src.includes("from './background"), 'protocol must not import from background.js')
 })
 
-test('Rust mcp.rs tool names all use category.method format', () => {
+test('Deno mcp.ts tool names all use category.method format', () => {
   // Why: unified naming convention — every tool must have a dot separator
-  const mcpSrc = readFileSync(new URL('../../src/mcp.rs', import.meta.url), 'utf-8')
-  // Extract tool names only from the tools_schema() function
-  const schemaSection = mcpSrc.substring(mcpSrc.indexOf('fn tools_schema()'), mcpSrc.indexOf('async fn handle_tool_call'))
-  const toolNames = [...schemaSection.matchAll(/"name":\s*"([^"]+)"/g)].map(m => m[1])
+  const mcpSrc = readFileSync(new URL('../../deno/mcp.ts', import.meta.url), 'utf-8')
+  // Extract only from buildToolsSchema() function (not serverInfo or other metadata)
+  const schemaSection = mcpSrc.substring(mcpSrc.indexOf('function buildToolsSchema'))
+  const toolNames = [...schemaSection.matchAll(/name:\s*"([^"]+)"/g)].map(m => m[1])
+  assert(toolNames.length >= 20, `expected 20+ tools, got ${toolNames.length}`)
   for (const name of toolNames) {
     assert(name.includes('.'), `MCP tool "${name}" missing category.method dot — expected format like "page.click"`)
   }
 })
 
-test('Rust relay_to_extension strips category prefix', () => {
-  // Why: extension handlers use bare method names, Rust must strip "page." / "inspect." etc.
-  const mcpSrc = readFileSync(new URL('../../src/mcp.rs', import.meta.url), 'utf-8')
-  const relayFn = mcpSrc.substring(mcpSrc.indexOf('fn relay_to_extension'))
-  assert(relayFn.includes("split('.')"), 'relay_to_extension must strip category prefix via split')
+// ── Daemon Architecture Constraints ──
+
+test('Extension reconnect prevents cascade via identity check', () => {
+  // Why: when daemon replaces old connection, the old WebSocket's onclose fires.
+  // Without identity check (bridgeSocket === ws), each close triggers a new connect,
+  // which triggers another close, creating an infinite reconnect cascade.
+  const bgSrc = readFileSync(new URL('../../extension/background.js', import.meta.url), 'utf-8')
+  const connectFn = bgSrc.substring(bgSrc.indexOf('function connectBridge()'))
+  assert(connectFn.includes('bridgeSocket === ws'),
+    'onclose must check bridgeSocket === ws to prevent reconnect cascade')
+})
+
+test('Extension detaches old socket before reconnecting', () => {
+  // Why: old socket's onclose/onerror must be nullified before creating new connection,
+  // otherwise stale events from the old socket trigger spurious reconnects.
+  const bgSrc = readFileSync(new URL('../../extension/background.js', import.meta.url), 'utf-8')
+  const connectFn = bgSrc.substring(bgSrc.indexOf('function connectBridge()'))
+  assert(connectFn.includes('onclose = null'),
+    'connectBridge must null out old socket onclose before reconnecting')
+})
+
+test('Deno cli.ts convertToolName strips category prefix', () => {
+  // Why: extension handlers use bare method names, Deno must strip "page." / "inspect." etc.
+  const cliSrc = readFileSync(new URL('../../deno/cli.ts', import.meta.url), 'utf-8')
+  const fn = cliSrc.substring(cliSrc.indexOf('function convertToolName'))
+  assert(fn.includes('indexOf(".")'), 'convertToolName must strip category prefix via indexOf')
 })
 
 console.log(`\n${passed + failed} constraints, ${passed} passed, ${failed} failed\n`)

@@ -7,17 +7,15 @@ on:
     branches: [master]
 
 jobs:
-  rust:
+  deno:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: denoland/setup-deno@v2
         with:
-          components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo fmt -- --check
-      - run: cargo clippy -- -D warnings
-      - run: cargo test
+          deno-version: v2.x
+      - name: Deno unit tests
+        run: deno test --no-check --allow-all src/test/page_test.ts src/test/executor_test.ts src/test/daemon_test.ts src/test/mcp_test.ts
 
   extension:
     runs-on: ubuntu-latest

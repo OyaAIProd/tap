@@ -2,7 +2,7 @@
  * Tap v2 — Background Service Worker
  *
  * One extension, three interfaces:
- *   1. WebSocket bridge — Rust MCP server sends CDP commands + tap actions
+ *   1. WebSocket bridge — Deno daemon relays CDP commands + tap actions
  *   2. chrome.runtime.onMessage — popup UI
  *   3. chrome.runtime.onMessageExternal — web pages, other extensions
  *
@@ -72,6 +72,7 @@ import c_weibo_detail from './taps/weibo/detail.tap.js'
 import c_weibo_hot from './taps/weibo/hot.tap.js'
 import c_weibo_open from './taps/weibo/open.tap.js'
 import c_weibo_search from './taps/weibo/search.tap.js'
+import c_weibo_to_xiaohongshu_auto_publish from './taps/weibo-to-xiaohongshu/auto_publish.tap.js'
 import c_weread_highlights from './taps/weread/highlights.tap.js'
 import c_weread_shelf from './taps/weread/shelf.tap.js'
 import c_wikipedia_most_read from './taps/wikipedia/most-read.tap.js'
@@ -109,6 +110,7 @@ const ALL_TAPS = [
   c_toutiao_hot, c_v2ex_hot, c_wechat_detail, c_wechat_open, c_wechat_search,
   c_weibo_comment, c_weibo_detail, c_weibo_hot,
   c_weibo_open, c_weibo_search,
+  c_weibo_to_xiaohongshu_auto_publish,
   c_weread_highlights, c_weread_shelf, c_wikipedia_most_read,
   c_x_post, c_x_search, c_x_trending, c_xiaohongshu_comment, c_xiaohongshu_detail, c_xiaohongshu_hot,
   c_xiaohongshu_nav_publish, c_xiaohongshu_open, c_xiaohongshu_post_detail, c_xiaohongshu_publish,
@@ -146,7 +148,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 })
 
 // --- CDP Command Router ---
-// Speaks the same protocol as the Rust CdpClient.send(method, params).
+// Speaks JSON-RPC: { id, method, params } → { id, result } or { id, error }.
 // Scripting mode by default, debugger only for Input/DOM/Accessibility.
 
 async function routeCDP(method, params = {}) {
@@ -981,26 +983,36 @@ chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
   return true
 })
 
-// --- WebSocket Bridge (for Rust MCP server) ---
+// --- WebSocket Bridge (for Deno daemon) ---
 
 const BRIDGE_PORT = 9333
 let bridgeSocket = null
 let reconnectDelay = 1000
 
 function connectBridge() {
+  // Detach old socket to prevent stale close/error events triggering reconnect cascade
+  if (bridgeSocket) {
+    bridgeSocket.onclose = null
+    bridgeSocket.onerror = null
+    if (bridgeSocket.readyState <= WebSocket.OPEN) bridgeSocket.close()
+  }
+
+  let ws
   try {
-    bridgeSocket = new WebSocket(`ws://127.0.0.1:${BRIDGE_PORT}`)
+    ws = new WebSocket(`ws://127.0.0.1:${BRIDGE_PORT}`)
   } catch {
     scheduleBridgeReconnect()
     return
   }
+  bridgeSocket = ws
 
-  bridgeSocket.onopen = () => {
+  ws.onopen = () => {
     console.log(`[tap] bridge connected (ws://127.0.0.1:${BRIDGE_PORT})`)
     reconnectDelay = 1000
+    bridgeSend({ protocol: 'tap/1.0', id: 0, type: 'bridge', method: 'ping', params: {} })
   }
 
-  bridgeSocket.onmessage = async (event) => {
+  ws.onmessage = async (event) => {
     let msg
     try { msg = JSON.parse(event.data) } catch { return }
 
@@ -1013,17 +1025,21 @@ function connectBridge() {
     }
   }
 
-  bridgeSocket.onclose = () => {
-    console.log('[tap] bridge disconnected')
-    scheduleBridgeReconnect()
+  ws.onclose = () => {
+    if (bridgeSocket === ws) {
+      console.log('[tap] bridge disconnected')
+      scheduleBridgeReconnect()
+    }
   }
 
-  bridgeSocket.onerror = () => scheduleBridgeReconnect()
+  ws.onerror = () => {
+    if (bridgeSocket === ws) scheduleBridgeReconnect()
+  }
 }
 
 function scheduleBridgeReconnect() {
   setTimeout(() => {
-    reconnectDelay = Math.min(reconnectDelay * 2, 30000)
+    reconnectDelay = Math.min(reconnectDelay * 2, 5000)
     connectBridge()
   }, reconnectDelay)
 }

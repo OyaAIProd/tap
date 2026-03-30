@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Tap",
   "version": "0.3.0",
-  "description": "Make every website programmable by AI — tap:// protocol for the web",
+  "description": "The protocol for AI to tap into any website.",
   "permissions": [
     "debugger",
     "activeTab",
