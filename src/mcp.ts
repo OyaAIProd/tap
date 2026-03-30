@@ -162,13 +162,13 @@ export function buildToolsSchema() {
     // Tap operations
     {
       name: "tap.list",
-      description: "List all available taps.",
+      description: "List all available taps. Check here first before using page.* tools — a pre-built tap is faster and more reliable than manual page operations.",
       inputSchema: { type: "object", properties: {} },
     },
     {
       name: "tap.run",
       description:
-        "Run a tap and return structured data. Example: tap.run({site: 'weibo', name: 'hot'})",
+        "Run a tap and return structured data. Returns {columns, rows, count, timing}. If rows is empty or data looks wrong, the tap may be broken — use forge.inspect to re-forge it.",
       inputSchema: {
         type: "object",
         properties: {
@@ -192,7 +192,7 @@ export function buildToolsSchema() {
     },
     {
       name: "tap.logs",
-      description: "Read recent log entries.",
+      description: "Read recent run/forge events. Use to diagnose failures — check error fields, row counts, and timing. If a tap keeps failing, re-forge it.",
       inputSchema: {
         type: "object",
         properties: {
@@ -215,7 +215,7 @@ export function buildToolsSchema() {
     // Forge
     {
       name: "forge.inspect",
-      description: "One-shot page analysis for tap forging.",
+      description: "Analyze a page for tap forging: detects framework, SSR state, APIs, and generates extraction strategies. Also use this to re-forge a broken tap — inspect the page again to find what changed.",
       inputSchema: {
         type: "object",
         properties: { url: { type: "string" } },
@@ -223,7 +223,7 @@ export function buildToolsSchema() {
     },
     {
       name: "forge.verify",
-      description: "Test tap extraction logic on a URL.",
+      description: "Test extraction logic live on a URL. Returns the actual data — verify columns and row count before saving. If the result is wrong, adjust the expression and verify again.",
       inputSchema: {
         type: "object",
         properties: {
@@ -236,7 +236,7 @@ export function buildToolsSchema() {
     },
     {
       name: "forge.save",
-      description: "Save a .tap.js file to disk.",
+      description: "Save a .tap.js file to disk. After saving, tap.run can execute it forever with zero AI. Use forge.verify first to confirm the logic works.",
       inputSchema: {
         type: "object",
         properties: {
@@ -250,7 +250,7 @@ export function buildToolsSchema() {
     // Page
     {
       name: "page.nav",
-      description: "Navigate to a URL.",
+      description: "Navigate to a URL. Returns {tabId, url, title}. If url differs from requested, a redirect occurred.",
       inputSchema: {
         type: "object",
         properties: { url: { type: "string" } },
@@ -259,7 +259,7 @@ export function buildToolsSchema() {
     },
     {
       name: "page.click",
-      description: "Click on an element by text or CSS selector.",
+      description: "Click on an element by visible text or CSS selector. Returns the resulting url and title. Use page.find first if unsure whether the element exists.",
       inputSchema: {
         type: "object",
         properties: { target: { type: "string" } },
@@ -268,7 +268,7 @@ export function buildToolsSchema() {
     },
     {
       name: "page.type",
-      description: "Type text into an input.",
+      description: "Type text into an input. Auto-detects editor type (standard input, contentEditable, CodeMirror, Draft.js, ProseMirror). Returns the current value — if it doesn't match your input, try page.eval with execCommand('insertText') or the editor's native API.",
       inputSchema: {
         type: "object",
         properties: {
@@ -293,7 +293,7 @@ export function buildToolsSchema() {
     },
     {
       name: "page.eval",
-      description: "Evaluate JavaScript in the browser.",
+      description: "Evaluate JavaScript in the browser. The universal escape hatch — use when other page.* tools can't do what you need. Falls back to CDP Runtime.evaluate on CSP-strict sites.",
       inputSchema: {
         type: "object",
         properties: { expression: { type: "string" } },
@@ -302,7 +302,7 @@ export function buildToolsSchema() {
     },
     {
       name: "page.find",
-      description: "Find elements by visible text.",
+      description: "Find elements by visible text. Returns position, selector, and bounding box. Use before click/type to verify the target exists. Works on CSP-strict sites.",
       inputSchema: {
         type: "object",
         properties: {
