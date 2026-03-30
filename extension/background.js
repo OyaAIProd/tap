@@ -353,7 +353,8 @@ async function handleTapCommand(method, params = {}) {
       }
       const page = getPage(tabId)
       await page.nav(params.url)
-      return { tabId }
+      const tab = await chrome.tabs.get(tabId)
+      return { tabId, url: tab.url, title: tab.title }
     }
 
     case 'page.wait': {
@@ -395,19 +396,20 @@ async function handleTapCommand(method, params = {}) {
       await page.click(target)
       await new Promise(r => setTimeout(r, 150))
       const fb = await pageFeedback(tabId)
-      const nav = fb.url !== prevUrl ? ' (navigated)' : ''
-      return formatFeedback(`clicked "${target}"${nav}`, fb)
+      const navigated = fb.url !== prevUrl
+      return formatFeedback(`clicked "${target}"${navigated ? ' (navigated)' : ''}`, fb)
     }
 
     case 'page.type': {
       const tabId = await requireTab(params)
       if (!params.selector || params.text === undefined) throw new Error('type: missing selector or text')
       const page = getPage(tabId)
-      await page.type(params.selector, params.text)
-      const val = await inputValue(tabId, params.selector)
+      const result = await page.type(params.selector, params.text)
       const fb = await pageFeedback(tabId)
+      // Protocol returns structured verification — pass through to Agent
       let msg = `typed ${params.text.length} chars into "${params.selector}"`
-      if (val !== null) msg += `\n  → value: "${val}"`
+      if (result?.value !== undefined) msg += `\n  → value: "${result.value}"`
+      if (result?.match === false) msg += `\n  → match: false (value differs from input)`
       return formatFeedback(msg, fb)
     }
 

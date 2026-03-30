@@ -360,6 +360,22 @@ function createStdlib(kernel) {
         await kernel.wait(50)
         await kernel.keyboard(text, 'insertText')
       }
+
+      // Postcondition: read back value and verify
+      try {
+        const verify = await kernel._cdp('Runtime.evaluate', {
+          expression: `(() => {
+            const el = document.querySelector(${JSON.stringify(selector)});
+            if (!el) return { value: null, match: false };
+            const v = el.value ?? el.textContent ?? '';
+            const actual = v.length > 200 ? v.slice(0, 200) : v;
+            const expected = ${JSON.stringify(text.slice(0, 200))};
+            return { value: actual, match: actual === expected || v.length >= ${Math.min(text.length, 200)} };
+          })()`,
+          returnByValue: true
+        })
+        return verify?.result?.value ?? {}
+      } catch { return {} }
     },
 
     /**
