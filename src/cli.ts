@@ -262,8 +262,8 @@ async function cmdUpdate(): Promise<void> {
       });
       const { code, stdout } = await cmd.output();
       const out = new TextDecoder().decode(stdout).trim();
-      const lastLine = out.split("\n").pop() || "";
-      steps.push({ name: "core", ok: code === 0, detail: lastLine || "updated" });
+      const installed = out.match(/tap installed to (.+)/)?.[1];
+      steps.push({ name: "core", ok: code === 0, detail: installed || "updated" });
     } catch (e) {
       steps.push({ name: "core", ok: false, detail: String(e) });
     }
