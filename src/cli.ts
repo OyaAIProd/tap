@@ -254,44 +254,51 @@ async function cmdUpdate(): Promise<void> {
       steps.push({ name: "core", ok: false, detail: String(e) });
     }
   } else {
-    // Compiled binary — keep a local repo at ~/.tap/repo for fast git pull
-    const localRepo = `${tapHome()}/repo`;
+    // Compiled binary — download pre-built from GitHub Releases (no Deno needed)
     try {
-      let repoExists = false;
-      try { await Deno.stat(`${localRepo}/.git`); repoExists = true; } catch {}
+      const target = {
+        "darwin-aarch64": "aarch64-apple-darwin",
+        "darwin-x86_64": "x86_64-apple-darwin",
+        "linux-x86_64": "x86_64-unknown-linux-gnu",
+        "windows-x86_64": "x86_64-pc-windows-msvc",
+      }[`${Deno.build.os}-${Deno.build.arch}`];
 
-      if (repoExists) {
-        // Fast path: git pull (~1s)
-        const cmd = new Deno.Command("git", {
-          args: ["-C", localRepo, "pull", "--ff-only"],
-          stdout: "piped", stderr: "piped",
-        });
-        await cmd.output();
-      } else {
-        // First time: shallow clone (~3s)
-        const cmd = new Deno.Command("git", {
-          args: ["clone", "--depth", "1", SKILLS_REPO.replace("tap-skills", "tap"), localRepo],
-          stdout: "piped", stderr: "piped",
-        });
-        await cmd.output();
-      }
+      if (!target) throw new Error(`unsupported platform: ${Deno.build.os}-${Deno.build.arch}`);
 
-      // Compile from local repo (rm + compile = safe on Unix)
+      const isWindows = Deno.build.os === "windows";
+      const ext = isWindows ? "zip" : "tar.gz";
+      const asset = `tap-${target}.${ext}`;
+      const url = `https://github.com/LeonTing1010/tap/releases/latest/download/${asset}`;
       const binPath = Deno.execPath();
+      const tmpDir = await Deno.makeTempDir();
+
+      // Download + extract + replace (rm before mv = safe on Unix)
+      const script = isWindows
+        ? `cd "${tmpDir}" && curl -fsSL -o ${asset} "${url}" && tar -xzf ${asset}`
+        : `cd "${tmpDir}" && curl -fsSL -o ${asset} "${url}" && tar -xzf ${asset} && rm -f "${binPath}" && mv tap "${binPath}" && chmod +x "${binPath}"`;
+
       const cmd = new Deno.Command("sh", {
-        args: ["-c", `rm -f "${binPath}" && deno compile --allow-all --output "${binPath}" "${localRepo}/src/cli.ts"`],
+        args: ["-c", script],
         stdout: "piped", stderr: "piped",
       });
-      const { code } = await cmd.output();
+      const { code, stderr } = await cmd.output();
+      await Deno.remove(tmpDir, { recursive: true }).catch(() => {});
 
-      // Update extension from local repo
-      const extDir = `${tapHome()}/extension`;
-      await new Deno.Command("sh", {
-        args: ["-c", `rm -rf "${extDir}" && cp -r "${localRepo}/extension" "${extDir}"`],
-        stdout: "piped", stderr: "piped",
-      }).output();
-
-      steps.push({ name: "core", ok: code === 0, detail: code === 0 ? binPath : "compile failed" });
+      if (code === 0) {
+        // Also update extension
+        const extUrl = "https://github.com/LeonTing1010/tap/releases/latest/download/tap-extension.zip";
+        const extDir = `${tapHome()}/extension`;
+        const extTmp = await Deno.makeTempDir();
+        await new Deno.Command("sh", {
+          args: ["-c", `curl -fsSL -o "${extTmp}/ext.zip" "${extUrl}" && rm -rf "${extDir}" && mkdir -p "${extDir}" && cd "${extDir}" && unzip -qo "${extTmp}/ext.zip"`],
+          stdout: "piped", stderr: "piped",
+        }).output();
+        await Deno.remove(extTmp, { recursive: true }).catch(() => {});
+        steps.push({ name: "core", ok: true, detail: binPath });
+      } else {
+        const err = new TextDecoder().decode(stderr).trim();
+        steps.push({ name: "core", ok: false, detail: err || "download failed" });
+      }
     } catch (e) {
       steps.push({ name: "core", ok: false, detail: String(e) });
     }
