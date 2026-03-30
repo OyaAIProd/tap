@@ -12,7 +12,7 @@
  */
 
 import { startDaemon, EXTENSION_PORT, CLIENT_PORT } from "./daemon.ts";
-import { connectToDaemon, BridgeClient } from "./bridge.ts";
+import { connectToDaemon, BridgeClient, isDaemonRunning } from "./bridge.ts";
 import { listTaps, loadTap, runTap, appendLog } from "./executor.ts";
 import { createPageProxy, type RpcSend } from "./page.ts";
 import { forgeInspect } from "./forge.ts";
@@ -118,7 +118,13 @@ if (!command || command === "-h" || command === "--help" || command === "help") 
 Usage:
   tap list                          list all available taps
   tap <site> <name> [--arg value]   run a tap
-  tap daemon                        start bridge daemon
+  tap daemon                        start bridge daemon (foreground)
+  tap daemon stop                   stop running daemon
+  tap daemon restart                restart daemon (background)
+  tap daemon status                 check daemon status
+  tap doctor                        diagnose setup issues
+  tap install                       install community skills
+  tap update                        update community skills
   tap mcp                           start MCP server (stdin/stdout)
 
 Options:
@@ -146,7 +152,10 @@ switch (command) {
     await cmdUpdate();
     break;
   case "daemon":
-    await cmdDaemon();
+    await cmdDaemon(args[1]);
+    break;
+  case "doctor":
+    await cmdDoctor();
     break;
   case "mcp":
     await cmdMcp();
@@ -267,7 +276,75 @@ async function cmdUpdate(): Promise<void> {
   console.log(`Updated. ${taps.length} skills available.`);
 }
 
-async function cmdDaemon(): Promise<void> {
+/** Kill any process listening on the daemon ports. */
+async function killDaemon(): Promise<boolean> {
+  let killed = false;
+  for (const port of [EXTENSION_PORT, CLIENT_PORT]) {
+    try {
+      const cmd = new Deno.Command("lsof", { args: ["-ti", `:${port}`], stdout: "piped", stderr: "null" });
+      const { stdout } = await cmd.output();
+      const pids = new TextDecoder().decode(stdout).trim().split("\n").filter(Boolean);
+      for (const pid of pids) {
+        try { Deno.kill(Number(pid), "SIGTERM"); killed = true; } catch { /* already gone */ }
+      }
+    } catch { /* lsof not found or no process */ }
+  }
+  if (killed) await new Promise((r) => setTimeout(r, 300));
+  return killed;
+}
+
+/** Start daemon in background (detached). */
+async function forkDaemonBackground(): Promise<void> {
+  // Detect compiled binary vs deno run
+  const exe = Deno.execPath();
+  const isCompiled = !exe.endsWith("/deno") && !exe.endsWith("/deno.exe");
+  let cmd: Deno.Command;
+  if (isCompiled) {
+    // Compiled binary: just re-run ourselves with "daemon"
+    cmd = new Deno.Command(exe, {
+      args: ["daemon"],
+      stdin: "null", stdout: "null", stderr: "null",
+    });
+  } else {
+    // Dev mode: use deno run
+    const script = new URL("./cli.ts", import.meta.url).pathname;
+    cmd = new Deno.Command(exe, {
+      args: ["run", "--allow-all", "--no-check", script, "daemon"],
+      stdin: "null", stdout: "null", stderr: "null",
+    });
+  }
+  const child = cmd.spawn();
+  child.unref();
+  await new Promise((r) => setTimeout(r, 500));
+}
+
+async function cmdDaemon(sub?: string): Promise<void> {
+  switch (sub) {
+    case "stop": {
+      const killed = await killDaemon();
+      console.log(killed ? "daemon stopped" : "daemon not running");
+      return;
+    }
+    case "restart": {
+      await killDaemon();
+      await forkDaemonBackground();
+      // Verify it started
+      const running = await isDaemonRunning();
+      console.log(running ? "daemon restarted" : "daemon failed to start — check ~/.tap/logs/daemon.log");
+      return;
+    }
+    case "status": {
+      const running = await isDaemonRunning();
+      if (running) {
+        console.log(`daemon running (extension=:${EXTENSION_PORT}, clients=:${CLIENT_PORT})`);
+      } else {
+        console.log("daemon not running");
+      }
+      return;
+    }
+  }
+
+  // Default: foreground start
   const dirs = tapDirs();
 
   const handle = await startDaemon({
@@ -303,6 +380,56 @@ async function cmdDaemon(): Promise<void> {
 
   await signal;
   await handle.stop();
+}
+
+async function cmdDoctor(): Promise<void> {
+  const checks: { name: string; ok: boolean; detail: string }[] = [];
+
+  // 1. Skills installed?
+  const dirs = tapDirs();
+  const taps = await listTaps(dirs);
+  checks.push({
+    name: "skills",
+    ok: taps.length > 0,
+    detail: taps.length > 0 ? `${taps.length} taps available` : "none — run 'tap install'",
+  });
+
+  // 2. Daemon running?
+  const daemonOk = await isDaemonRunning();
+  checks.push({
+    name: "daemon",
+    ok: daemonOk,
+    detail: daemonOk ? `running (:${EXTENSION_PORT}/:${CLIENT_PORT})` : "not running — run 'tap daemon'",
+  });
+
+  // 3. Extension connected?
+  let extOk = false;
+  if (daemonOk) {
+    try {
+      const client = new BridgeClient(`ws://127.0.0.1:${CLIENT_PORT}`);
+      await client.waitReady();
+      await client.sendTap("tool", "page.capabilities", {});
+      extOk = true;
+      client.close();
+    } catch { /* not connected */ }
+  }
+  checks.push({
+    name: "extension",
+    ok: extOk,
+    detail: extOk ? "connected" : "not connected — load extension in Chrome",
+  });
+
+  // Print
+  for (const c of checks) {
+    console.log(`${c.ok ? "✔" : "✘"} ${c.name.padEnd(12)} ${c.detail}`);
+  }
+  const allOk = checks.every((c) => c.ok);
+  if (allOk) {
+    console.log("\nAll good. Ready to tap.");
+  } else {
+    console.log("\nSome issues found. Fix them and run 'tap doctor' again.");
+    Deno.exit(1);
+  }
 }
 
 async function cmdMcp(): Promise<void> {
