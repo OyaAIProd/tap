@@ -17,6 +17,7 @@
 
 import { strict as assert } from 'node:assert'
 import { readdir } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { join, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -209,6 +210,18 @@ for (const { site, name, path } of tapFiles) {
         assert.equal(typeof col, 'string', `column must be string, got ${typeof col}`)
       }
     })
+
+    // Composition constraint: page.tap() references must resolve to existing taps
+    const body = tap.run.toString()
+    const tapCalls = [...body.matchAll(/page\.tap\(\s*["']([^"']+)["']\s*,\s*["']([^"']+)["']/g)]
+    for (const [, refSite, refName] of tapCalls) {
+      test(`  [composition] page.tap("${refSite}", "${refName}") references existing tap`, () => {
+        const refPath = join(TAPS_DIR, refSite, `${refName}.tap.js`)
+        const exists = existsSync(refPath)
+        assert(exists,
+          `page.tap("${refSite}", "${refName}") references non-existent tap at ${refPath} — composition requires all sub-taps to exist on disk`)
+      })
+    }
   }
 }
 

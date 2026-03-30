@@ -53,6 +53,8 @@ Tap follows the **POSIX design philosophy**: minimal kernel, maximal possibility
 
 - **No direct CDP in stdlib.** Stdlib calls kernel primitives. Only kernel touches `chrome.debugger`.
 - **No `chrome.scripting` in stdlib.** Use `kernel.eval()` instead.
+- **Composition is local.** `page.tap()` loads sub-taps from disk and runs them in the executor. Never delegates to extension's tap registry. The executor is the only place that knows how to find and run taps. Extension is a runtime, not an executor.
+- **Tool layer must not bypass kernel.** `handleTapCommand` (extension tool dispatch) calls `getPage()` kernel methods. Never `routeCDP()`, `chrome.scripting`, or `chrome.debugger` directly.
 - **Extension-only for browser.** All browser ops go through extension bridge. Never `--remote-debugging-port`.
 - **API > DOM.** `page.fetch()` beats `page.eval(() => querySelectorAll(...))`. Only use DOM when no API exists.
 

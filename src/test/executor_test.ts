@@ -234,6 +234,77 @@ Deno.test("[safety/what] runTap extract applies limit arg", async () => {
   assertEquals(result.rows.length, 10);
 });
 
+// --- Safety: tap composition must be local ---
+
+Deno.test("[safety/what] page.tap() composes sub-taps locally without extension", async () => {
+  // Why: page.tap() is THE composition primitive. If it depends on
+  // extension tap registry, composition breaks when taps aren't registered.
+  // Composition must be purely local: load from disk, run in executor.
+  const tmpDir = await Deno.makeTempDir();
+  await Deno.mkdir(`${tmpDir}/site_a`, { recursive: true });
+  await Deno.mkdir(`${tmpDir}/site_b`, { recursive: true });
+
+  // Sub-tap: returns data
+  await Deno.writeTextFile(
+    `${tmpDir}/site_a/data.tap.js`,
+    `export default {
+      site: "site_a", name: "data", description: "sub-tap",
+      columns: ["val"],
+      async run(page, args) { return [{ val: "from_sub_tap" }] }
+    }`,
+  );
+
+  // Parent tap: composes via page.tap()
+  await Deno.writeTextFile(
+    `${tmpDir}/site_b/compose.tap.js`,
+    `export default {
+      site: "site_b", name: "compose", description: "parent",
+      columns: ["result"],
+      async run(page, args) {
+        const data = await page.tap("site_a", "data");
+        return [{ result: data[0].val }];
+      }
+    }`,
+  );
+
+  const calls: string[] = [];
+  const send = (_t: string, method: string, _p: Record<string, unknown>) => {
+    calls.push(method);
+    return Promise.resolve({});
+  };
+
+  const tap = await loadTap(`${tmpDir}/site_b/compose.tap.js`);
+  const result = await runTap(tap, {}, send, [tmpDir]);
+
+  // Composition worked — got data from sub-tap
+  assertEquals(result.rows[0].result, "from_sub_tap");
+
+  // No "run" method was sent to extension — composition is local
+  assertEquals(calls.includes("run"), false,
+    "page.tap() must NOT send 'run' to extension — composition is local");
+
+  await Deno.remove(tmpDir, { recursive: true });
+});
+
+Deno.test("[safety/what] page.tap() throws if tapDirs not provided", async () => {
+  // Why: page.tap() without tapDirs means composition can't work.
+  // Better to fail fast than silently fall through to extension.
+  const tap = {
+    site: "test", name: "no_dirs", description: "test",
+    columns: ["x"],
+    async run(page: unknown) {
+      await (page as { tap: (s: string, n: string) => Promise<unknown> }).tap("foo", "bar");
+      return [];
+    },
+  };
+
+  await assertRejects(
+    () => runTap(tap, {}, () => Promise.resolve({})),
+    Error,
+    "must be wired",
+  );
+});
+
 // --- Safety: timing is always present ---
 
 Deno.test("[safety/what] runTap result includes timing.total_ms", async () => {
