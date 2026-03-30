@@ -570,8 +570,8 @@ function createStdlib(kernel) {
  * @param {function} opts.withDebugger - Debugger wrapper (fn) => Promise from background.js
  * @returns {object} page API object — kernel + stdlib merged into a flat namespace
  */
-export function createPage(tabId, { cdpClick, withDebugger } = {}) {
-  const kernel = createKernel(tabId, { cdpClick, withDebugger })
+export function createPage(tabId, { cdpClick, withDebugger, cdp } = {}) {
+  const kernel = createKernel(tabId, { cdpClick, withDebugger, cdp })
   const stdlib = createStdlib(kernel)
 
   // Merge into flat page object: kernel primitives + stdlib operations
