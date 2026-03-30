@@ -158,7 +158,7 @@ Deno.test("[safety/what] runTap executes extract-format tap via page.nav + page.
   const calls: Array<{ type: string; method: string; params: Record<string, unknown> }> = [];
   const send = (type: string, method: string, params: Record<string, unknown>) => {
     calls.push({ type, method, params });
-    if (method === "eval") {
+    if (method === "page.eval") {
       return Promise.resolve([{ title: "hello", score: "99" }]);
     }
     return Promise.resolve({});
@@ -177,13 +177,13 @@ Deno.test("[safety/what] runTap executes extract-format tap via page.nav + page.
 
   const result = await runTap(tap, {}, send);
 
-  const navCall = calls.find(c => c.method === "nav");
+  const navCall = calls.find(c => c.method === "page.nav");
   assertEquals(navCall?.params?.url, "https://example.com/trending");
 
-  const waitCall = calls.find(c => c.method === "waitFor");
+  const waitCall = calls.find(c => c.method === "page.waitFor");
   assertEquals(waitCall?.params?.selector, ".item");
 
-  const evalCall = calls.find(c => c.method === "eval");
+  const evalCall = calls.find(c => c.method === "page.eval");
   assertExists(evalCall, "must call page.eval");
 
   assertEquals(result.rows.length >= 1, true);
@@ -194,7 +194,7 @@ Deno.test("[safety/what] runTap extract with dynamic url function", async () => 
   const calls: Array<{ type: string; method: string; params: Record<string, unknown> }> = [];
   const send = (type: string, method: string, params: Record<string, unknown>) => {
     calls.push({ type, method, params });
-    if (method === "eval") return Promise.resolve([{ r: "1" }]);
+    if (method === "page.eval") return Promise.resolve([{ r: "1" }]);
     return Promise.resolve({});
   };
 
@@ -207,7 +207,7 @@ Deno.test("[safety/what] runTap extract with dynamic url function", async () => 
   };
 
   const result = await runTap(tap, { query: "rust" }, send);
-  const navCall = calls.find(c => c.method === "nav");
+  const navCall = calls.find(c => c.method === "page.nav");
   assertEquals(navCall?.params?.url, "https://example.com/search?q=rust");
   assertEquals(result.count >= 1, true);
 });
@@ -215,7 +215,7 @@ Deno.test("[safety/what] runTap extract with dynamic url function", async () => 
 Deno.test("[safety/what] runTap extract applies limit arg", async () => {
   // Why: runtime must honor limit to avoid returning thousands of rows
   const send = (_t: string, method: string, _p: Record<string, unknown>) => {
-    if (method === "eval") {
+    if (method === "page.eval") {
       return Promise.resolve(Array.from({ length: 50 }, (_, i) => ({ n: String(i) })));
     }
     return Promise.resolve({});
@@ -226,7 +226,7 @@ Deno.test("[safety/what] runTap extract applies limit arg", async () => {
     name: "limit",
     description: "test",
     url: "https://example.com",
-    extract: () => [],
+    extract: () => Array.from({ length: 50 }, (_, i) => ({ n: String(i) })),
     args: { limit: { type: "int" as const, default: 20 } },
   };
 
