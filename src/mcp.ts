@@ -53,6 +53,15 @@ export function handlePromptsList(id: unknown) {
             { name: "name", description: "Tap name", required: true },
           ],
         },
+        {
+          name: "run",
+          description:
+            "Execute a task on a website. Checks for existing taps first — runs them if found, forges a new one if not.",
+          arguments: [
+            { name: "url", description: "Target page URL", required: true },
+            { name: "task", description: "What to do on the page", required: true },
+          ],
+        },
       ],
     },
   };
@@ -119,6 +128,32 @@ Capability: ${cap}
 5. **Save**: \`forge_save\` with updated code.
 
 6. **Confirm**: \`tap.run(site="${site}", name="${name}")\` end-to-end.`;
+      break;
+    }
+    case "run": {
+      const url = args.url || "<URL>";
+      const task = args.task || "<task>";
+      text = `Task: ${task}
+URL: ${url}
+
+## Workflow
+
+1. **Check existing taps**: \`tap.list()\` — scan for a tap matching this site and task.
+
+2. **If match found** → \`tap.run(site, name)\`. Done.
+   - If result looks wrong (empty rows, stale data) → go to debug prompt.
+
+3. **If no match** → forge a new tap:
+   - \`forge.inspect(url="${url}")\` → pick strategy (SSR > API > DOM).
+   - Write tap, \`forge.verify\` to confirm, \`forge.save\` to persist.
+   - \`tap.run\` the saved tap.
+
+4. **Only use page.* tools directly** when the task is one-off (no reuse value)
+   or requires interactive steps a tap can't encode (login flows, multi-step forms).
+
+## Rules
+- tap.run > page.* always. A saved tap runs zero AI at runtime — faster and stable.
+- If you forge a new tap, it is now available for all future requests on this site.`;
       break;
     }
     default:
