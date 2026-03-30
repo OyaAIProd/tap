@@ -50,7 +50,7 @@ Tap follows the **POSIX design philosophy**: minimal kernel, maximal possibility
 5. **Interface = protocol, not implementation.** The page API is the protocol. The Chrome extension is just the first runtime.
 6. **Dependency inversion.** Stdlib depends on kernel interface, not on Chrome APIs. `createStdlib(kernel)` — kernel is injected.
 
-7. **Self-update.** `tap self-update` pulls code, recompiles CLI, reloads extension via `tap.reload`, updates skills.
+7. **One update.** `tap update` pulls core + skills + broadcasts reload to all connected runtimes. CLI doesn't know what runtimes exist.
 
 ### Key Rules
 

@@ -255,6 +255,13 @@ async function handleBridgeCommand(method, params = {}) {
       return { tabId: tab.id, url: tab.url }
     }
 
+    case 'Bridge.reload': {
+      // Runtime-specific reload — Chrome Extension reloads itself
+      console.log('[tap] reload requested via bridge')
+      chrome.runtime.reload()
+      return { reloaded: 'chrome-extension' }
+    }
+
     default:
       return { error: `Unknown bridge command: ${method}` }
   }

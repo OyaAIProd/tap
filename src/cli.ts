@@ -124,7 +124,7 @@ Usage:
   tap daemon status                 check daemon status
   tap doctor                        diagnose setup issues
   tap install                       install community skills
-  tap update                        update community skills
+  tap update                        update everything (core + skills + runtimes)
   tap mcp                           start MCP server (stdin/stdout)
 
 Options:
@@ -149,6 +149,7 @@ switch (command) {
     await cmdInstall();
     break;
   case "update":
+  case "self-update": // backward compat
     await cmdUpdate();
     break;
   case "daemon":
@@ -156,9 +157,6 @@ switch (command) {
     break;
   case "doctor":
     await cmdDoctor();
-    break;
-  case "self-update":
-    await cmdSelfUpdate();
     break;
   case "mcp":
     await cmdMcp();
@@ -254,37 +252,16 @@ async function cmdInstall(): Promise<void> {
   console.log(`Installed ${taps.length} skills.`);
 }
 
+/**
+ * tap update — update everything: core code, CLI binary, skills, active runtimes.
+ * Runtime reload is broadcast via daemon — each runtime decides how to reload.
+ * CLI doesn't know or care what runtimes are connected.
+ */
 async function cmdUpdate(): Promise<void> {
-  const skillsDir = `${tapHome()}/skills`;
-  try {
-    await Deno.stat(skillsDir);
-  } catch {
-    console.log("Skills not installed. Run 'tap install' first.");
-    Deno.exit(1);
-  }
-
-  console.log("Updating tap-skills...");
-  const cmd = new Deno.Command("git", {
-    args: ["-C", skillsDir, "pull", "--ff-only"],
-    stdout: "inherit",
-    stderr: "inherit",
-  });
-  const { code } = await cmd.output();
-  if (code !== 0) {
-    console.error("Failed to update. Try: rm -rf ~/.tap/skills && tap install");
-    Deno.exit(1);
-  }
-  const dirs = tapDirs();
-  const taps = await listTaps(dirs);
-  console.log(`Updated. ${taps.length} skills available.`);
-}
-
-async function cmdSelfUpdate(): Promise<void> {
   const steps: { name: string; ok: boolean; detail: string }[] = [];
 
-  // Step 1: Git pull the main repo
+  // Step 1: Pull core repo
   const repoDir = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
-  console.log(`Updating tap core from ${repoDir}...`);
   try {
     const cmd = new Deno.Command("git", {
       args: ["-C", repoDir, "pull", "--ff-only"],
@@ -293,16 +270,14 @@ async function cmdSelfUpdate(): Promise<void> {
     });
     const { code, stdout } = await cmd.output();
     const out = new TextDecoder().decode(stdout).trim();
-    steps.push({ name: "git pull", ok: code === 0, detail: out || "up to date" });
+    steps.push({ name: "core", ok: code === 0, detail: out || "up to date" });
   } catch (e) {
-    steps.push({ name: "git pull", ok: false, detail: String(e) });
+    steps.push({ name: "core", ok: false, detail: String(e) });
   }
 
   // Step 2: Recompile CLI binary
-  console.log("Recompiling CLI binary...");
   try {
     const cliSrc = `${repoDir}/src/cli.ts`;
-    // Find where the current binary is
     const binPath = Deno.execPath();
     const tapBin = binPath.includes("deno") ? `${repoDir}/tap` : binPath;
     const cmd = new Deno.Command("deno", {
@@ -311,37 +286,46 @@ async function cmdSelfUpdate(): Promise<void> {
       stderr: "piped",
     });
     const { code } = await cmd.output();
-    steps.push({ name: "compile CLI", ok: code === 0, detail: tapBin });
+    steps.push({ name: "compile", ok: code === 0, detail: tapBin });
   } catch (e) {
-    steps.push({ name: "compile CLI", ok: false, detail: String(e) });
+    steps.push({ name: "compile", ok: false, detail: String(e) });
   }
 
-  // Step 3: Reload extension via daemon
-  console.log("Reloading Chrome extension...");
+  // Step 3: Pull skills
+  const skillsDir = `${tapHome()}/skills`;
+  try {
+    await Deno.stat(skillsDir);
+    const cmd = new Deno.Command("git", {
+      args: ["-C", skillsDir, "pull", "--ff-only"],
+      stdout: "piped",
+      stderr: "piped",
+    });
+    const { code, stdout } = await cmd.output();
+    const out = new TextDecoder().decode(stdout).trim();
+    steps.push({ name: "skills", ok: code === 0, detail: out || "up to date" });
+  } catch {
+    steps.push({ name: "skills", ok: true, detail: "not installed (tap install)" });
+  }
+
+  // Step 4: Broadcast reload to all connected runtimes via daemon
+  // Daemon forwards to every runtime. Each runtime handles reload its own way:
+  //   Chrome Extension → chrome.runtime.reload()
+  //   Playwright → no-op (stateless, always uses latest code)
+  //   Future runtimes → their own reload mechanism
   try {
     const { connectToDaemon } = await import("./bridge.ts");
     const bridge = await connectToDaemon();
-    const result = await bridge.sendTap("tool", "tap.reload", {});
+    const result = await bridge.sendTap("bridge", "reload", {}) as Record<string, unknown>;
     bridge.close();
-    steps.push({ name: "extension reload", ok: true, detail: JSON.stringify(result) });
-  } catch (e) {
-    steps.push({ name: "extension reload", ok: false, detail: String(e) });
-  }
-
-  // Step 4: Update skills too
-  console.log("Updating skills...");
-  try {
-    await cmdUpdate();
-    steps.push({ name: "skills update", ok: true, detail: "done" });
-  } catch (e) {
-    steps.push({ name: "skills update", ok: false, detail: String(e) });
+    steps.push({ name: "runtimes", ok: true, detail: String(result.reloaded || "broadcast sent") });
+  } catch {
+    steps.push({ name: "runtimes", ok: true, detail: "daemon not running (skip)" });
   }
 
   // Summary
-  console.log("\n  Self-update results:");
+  console.log("tap update:");
   for (const s of steps) {
-    const icon = s.ok ? "✓" : "✗";
-    console.log(`  ${icon} ${s.name}: ${s.detail}`);
+    console.log(`  ${s.ok ? "✓" : "✗"} ${s.name}: ${s.detail}`);
   }
 }
 
@@ -855,6 +839,11 @@ async function executeToolCall(
     case "inspect.toasts": {
       const send = createBridgeSend(client, tabId);
       return wrap(await handleInspectTool(name, args, send));
+    }
+    case "tap.reload": {
+      // Broadcast reload to all connected runtimes via daemon bridge
+      const result = await client.sendTap("bridge", "reload", {});
+      return wrap(result);
     }
     default: {
       // Relay to extension — name IS the wire method, no conversion

@@ -109,9 +109,8 @@ npx @LeonTing1010/tap-mcp
 安装社区 skills：
 
 ```bash
-tap install       # 从 tap-skills 仓库克隆 106 个 skills
-tap update        # 更新 skills 到最新版本
-tap self-update   # 全量更新：核心代码 + 扩展 + skills
+tap install       # 从 tap-skills 仓库克隆 skills
+tap update        # 更新一切：核心代码 + skills + 活跃运行时
 ```
 
 ## 快速开始
@@ -359,7 +358,7 @@ deno compile --allow-all --output tap src/cli.ts  # 编译二进制
 
 - [x] **106 个社区 skills** — 从 [tap-skills](https://github.com/LeonTing1010/tap-skills) `tap install`
 - [x] **Playwright 运行时** — 第二个内核，支持无头模式
-- [x] **自更新** — `tap self-update` 拉代码、重编译、reload 扩展
+- [x] **统一更新** — `tap update` 拉核心代码 + skills + reload 所有连接的运行时
 - [ ] **Android 运行时** — 基于 AccessibilityService 的内核
 - [ ] **Tap 注册中心** — 像 npm 包一样发布和发现 tap
 

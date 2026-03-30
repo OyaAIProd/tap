@@ -109,9 +109,8 @@ npx @LeonTing1010/tap-mcp
 Install community skills:
 
 ```bash
-tap install       # Clone 106 skills from tap-skills repo
-tap update        # Update skills to latest
-tap self-update   # Update everything: core + extension + skills
+tap install       # Clone skills from tap-skills repo
+tap update        # Update everything: core + skills + active runtimes
 ```
 
 ## Quick Start
@@ -359,7 +358,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). The easiest way to contribute: **forge a
 
 - [x] **106 community skills** — `tap install` from [tap-skills](https://github.com/LeonTing1010/tap-skills)
 - [x] **Playwright runtime** — second kernel, headless capable
-- [x] **Self-update** — `tap self-update` pulls code, recompiles, reloads extension
+- [x] **One update** — `tap update` pulls core + skills + reloads all connected runtimes
 - [ ] **Android runtime** — AccessibilityService-based kernel
 - [ ] **Tap registry** — publish and discover taps like packages
 

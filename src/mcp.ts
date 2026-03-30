@@ -204,7 +204,7 @@ export function buildToolsSchema() {
     {
       name: "tap.reload",
       description:
-        "Reload the Chrome extension to apply code changes. The extension restarts and the daemon reconnects automatically.",
+        "Reload all connected runtimes via daemon broadcast. Each runtime handles reload its own way.",
       inputSchema: { type: "object", properties: {} },
     },
     {
