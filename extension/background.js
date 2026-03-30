@@ -655,16 +655,6 @@ async function handleTapCommand(method, params = {}) {
       return page.capabilities()
     }
 
-    // ---- Tap execution (via WebSocket bridge to Deno daemon) ----
-
-    case 'list': {
-      return bridgeInvoke('list', params)
-    }
-
-    case 'run': {
-      return bridgeInvoke('run', params)
-    }
-
     default:
       throw new Error(`Unknown Tap command: ${method}`)
   }
@@ -712,8 +702,10 @@ async function handleMessage(msg) {
       args = {}
       if (queryString) {
         for (const pair of queryString.split('&')) {
-          const [k, v] = pair.split('=')
-          args[decodeURIComponent(k)] = decodeURIComponent(v || '')
+          const eq = pair.indexOf('=')
+          const k = eq === -1 ? pair : pair.slice(0, eq)
+          const v = eq === -1 ? '' : pair.slice(eq + 1)
+          args[decodeURIComponent(k)] = decodeURIComponent(v)
         }
       }
     } else if (msg.site && msg.name) {
@@ -722,13 +714,9 @@ async function handleMessage(msg) {
       args = msg.args || {}
     }
     if (site && name) {
-      // Try bridge first, fall back to showing run instructions
       if (bridgeSocket && bridgeSocket.readyState === WebSocket.OPEN) {
         return bridgeInvoke('run', { site, name, args })
       }
-      // No daemon — open results page with instructions
-      const hash = `${site}/${name}${Object.keys(args).length ? '?' + new URLSearchParams(args).toString() : ''}`
-      chrome.tabs.create({ url: chrome.runtime.getURL(`results.html#${hash}`) })
       return { error: 'daemon not running', hint: 'Run "tap daemon" in terminal, then try again' }
     }
   }
@@ -817,6 +805,11 @@ function connectBridge() {
   ws.onclose = () => {
     if (bridgeSocket === ws) {
       console.log('[tap] bridge disconnected')
+      for (const [id, pending] of pendingCallbacks) {
+        clearTimeout(pending.timer)
+        pending.reject(new Error('bridge disconnected'))
+      }
+      pendingCallbacks.clear()
       scheduleBridgeReconnect()
     }
   }
@@ -840,6 +833,7 @@ function bridgeSend(msg) {
 }
 
 const pendingCallbacks = new Map()
+let nextBridgeId = 1
 
 async function listTapsFromDisk() {
   try {
@@ -863,7 +857,7 @@ function bridgeInvoke(method, params = {}, timeout = 30000) {
       return
     }
 
-    const id = Date.now()
+    const id = `ext_${nextBridgeId++}`
     const pending = { resolve, reject, timer: setTimeout(() => {
       pendingCallbacks.delete(id)
       reject(new Error(`bridge timeout after ${timeout}ms`))

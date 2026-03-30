@@ -268,7 +268,29 @@ async function cmdUpdate(): Promise<void> {
 }
 
 async function cmdDaemon(): Promise<void> {
-  const handle = await startDaemon();
+  const dirs = tapDirs();
+
+  const handle = await startDaemon({
+    onExtensionRequest: async (msg, sendToExtension) => {
+      const { method, params } = msg;
+      switch (method) {
+        case "list": {
+          const taps = await listTaps(dirs);
+          return { taps: taps.map((t) => ({ site: t.site, name: t.name, description: t.description })), count: taps.length };
+        }
+        case "run": {
+          const site = params.site as string;
+          const name = params.name as string;
+          const tapArgs = (params.args as Record<string, unknown>) || {};
+          const tapPath = await findTap(site, name, dirs);
+          const tap = await loadTap(tapPath);
+          return await runTap(tap, tapArgs, sendToExtension, dirs);
+        }
+        default:
+          throw new Error(`unknown extension request: ${method}`);
+      }
+    },
+  });
   console.error(`daemon: extension=${EXTENSION_PORT}, clients=${CLIENT_PORT}`);
 
   // Keep running until signal

@@ -22,6 +22,12 @@ interface DaemonHandle {
   clientPort: number;
 }
 
+/** Handler for requests initiated by the extension (e.g. tap:// links). */
+export type ExtensionRequestHandler = (
+  msg: { method: string; params: Record<string, unknown> },
+  sendToExtension: (type: string, method: string, params: Record<string, unknown>) => Promise<unknown>,
+) => Promise<unknown>;
+
 /** Append a line to the daemon log file. */
 function logMsg(direction: string, id: unknown, type: string, method: string, extra = "") {
   const ts = new Date().toISOString().slice(11, 23); // HH:mm:ss.SSS
@@ -34,7 +40,7 @@ function logMsg(direction: string, id: unknown, type: string, method: string, ex
 }
 
 export async function startDaemon(
-  opts: { extensionPort?: number; clientPort?: number } = {},
+  opts: { extensionPort?: number; clientPort?: number; onExtensionRequest?: ExtensionRequestHandler } = {},
 ): Promise<DaemonHandle> {
   const pending = new Map<number, PendingRequest>();
   let nextId = 1;
@@ -51,10 +57,11 @@ export async function startDaemon(
       socket.onopen = () => {
         extensionWs = socket;
       };
-      socket.onmessage = (e) => {
-        // Route response back to the correct client
+      socket.onmessage = async (e) => {
         const msg = JSON.parse(e.data);
         const id = msg.id;
+
+        // Response to a pending request (from client or daemon-initiated kernel call)
         const req = pending.get(id);
         if (req) {
           pending.delete(id);
@@ -63,6 +70,41 @@ export async function startDaemon(
           logMsg("◂ ext→cli", req.originalId, "", req.method, `${elapsed}ms${hasError ? " " + hasError : ""}`);
           msg.id = req.originalId;
           req.clientSend(JSON.stringify(msg));
+          return;
+        }
+
+        // New request FROM the extension (e.g. tap:// link triggered run)
+        if (msg.protocol?.startsWith("tap/") && opts.onExtensionRequest) {
+          logMsg("◂ ext→daemon", id, msg.type || "", msg.method || "");
+          const sendToExtension = (type: string, method: string, params: Record<string, unknown>): Promise<unknown> => {
+            return new Promise((resolve, reject) => {
+              if (!extensionWs || extensionWs.readyState !== WebSocket.OPEN) {
+                reject(new Error("extension disconnected during execution"));
+                return;
+              }
+              const callId = nextId++;
+              pending.set(callId, {
+                clientSend: (responseStr: string) => {
+                  const response = JSON.parse(responseStr);
+                  if (response.error) reject(new Error(response.error.message || "unknown"));
+                  else resolve(response.result);
+                },
+                originalId: callId,
+                method: `${type}/${method}`,
+                sentAt: performance.now(),
+              });
+              extensionWs!.send(JSON.stringify({ protocol: "tap/1.0", type, method, params, id: callId }));
+            });
+          };
+          try {
+            const result = await opts.onExtensionRequest(
+              { method: msg.method, params: msg.params || {} },
+              sendToExtension,
+            );
+            socket.send(JSON.stringify({ id, result: result || {} }));
+          } catch (err) {
+            socket.send(JSON.stringify({ id, error: { code: -32000, message: (err as Error).message } }));
+          }
         }
       };
       socket.onclose = () => {

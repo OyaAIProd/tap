@@ -233,8 +233,10 @@ export function parseTapURL(url) {
   const args = {}
   if (queryString) {
     for (const pair of queryString.split('&')) {
-      const [k, v] = pair.split('=')
-      args[decodeURIComponent(k)] = decodeURIComponent(v || '')
+      const eq = pair.indexOf('=')
+      const k = eq === -1 ? pair : pair.slice(0, eq)
+      const v = eq === -1 ? '' : pair.slice(eq + 1)
+      args[decodeURIComponent(k)] = decodeURIComponent(v)
     }
   }
 
