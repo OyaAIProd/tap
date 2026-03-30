@@ -103,8 +103,8 @@ Deno.test("[safety/what] page.eval sends expression as RPC", async () => {
   });
 
   await page.eval("document.title");
-  assertEquals(calls[0]?.type, "tool");
-  assertEquals(calls[0]?.method, "eval");
+  assertEquals(calls[0]?.type, "cdp");
+  assertEquals(calls[0]?.method, "Runtime.evaluate");
   assertEquals(
     (calls[0]?.params as Record<string, unknown>)?.expression,
     "document.title",
@@ -119,8 +119,8 @@ Deno.test("[safety/what] page.nav sends url as RPC", async () => {
   });
 
   await page.nav("https://example.com");
-  assertEquals(calls[0]?.type, "tool");
-  assertEquals(calls[0]?.method, "nav");
+  assertEquals(calls[0]?.type, "cdp");
+  assertEquals(calls[0]?.method, "Page.navigate");
   assertEquals(
     (calls[0]?.params as Record<string, unknown>)?.url,
     "https://example.com",
