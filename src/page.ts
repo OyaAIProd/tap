@@ -1,5 +1,5 @@
 /**
- * Page proxy — 24 methods (8 kernel + 16 stdlib) as RPC calls.
+ * Page proxy — 25 methods (8 kernel + 17 stdlib) as RPC calls.
  *
  * Each method is a thin wrapper that sends an RPC message to the extension
  * via the provided `send` function. The extension does the actual work.
@@ -25,9 +25,10 @@ export interface Page {
   screenshot(opts?: Record<string, unknown>): Promise<unknown>;
   tap(site: string, name: string, args?: Record<string, unknown>): Promise<unknown>;
   capabilities(): Promise<unknown>;
-  // Stdlib (16)
+  // Stdlib (17)
   click(target: string): Promise<unknown>;
   type(selector: string, text: string): Promise<unknown>;
+  fill(selector: string, text: string): Promise<unknown>;
   hover(selector: string): Promise<unknown>;
   scroll(selector: string): Promise<unknown>;
   pressKey(key: string, mods?: number): Promise<unknown>;
@@ -66,6 +67,7 @@ export function createPageProxy(send: RpcSend): Page {
     // Stdlib (16)
     click: (target) => send("tool", "page.click", { target }),
     type: (selector, text) => send("tool", "page.type", { selector, text }),
+    fill: (selector, text) => send("tool", "page.fill", { selector, text }),
     hover: (selector) => send("tool", "page.hover", { selector }),
     scroll: (selector) => send("tool", "page.scroll", { selector }),
     pressKey: (key, mods) =>

@@ -175,6 +175,22 @@ export async function createPlaywrightRuntime(
         return {};
       }
 
+      case "page.fill": {
+        const selector = p.selector as string;
+        const text = p.text as string;
+        await page.fill(selector, text);
+        await page.evaluate(
+          `((sel) => {
+            const el = document.querySelector(sel);
+            if (!el) return;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          })`,
+          { sel: selector },
+        );
+        return {};
+      }
+
       case "page.hover": {
         await page.hover(p.selector as string);
         return {};

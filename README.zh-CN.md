@@ -55,16 +55,16 @@ Tap 定义了一套最小且完备的界面操作契约。
 eval · pointer · keyboard · nav · wait · screenshot · tap · capabilities
 ```
 
-**16 个标准库操作** — 由内核组合而成，每个运行时免费获得：
+**17 个标准库操作** — 由内核组合而成，每个运行时免费获得：
 
 ```
-click · type · hover · scroll · pressKey · select · upload · dialog
+click · type · fill · hover · scroll · pressKey · select · upload · dialog
 fetch · find · cookies · download · waitFor · waitForNetwork · ssrState · storage
 ```
 
-8 + 16 = 人类在任何界面上能做的所有操作。
+8 + 17 = 人类在任何界面上能做的所有操作。
 
-新运行时实现 8 个方法 — 立刻获得 16 个操作和所有已有的 `.tap.js` 脚本。今天是 Chrome 和 Playwright，明天是 Android、iOS、桌面应用。**写一次 tap，在所有平台运行。**
+新运行时实现 8 个方法 — 立刻获得 17 个操作和所有已有的 `.tap.js` 脚本。今天是 Chrome 和 Playwright，明天是 Android、iOS、桌面应用。**写一次 tap，在所有平台运行。**
 
 ## 安装
 
@@ -109,8 +109,9 @@ npx @LeonTing1010/tap-mcp
 安装社区 skills：
 
 ```bash
-tap install     # 从 tap-skills 仓库克隆 81 个 skills
-tap update      # 更新到最新版本
+tap install       # 从 tap-skills 仓库克隆 81 个 skills
+tap update        # 更新 skills 到最新版本
+tap self-update   # 全量更新：核心代码 + 扩展 + skills
 ```
 
 ## 快速开始
@@ -246,9 +247,21 @@ AI：已保存至 hackernews/hot.tap.js ✓
 | Tap | 功能 |
 |-----|------|
 | `x/post` | 发推文 |
-| `reddit/comment` | 评论帖子 |
+| `weibo/post` | 发微博 |
 | `xiaohongshu/publish` | 发布图文笔记 |
-| `telegraph/publish` | 发布文章 |
+| `zhihu/publish` | 发知乎专栏文章（API） |
+| `juejin/publish` | 发掘金文章（API） |
+| `devto/publish` | 发 Dev.to 文章 |
+| `medium/publish` | 发 Medium 文章 |
+| `telegraph/publish` | 发 Telegraph 文章 |
+| `linkedin/post` | 发 LinkedIn 动态 |
+| `reddit/post` | 发 Reddit 帖子 |
+| `reddit/comment` | 评论 Reddit 帖子 |
+| `hackernews/submit` | 提交 Hacker News 故事 |
+| `v2ex/post` | 发 V2EX 主题 |
+| `notion/create` | 创建 Notion 页面 |
+| `discord/send` | 发 Discord 消息 |
+| `slack/send` | 发 Slack 消息 |
 | `jimeng/generate` | 生成 AI 图片 |
 
 ## 架构
@@ -264,7 +277,7 @@ AI Agent ←→ MCP ←→ Deno Executor ─┤
 - **Chrome 扩展** — 运行时 #1。真实浏览器、真实登录态。无 headless 检测，无指纹伪造。
 - **Playwright** — 运行时 #2。支持无头模式，无需扩展。服务端自动化。
 - **.tap.js** — 确定性脚本。纯 JavaScript，零 AI，永久运行。
-- **MCP 服务器** — 38 个工具，将完整协议暴露给任何 AI Agent。
+- **MCP 服务器** — 40 个工具，将完整协议暴露给任何 AI Agent。
 
 ### .tap.js 格式
 
@@ -307,13 +320,13 @@ export default {
 
 ## MCP 工具
 
-38 个工具覆盖 6 个类别 — 完整的界面协议以 MCP 形式暴露：
+40 个工具覆盖 6 个类别 — 完整的界面协议以 MCP 形式暴露：
 
 | 类别 | 工具 |
 |------|------|
-| **tap.** | `run`, `list`, `screenshot`, `logs` |
+| **tap.** | `run`, `list`, `screenshot`, `logs`, `reload`, `version` |
 | **forge.** | `inspect`, `verify`, `save` |
-| **page.** | `click`, `type`, `nav`, `eval`, `hover`, `scroll`, `pressKey`, `select`, `upload`, `find`, `cookies`, `dialog`, `storage`, `setCookie` |
+| **page.** | `click`, `type`, `fill`, `nav`, `eval`, `hover`, `scroll`, `pressKey`, `select`, `upload`, `find`, `cookies`, `dialog`, `storage`, `setCookie` |
 | **inspect.** | `page`, `a11y`, `dom`, `element`, `apiLog`, `networkStart`, `networkDump`, `globals`, `resources`, `download` |
 | **intercept.** | `on`, `off`, `list`, `continue`, `fulfill`, `fail` |
 | **tab.** | `list`, `new`, `close` |
@@ -346,6 +359,7 @@ deno compile --allow-all --output tap src/cli.ts  # 编译二进制
 
 - [x] **81 个社区 skills** — 从 [tap-skills](https://github.com/LeonTing1010/tap-skills) `tap install`
 - [x] **Playwright 运行时** — 第二个内核，支持无头模式
+- [x] **自更新** — `tap self-update` 拉代码、重编译、reload 扩展
 - [ ] **Android 运行时** — 基于 AccessibilityService 的内核
 - [ ] **自动修复** — 检测并重新生成失效的 tap
 - [ ] **Tap 注册中心** — 像 npm 包一样发布和发现 tap

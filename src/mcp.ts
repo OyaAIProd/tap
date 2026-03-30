@@ -201,6 +201,17 @@ export function buildToolsSchema() {
         },
       },
     },
+    {
+      name: "tap.reload",
+      description:
+        "Reload the Chrome extension to apply code changes. The extension restarts and the daemon reconnects automatically.",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
+      name: "tap.version",
+      description: "Get extension version info.",
+      inputSchema: { type: "object", properties: {} },
+    },
     // Forge
     {
       name: "forge.inspect",
@@ -258,6 +269,19 @@ export function buildToolsSchema() {
     {
       name: "page.type",
       description: "Type text into an input.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          selector: { type: "string" },
+          text: { type: "string" },
+        },
+        required: ["selector", "text"],
+      },
+    },
+    {
+      name: "page.fill",
+      description:
+        "Fill an element with text (clear + set atomically via setter). Fastest for long text or programmatic injection. No keyboard simulation.",
       inputSchema: {
         type: "object",
         properties: {

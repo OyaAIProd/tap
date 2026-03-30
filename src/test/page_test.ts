@@ -214,7 +214,7 @@ Deno.test("[safety/what] page proxy never sends CDP method names", async () => {
 
 // --- Safety: no extra methods leak ---
 
-Deno.test("[safety/what] page proxy has exactly 24 methods, no more", () => {
+Deno.test("[safety/what] page proxy has exactly 25 methods, no more", () => {
   // Why: extra methods would be unimplemented on extension side → runtime error
   const page = createPageProxy(() => Promise.resolve({}));
   const methods = Object.keys(page).filter(
@@ -222,8 +222,8 @@ Deno.test("[safety/what] page proxy has exactly 24 methods, no more", () => {
   );
   assertEquals(
     methods.length,
-    24,
-    `page must have exactly 24 methods (8 kernel + 16 stdlib), got ${methods.length}: ${methods.join(", ")}`,
+    25,
+    `page must have exactly 25 methods (8 kernel + 17 stdlib), got ${methods.length}: ${methods.join(", ")}`,
   );
 });
 

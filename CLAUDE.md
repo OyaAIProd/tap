@@ -19,9 +19,10 @@ Tap follows the **POSIX design philosophy**: minimal kernel, maximal possibility
 └──────────────────────┬──────────────────────────┘
                        │
 ┌──────────────────────▼──────────────────────────┐
-│ Stdlib — 16 named operations                     │
+│ Stdlib — 17 named operations                     │
 │ Built on kernel. Runtime may override.           │
-│ click, type, hover, scroll, pressKey, select,   │
+│ click, type, fill, hover, scroll, pressKey,      │
+│ select,                                          │
 │ upload, dialog, fetch, find, cookies, download,  │
 │ waitFor, waitForNetwork, getSSRState, storage    │
 └──────────────────────┬──────────────────────────┘
@@ -49,6 +50,8 @@ Tap follows the **POSIX design philosophy**: minimal kernel, maximal possibility
 5. **Interface = protocol, not implementation.** The page API is the protocol. The Chrome extension is just the first runtime.
 6. **Dependency inversion.** Stdlib depends on kernel interface, not on Chrome APIs. `createStdlib(kernel)` — kernel is injected.
 
+7. **Self-update.** `tap self-update` pulls code, recompiles CLI, reloads extension via `tap.reload`, updates skills.
+
 ### Key Rules
 
 - **No direct CDP in stdlib.** Stdlib calls kernel primitives. Only kernel touches `chrome.debugger`.
@@ -72,7 +75,7 @@ Claude Code ←→ MCP ←→ Deno Executor ─┤
 **Deno Executor** = Primary tap executor. Loads .tap.js from disk, runs tap logic locally, routes kernel calls to runtime.
 **Chrome Extension** = Runtime #1 (kernel provider). Receives kernel RPC via daemon WebSocket.
 **Playwright** = Runtime #2. `tap --runtime playwright <site> <name>`. Headless capable.
-**.tap.js** = deterministic scripts using page API (8 kernel + 16 stdlib). Zero AI at runtime.
+**.tap.js** = deterministic scripts using page API (8 kernel + 17 stdlib). Zero AI at runtime.
 
 ### Daemon Architecture
 
@@ -93,7 +96,7 @@ src/
   daemon.ts             — WebSocket relay (:9333 extension, :9334 clients)
   bridge.ts             — WebSocket client + auto-fork daemon
   executor.ts           — Dynamic .tap.js loader + runner
-  page.ts               — Page proxy: 24 methods → RPC to runtime
+  page.ts               — Page proxy: 25 methods → RPC to runtime
   runtime-playwright.ts — Playwright kernel (second runtime)
   test/                 — Constraint tests
 deno.json               — Deno config (root)

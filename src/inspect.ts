@@ -44,7 +44,7 @@ export async function handleInspectTool(
     text: el.innerText?.trim().substring(0, 300) || '',
     box: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
     visible: el.offsetParent !== null, editable: el.isContentEditable || el.tagName === 'INPUT' || el.tagName === 'TEXTAREA',
-    disabled: el.disabled || false, value: el.value?.substring(0, 200) || null,
+    disabled: el.disabled || false, value: el.value != null ? String(el.value).substring(0, 200) : null,
     display: cs.display, position: cs.position, overflow: cs.overflow
   }
 })(${JSON.stringify(selector)})`);
@@ -73,7 +73,7 @@ export async function handleInspectTool(
       name: el.getAttribute('aria-label') || el.innerText?.trim().substring(0, 80) || el.placeholder || el.name || '',
       selector: qs(el),
       box: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
-      disabled: el.disabled || false, value: el.value?.substring(0, 100) || null
+      disabled: el.disabled || false, value: el.value != null ? String(el.value).substring(0, 100) : null
     })
   })
   return { interactive: items }

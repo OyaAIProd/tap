@@ -55,16 +55,16 @@ Tap defines a minimal, complete contract for operating any interface.
 eval · pointer · keyboard · nav · wait · screenshot · tap · capabilities
 ```
 
-**16 stdlib operations** — composed from the kernel, given to every runtime for free:
+**17 stdlib operations** — composed from the kernel, given to every runtime for free:
 
 ```
-click · type · hover · scroll · pressKey · select · upload · dialog
+click · type · fill · hover · scroll · pressKey · select · upload · dialog
 fetch · find · cookies · download · waitFor · waitForNetwork · ssrState · storage
 ```
 
-That's it. 8 + 16 = every interaction a human can perform on any interface.
+That's it. 8 + 17 = every interaction a human can perform on any interface.
 
-A new runtime implements 8 methods — instantly gains 16 operations and every existing `.tap.js` script. Today it's Chrome and Playwright. Tomorrow: Android, iOS, desktop apps. **Write a tap once, run it on every platform.**
+A new runtime implements 8 methods — instantly gains 17 operations and every existing `.tap.js` script. Today it's Chrome and Playwright. Tomorrow: Android, iOS, desktop apps. **Write a tap once, run it on every platform.**
 
 ## Install
 
@@ -109,8 +109,9 @@ npx @LeonTing1010/tap-mcp
 Install community skills:
 
 ```bash
-tap install     # Clone 81 skills from tap-skills repo
-tap update      # Update to latest
+tap install       # Clone 81 skills from tap-skills repo
+tap update        # Update skills to latest
+tap self-update   # Update everything: core + extension + skills
 ```
 
 ## Quick Start
@@ -246,9 +247,21 @@ Now `tap hackernews hot` runs forever. No AI. No tokens. No maintenance until th
 | Tap | What it does |
 |-----|-------------|
 | `x/post` | Post a tweet |
-| `reddit/comment` | Comment on a post |
+| `weibo/post` | Post on Weibo |
 | `xiaohongshu/publish` | Publish a note with images |
-| `telegraph/publish` | Publish an article |
+| `zhihu/publish` | Publish a Zhihu column article (API) |
+| `juejin/publish` | Publish a Juejin article (API) |
+| `devto/publish` | Publish a Dev.to article |
+| `medium/publish` | Publish a Medium article |
+| `telegraph/publish` | Publish a Telegraph article |
+| `linkedin/post` | Post on LinkedIn |
+| `reddit/post` | Submit a Reddit post |
+| `reddit/comment` | Comment on a Reddit post |
+| `hackernews/submit` | Submit a story to Hacker News |
+| `v2ex/post` | Post a V2EX topic |
+| `notion/create` | Create a Notion page |
+| `discord/send` | Send a Discord message |
+| `slack/send` | Send a Slack message |
 | `jimeng/generate` | Generate AI images |
 
 ## Architecture
@@ -264,7 +277,7 @@ AI Agent ←→ MCP ←→ Deno Executor ─┤
 - **Chrome extension** — Runtime #1. Your real browser with real login sessions. No headless detection, no fingerprint spoofing.
 - **Playwright** — Runtime #2. Headless capable, no extension needed. Server-side automation.
 - **.tap.js** — Deterministic scripts. Pure JavaScript, zero AI, runs forever.
-- **MCP server** — 38 tools exposing the full protocol to any AI agent.
+- **MCP server** — 40 tools exposing the full protocol to any AI agent.
 
 ### .tap.js Format
 
@@ -307,13 +320,13 @@ export default {
 
 ## MCP Tools
 
-38 tools across 6 categories — the full interface protocol exposed as MCP:
+40 tools across 6 categories — the full interface protocol exposed as MCP:
 
 | Category | Tools |
 |----------|-------|
-| **tap.** | `run`, `list`, `screenshot`, `logs` |
+| **tap.** | `run`, `list`, `screenshot`, `logs`, `reload`, `version` |
 | **forge.** | `inspect`, `verify`, `save` |
-| **page.** | `click`, `type`, `nav`, `eval`, `hover`, `scroll`, `pressKey`, `select`, `upload`, `find`, `cookies`, `dialog`, `storage`, `setCookie` |
+| **page.** | `click`, `type`, `fill`, `nav`, `eval`, `hover`, `scroll`, `pressKey`, `select`, `upload`, `find`, `cookies`, `dialog`, `storage`, `setCookie` |
 | **inspect.** | `page`, `a11y`, `dom`, `element`, `apiLog`, `networkStart`, `networkDump`, `globals`, `resources`, `download` |
 | **intercept.** | `on`, `off`, `list`, `continue`, `fulfill`, `fail` |
 | **tab.** | `list`, `new`, `close` |
@@ -346,6 +359,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). The easiest way to contribute: **forge a
 
 - [x] **81 community skills** — `tap install` from [tap-skills](https://github.com/LeonTing1010/tap-skills)
 - [x] **Playwright runtime** — second kernel, headless capable
+- [x] **Self-update** — `tap self-update` pulls code, recompiles, reloads extension
 - [ ] **Android runtime** — AccessibilityService-based kernel
 - [ ] **Auto-healing** — detect and regenerate broken taps
 - [ ] **Tap registry** — publish and discover taps like packages
