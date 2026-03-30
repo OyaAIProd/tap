@@ -216,7 +216,7 @@ export function buildToolsSchema() {
     },
     {
       name: "tap.screenshot",
-      description: "Take a screenshot of the current page. Prefer inspect.page, page.eval, or inspect.a11y for extracting page info — screenshot is expensive and should only be used for visual verification.",
+      description: "Capture the current page as an image. Use only for visual verification (layout, rendering). For data extraction use inspect.a11y or inspect.dom — they are faster and return structured data.",
       inputSchema: {
         type: "object",
         properties: {
@@ -227,7 +227,7 @@ export function buildToolsSchema() {
     },
     {
       name: "tap.logs",
-      description: "Read recent run/forge events. Use to diagnose failures — check error fields, row counts, and timing. If a tap keeps failing, re-forge it.",
+      description: "Read tap execution history (run + forge events). Filter by site to narrow results. Use to diagnose failures: check error fields, row counts, timing. Consistently 0 rows or repeated errors → use forge.inspect to re-forge.",
       inputSchema: {
         type: "object",
         properties: {
@@ -239,12 +239,12 @@ export function buildToolsSchema() {
     {
       name: "tap.reload",
       description:
-        "Reload all connected runtimes via daemon broadcast. Each runtime handles reload its own way.",
+        "Push updated taps to all connected runtimes (extension, Playwright) without restarting the daemon. Call after forge.save or tap update to make new taps available immediately.",
       inputSchema: { type: "object", properties: {} },
     },
     {
       name: "tap.version",
-      description: "Get extension version info.",
+      description: "Get protocol version and connected runtime info. Use to verify the extension is connected and check version compatibility before running taps.",
       inputSchema: { type: "object", properties: {} },
     },
     // Forge
