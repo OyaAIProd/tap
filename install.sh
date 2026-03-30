@@ -1,11 +1,13 @@
 #!/bin/sh
 set -e
 
+# Ensure ~/.deno/bin is in PATH (not loaded by /bin/sh)
+export PATH="$HOME/.deno/bin:$PATH"
+
 # Install Deno if not present
 if ! command -v deno >/dev/null 2>&1; then
   echo "Installing Deno..."
   curl -fsSL https://deno.land/install.sh | sh
-  export PATH="$HOME/.deno/bin:$PATH"
 fi
 
 # Clone and compile tap
