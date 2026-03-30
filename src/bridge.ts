@@ -122,17 +122,29 @@ export async function connectToDaemon(): Promise<BridgeClient> {
 
 async function forkDaemon(): Promise<void> {
   const exe = Deno.execPath();
-  const script = new URL("./cli.ts", import.meta.url).pathname;
-  const cmd = new Deno.Command(exe, {
-    args: ["run", "--allow-all", "--no-check", script, "daemon"],
-    stdin: "null",
-    stdout: "null",
-    stderr: "piped",
-  });
+  const isCompiled = !exe.includes("deno");
+
+  let cmd: Deno.Command;
+  if (isCompiled) {
+    // Compiled binary: `tap daemon` directly
+    cmd = new Deno.Command(exe, {
+      args: ["daemon"],
+      stdin: "null",
+      stdout: "null",
+      stderr: "piped",
+    });
+  } else {
+    // Dev mode: `deno run --allow-all cli.ts daemon`
+    const script = new URL("./cli.ts", import.meta.url).pathname;
+    cmd = new Deno.Command(exe, {
+      args: ["run", "--allow-all", "--no-check", script, "daemon"],
+      stdin: "null",
+      stdout: "null",
+      stderr: "piped",
+    });
+  }
   const child = cmd.spawn();
-  // Detach — don't wait for it
   child.unref();
-  // Give it a moment to start
   await new Promise((r) => setTimeout(r, 500));
 }
 
