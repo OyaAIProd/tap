@@ -1,7 +1,7 @@
 ---
 name: tap
 description: "AI browser automation protocol — run pre-built skills for 41 sites, or forge new ones. MCP native, deterministic, zero AI at runtime."
-version: 0.1.1
+version: 0.1.2
 metadata:
   openclaw:
     requires:
@@ -83,7 +83,7 @@ Or build from source (requires Deno):
 
 ```bash
 git clone https://github.com/LeonTing1010/tap && cd tap
-deno compile --allow-all --output tap src/cli.ts
+deno compile --allow-read --allow-write --allow-net --allow-env --allow-run --output tap src/cli.ts
 ```
 
 ### 2. Install Chrome Extension
@@ -148,6 +148,14 @@ Add to your OpenClaw MCP configuration:
 4. tap.run newsite/data  ← works forever, zero AI
 ```
 
-## Key Advantage
+## Security & Trust
 
-Other browser skills require AI at every step — each run costs tokens and can fail. Tap skills are deterministic scripts — forged once, then run forever with zero AI. The 81 pre-built skills cover the most common sites. For anything else, use the forge pipeline to create new ones.
+**Provenance.** Tap is open source (AGPL-3.0) at [github.com/LeonTing1010/tap](https://github.com/LeonTing1010/tap). All release binaries are built via GitHub Actions — verify by checking the [CI workflow](https://github.com/LeonTing1010/tap/actions/workflows/release.yml).
+
+**Chrome extension permissions.** The extension requires `debugger` permission to send CDP commands to the active tab. It does NOT request `<all_urls>`, `cookies`, or `webRequest` in its manifest. The extension only activates when Tap is explicitly invoked.
+
+**Community skills.** `tap install` clones scripts from [tap-skills](https://github.com/LeonTing1010/tap-skills). All scripts are plain `.tap.js` files (readable JavaScript) — review before running. User-forged taps are stored locally in `~/.tap/taps/`.
+
+**Scope of access.** Tap operates on the active browser tab when invoked. It does not run in the background, does not access tabs you haven't navigated to, and does not persist any data beyond `~/.tap/`.
+
+**Recommendation.** Review the [source code](https://github.com/LeonTing1010/tap/tree/master/src) (~1,800 lines) and [extension manifest](https://github.com/LeonTing1010/tap/blob/master/extension/manifest.json) before installing.
