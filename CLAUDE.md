@@ -34,7 +34,8 @@ Tap follows the **POSIX design philosophy**: minimal kernel, maximal possibility
 └──────────────────────┬──────────────────────────┘
                        │ Runtime Interface
 ┌──────────────────────▼──────────────────────────┐
-│ Runtime #1: Chrome Extension (current)           │
+│ Runtime #1: Chrome Extension                     │
+│ Runtime #2: Playwright (validated 2026-03-30)    │
 │ Runtime #N: Android, iOS, Desktop (future)       │
 └─────────────────────────────────────────────────┘
 ```
@@ -58,14 +59,17 @@ Tap follows the **POSIX design philosophy**: minimal kernel, maximal possibility
 ## Architecture
 
 ```
-Claude Code ←→ MCP (stdin/stdout) ←→ Daemon (ws) ←→ Chrome Extension
-                 cli.ts / mcp.ts       daemon.ts        background.js
-                 tool dispatch          relay :9333       kernel + stdlib
-                 + forge tools          + :9334           routeCDP
+                    ┌─ Chrome Extension (kernel via CDP)
+Claude Code ←→ MCP ←→ Deno Executor ─┤
+  cli.ts / mcp.ts    executor.ts     └─ Playwright (kernel via pw API)
+  tool dispatch       load + run tap
+  + forge tools       page proxy → kernel RPC
 ```
 
-**Deno CLI** = MCP server + CLI + daemon (~1,200 lines). Zero dependencies.
-**Chrome extension** = Runtime #1. All browser ops go through it.
+**Deno CLI** = MCP server + CLI + daemon + executor (~1,800 lines). Zero dependencies.
+**Deno Executor** = Primary tap executor. Loads .tap.js from disk, runs tap logic locally, routes kernel calls to runtime.
+**Chrome Extension** = Runtime #1 (kernel provider). Receives kernel RPC via daemon WebSocket.
+**Playwright** = Runtime #2. `tap --runtime playwright <site> <name>`. Headless capable.
 **.tap.js** = deterministic scripts using page API (8 kernel + 16 stdlib). Zero AI at runtime.
 
 ### Daemon Architecture
@@ -82,14 +86,15 @@ CLI auto-forks the daemon if not running.
 
 ```
 src/
-  cli.ts          — CLI: list, daemon, mcp, <site> <name>
-  mcp.ts          — MCP tools schema (35+ tools)
-  daemon.ts       — WebSocket relay (:9333 extension, :9334 clients)
-  bridge.ts       — WebSocket client + auto-fork daemon
-  executor.ts     — Dynamic .tap.js loader + runner
-  page.ts         — Page proxy: 24 methods → RPC to extension
-  test/           — Constraint tests (44 unit + 5 e2e)
-deno.json           — Deno config (root)
+  cli.ts                — CLI: list, daemon, mcp, <site> <name> [--runtime]
+  mcp.ts                — MCP tools schema (35+ tools)
+  daemon.ts             — WebSocket relay (:9333 extension, :9334 clients)
+  bridge.ts             — WebSocket client + auto-fork daemon
+  executor.ts           — Dynamic .tap.js loader + runner
+  page.ts               — Page proxy: 24 methods → RPC to runtime
+  runtime-playwright.ts — Playwright kernel (second runtime)
+  test/                 — Constraint tests
+deno.json               — Deno config (root)
 
 extension/
   manifest.json       — Chrome MV3 manifest
@@ -132,17 +137,20 @@ forge.save(site, name)  → persist to ~/.tap/taps/ + extension/taps/
 ## Build & Development
 
 ```bash
-# Run CLI
+# Run CLI (default: Chrome Extension runtime)
 deno run --allow-all src/cli.ts list
 deno run --allow-all src/cli.ts <site> <name> [--arg value]
 deno run --allow-all src/cli.ts daemon
 deno run --allow-all src/cli.ts mcp
 
+# Run with Playwright runtime (headless capable, no extension needed)
+deno run --allow-all src/cli.ts --runtime playwright <site> <name>
+
 # Compile to binary
 deno compile --allow-all --output tap src/cli.ts
 
 # Tests
-deno test --no-check --allow-all src/test/     # 44 unit + 5 e2e constraints
+deno test --no-check --allow-all src/test/     # unit constraints
 node extension/test/tap-format.test.mjs          # 943 format constraints
 node extension/test/protocol.test.mjs            # 88 protocol constraints
 ```
