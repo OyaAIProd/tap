@@ -197,13 +197,13 @@ export function buildToolsSchema() {
     // Tap operations
     {
       name: "tap.list",
-      description: "List all available taps. Check here first before using page.* tools — a pre-built tap is faster and more reliable than manual page operations.",
+      description: "List all available taps. ALWAYS call this first before any page.* tool. If a matching tap exists, use tap.run — it executes with zero AI, faster and more stable than manual page operations.",
       inputSchema: { type: "object", properties: {} },
     },
     {
       name: "tap.run",
       description:
-        "Run a tap and return structured data. Returns {columns, rows, count, timing}. If rows is empty or data looks wrong, the tap may be broken — use forge.inspect to re-forge it.",
+        "Run a pre-built tap. Preferred over page.* tools — deterministic, zero AI at runtime. Workflow: tap.list → tap.run (if match) → forge if none. Returns {columns, rows, count, timing}. If rows is empty, use forge.inspect to re-forge.",
       inputSchema: {
         type: "object",
         properties: {
