@@ -18,6 +18,9 @@ TAP_HOME="${TAP_HOME:-$HOME/.tap}"
 echo "Installing tap..."
 TMPDIR=$(mktemp -d)
 git clone --depth 1 "https://github.com/$REPO.git" "$TMPDIR/tap"
+# Remove old binary first — safe even if running (Unix keeps inode alive).
+# Without this, deno compile overwrites in-place (same inode) → SIGKILL.
+rm -f "$INSTALL_DIR/tap"
 deno compile --allow-all --output "$INSTALL_DIR/tap" "$TMPDIR/tap/src/cli.ts"
 
 # Install Chrome extension

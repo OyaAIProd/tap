@@ -254,8 +254,19 @@ async function cmdUpdate(): Promise<void> {
       steps.push({ name: "core", ok: false, detail: String(e) });
     }
   } else {
-    // Compiled binary — can't update itself (overwrite = SIGKILL)
-    steps.push({ name: "core", ok: true, detail: "run: curl -fsSL https://raw.githubusercontent.com/LeonTing1010/tap/master/install.sh | sh" });
+    // Compiled binary — re-run install.sh (rm + compile = safe on Unix)
+    try {
+      const cmd = new Deno.Command("sh", {
+        args: ["-c", "curl -fsSL https://raw.githubusercontent.com/LeonTing1010/tap/master/install.sh | sh"],
+        stdout: "piped", stderr: "piped",
+      });
+      const { code, stdout } = await cmd.output();
+      const out = new TextDecoder().decode(stdout).trim();
+      const lastLine = out.split("\n").pop() || "";
+      steps.push({ name: "core", ok: code === 0, detail: lastLine || "updated" });
+    } catch (e) {
+      steps.push({ name: "core", ok: false, detail: String(e) });
+    }
   }
 
   // Step 3: Skills — idempotent: clone if missing, pull if exists
