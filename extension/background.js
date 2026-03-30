@@ -78,6 +78,8 @@ async function routeCDP(method, params = {}) {
     }
 
     case 'Runtime.evaluate': {
+      // Wrap in block scope to prevent const/let redeclaration across calls
+      const safeExpr = '{\n' + params.expression + '\n}'
       // Try scripting mode first (no timeout, undetectable)
       // Falls back to debugger for pages with strict CSP
       const [evalResult] = await chrome.scripting.executeScript({
@@ -90,7 +92,7 @@ async function routeCDP(method, params = {}) {
             return { __ok: false, error: e.message }
           }
         },
-        args: [params.expression],
+        args: [safeExpr],
         world: 'MAIN'
       })
       const wrapped = evalResult?.result
@@ -101,7 +103,7 @@ async function routeCDP(method, params = {}) {
       await ensureDebugger(tabId)
       return await chrome.debugger.sendCommand(
         { tabId }, 'Runtime.evaluate',
-        { expression: params.expression, returnByValue: true, awaitPromise: true }
+        { expression: safeExpr, returnByValue: true, awaitPromise: true }
       )
     }
 
@@ -264,11 +266,26 @@ async function handleBridgeCommand(method, params = {}) {
 
 async function requireTab(params = {}) {
   let tabId = params.tabId ? Number(params.tabId) : activeTabId
+  // Validate tab still exists
+  if (tabId) {
+    try { await chrome.tabs.get(tabId) }
+    catch {
+      // Tab gone — fall back to current active tab before creating a new one
+      const [active] = await chrome.tabs.query({ active: true, currentWindow: true })
+      if (active?.id) {
+        tabId = active.id
+        activeTabId = active.id
+        console.log(`[tap] tab gone, fell back to active tab ${tabId}`)
+      } else {
+        tabId = null
+      }
+    }
+  }
   if (!tabId) {
     const tab = await chrome.tabs.create({ url: 'about:blank' })
     tabId = tab.id
     activeTabId = tab.id
-    console.log(`[tap] auto-created tab ${tab.id}`)
+    console.log(`[tap] auto-created tab ${tab.id} (no active tab)`)
   }
   return tabId
 }
@@ -289,6 +306,8 @@ async function handleTapCommand(method, params = {}) {
     case 'page.eval': {
       const tabId = await requireTab(params)
       const page = getPage(tabId)
+      // Wrap in block scope to prevent const/let redeclaration across calls
+      const safeExpr = '{\n' + params.expression + '\n}'
       // Try chrome.scripting first (no debugger needed)
       const wrapped = await page.eval(async (expr) => {
         try {
@@ -297,13 +316,13 @@ async function handleTapCommand(method, params = {}) {
         } catch (e) {
           return { __ok: false, error: String(e.message || e) }
         }
-      }, params.expression)
+      }, safeExpr)
       if (wrapped?.__ok) return wrapped.value
       // CSP blocks eval() — fall back to CDP Runtime.evaluate (bypasses CSP)
       await ensureDebugger(tabId)
       const cdpResult = await chrome.debugger.sendCommand(
         { tabId }, 'Runtime.evaluate',
-        { expression: params.expression, returnByValue: true, awaitPromise: true }
+        { expression: safeExpr, returnByValue: true, awaitPromise: true }
       )
       if (cdpResult?.exceptionDetails) {
         throw new Error(cdpResult.exceptionDetails.exception?.description || 'eval failed')
@@ -359,8 +378,10 @@ async function handleTapCommand(method, params = {}) {
 
     case 'page.screenshot': {
       const tabId = await requireTab(params)
-      const page = getPage(tabId)
-      return await page.screenshot()
+      const format = params.format || 'jpeg'
+      const quality = params.quality ?? (format === 'jpeg' ? 50 : undefined)
+      // Use CDP route which supports format + quality (kernel.screenshot is always PNG)
+      return await routeCDP('Page.captureScreenshot', { tabId, format, quality })
     }
 
     // ---- Interaction tools — delegate to protocol.js (single protocol implementation) ----
@@ -386,6 +407,18 @@ async function handleTapCommand(method, params = {}) {
       const val = await inputValue(tabId, params.selector)
       const fb = await pageFeedback(tabId)
       let msg = `typed ${params.text.length} chars into "${params.selector}"`
+      if (val !== null) msg += `\n  → value: "${val}"`
+      return formatFeedback(msg, fb)
+    }
+
+    case 'page.fill': {
+      const tabId = await requireTab(params)
+      if (!params.selector || params.text === undefined) throw new Error('fill: missing selector or text')
+      const page = getPage(tabId)
+      await page.fill(params.selector, params.text)
+      const val = await inputValue(tabId, params.selector)
+      const fb = await pageFeedback(tabId)
+      let msg = `filled "${params.selector}" with ${params.text.length} chars`
       if (val !== null) msg += `\n  → value: "${val}"`
       return formatFeedback(msg, fb)
     }
@@ -648,6 +681,19 @@ async function handleTapCommand(method, params = {}) {
       return { closed: true, tabId }
     }
 
+    // --- Self-management ---
+
+    case 'tap.reload': {
+      // Reload the extension itself — applies code changes without manual chrome://extensions
+      chrome.runtime.reload()
+      return { reloaded: true }
+    }
+
+    case 'tap.version': {
+      const manifest = chrome.runtime.getManifest()
+      return { version: manifest.version, name: manifest.name }
+    }
+
     // ---- Stdlib delegates (page object has these, just route through) ----
 
     case 'page.fetch': {
@@ -683,6 +729,8 @@ async function handleTapCommand(method, params = {}) {
 async function cdpClick(tabId, x, y) {
   await withDebugger(tabId, async (tid) => {
     const p = { x, y, button: 'left', clickCount: 1 }
+    // mouseMoved first — triggers mouseenter/mouseover (required for React synthetic events)
+    await chrome.debugger.sendCommand({ tabId: tid }, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
     await chrome.debugger.sendCommand({ tabId: tid }, 'Input.dispatchMouseEvent', { type: 'mousePressed', ...p })
     await chrome.debugger.sendCommand({ tabId: tid }, 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...p })
   })
@@ -893,16 +941,19 @@ function bridgeInvoke(method, params = {}, timeout = 30000) {
   })
 }
 
-function waitForTabLoad(tabId) {
+function waitForTabLoad(tabId, targetUrl) {
   return new Promise(resolve => {
+    let done = false
+    const finish = () => { if (!done) { done = true; chrome.tabs.onUpdated.removeListener(onUpdated); resolve() } }
     const onUpdated = (id, changeInfo) => {
-      if (id === tabId && changeInfo.status === 'complete') {
-        chrome.tabs.onUpdated.removeListener(onUpdated)
-        resolve()
+      if (id !== tabId) return
+      if (changeInfo.status === 'complete') finish()
+      if (targetUrl && changeInfo.url && changeInfo.url.startsWith(targetUrl.split('?')[0])) {
+        setTimeout(finish, 500)
       }
     }
     chrome.tabs.onUpdated.addListener(onUpdated)
-    setTimeout(() => { chrome.tabs.onUpdated.removeListener(onUpdated); resolve() }, 30000)
+    setTimeout(finish, 30000)
   })
 }
 
@@ -933,8 +984,28 @@ async function ensureDebugger(tabId) {
 
 async function withDebugger(tabId, fn) {
   await ensureDebugger(tabId)
-  return await fn(tabId)
+  try {
+    return await fn(tabId)
+  } catch (e) {
+    // Debugger detached between ensure and fn — retry once
+    if (String(e).includes('detached') || String(e).includes('not attached') || String(e).includes('Debugger')) {
+      debuggerSessions.delete(tabId)
+      await ensureDebugger(tabId)
+      return await fn(tabId)
+    }
+    throw e
+  }
 }
+
+// Clean up debugger sessions on unexpected detach
+chrome.debugger.onDetach.addListener((source, reason) => {
+  const session = debuggerSessions.get(source.tabId)
+  if (session) {
+    if (session.detachTimer) clearTimeout(session.detachTimer)
+    debuggerSessions.delete(source.tabId)
+    console.log(`[tap] debugger detached from ${source.tabId}: ${reason}`)
+  }
+})
 
 // --- Omnibox: tap:// protocol via address bar ---
 

@@ -48,15 +48,23 @@ function createKernel(tabId, { cdpClick, withDebugger, cdp } = {}) {
   const wd = withDebugger || _fallbackWithDebugger
 
   return {
-    /** Execute a function in the page's JS context. The universal escape hatch. */
+    /** Execute a function in the page's JS context. CSP fallback via CDP Runtime.evaluate. */
     async eval(fn, ...args) {
-      const results = await chrome.scripting.executeScript({
-        target: { tabId },
-        func: fn,
-        args,
-        world: 'MAIN'
-      })
-      return results?.[0]?.result
+      try {
+        const results = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: fn,
+          args,
+          world: 'MAIN'
+        })
+        return results?.[0]?.result
+      } catch (e) {
+        if (!cdp) throw e
+        const expr = `(${fn.toString()})(${args.map(a => JSON.stringify(a)).join(',')})`
+        const r = await cdp('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true })
+        if (r?.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || 'eval failed')
+        return r?.result?.value
+      }
     },
 
     /**
@@ -100,7 +108,18 @@ function createKernel(tabId, { cdpClick, withDebugger, cdp } = {}) {
      * @param {number} [modifiers=0] - Modifier bitmask: Alt=1, Ctrl=2, Meta=4, Shift=8
      */
     async keyboard(key, action = 'press', modifiers = 0) {
-      const mapped = KEY_MAP[key] || { key, code: `Key${key.toUpperCase()}`, windowsVirtualKeyCode: key.charCodeAt(0) }
+      const mapped = KEY_MAP[key] || {
+        key, code: `Key${key.toUpperCase()}`,
+        windowsVirtualKeyCode: key.length === 1 ? key.toUpperCase().charCodeAt(0) : key.charCodeAt(0)
+      }
+
+      // Resolve editing commands for modifier combos (macOS Cmd shortcuts)
+      const commands = []
+      if (modifiers & 4) { // Meta
+        const CMD_MAP = { a: 'selectAll', c: 'copy', v: 'paste', x: 'cut', z: 'undo' }
+        const cmd = CMD_MAP[key.toLowerCase()]
+        if (cmd) commands.push(cmd)
+      }
 
       await wd(async () => {
         if (action === 'type') {
@@ -119,7 +138,7 @@ function createKernel(tabId, { cdpClick, withDebugger, cdp } = {}) {
           await chrome.debugger.sendCommand({ tabId }, 'Input.insertText', { text: key })
         } else if (action === 'down') {
           await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
-            type: 'keyDown', modifiers, ...mapped
+            type: 'keyDown', modifiers, commands, ...mapped
           })
         } else if (action === 'up') {
           await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
@@ -128,7 +147,7 @@ function createKernel(tabId, { cdpClick, withDebugger, cdp } = {}) {
         } else {
           // 'press' = down + up
           await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
-            type: 'keyDown', modifiers, ...mapped
+            type: 'keyDown', modifiers, commands, ...mapped
           })
           await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
             type: 'keyUp', modifiers, ...mapped
@@ -137,10 +156,16 @@ function createKernel(tabId, { cdpClick, withDebugger, cdp } = {}) {
       })
     },
 
-    /** Navigate to URL. Waits for full page idle. */
+    /** Navigate to URL. Waits for load or SPA URL change. Detects error pages immediately. */
     async nav(url) {
       await chrome.tabs.update(tabId, { url })
-      await waitForTabLoad(tabId)
+      await waitForTabLoad(tabId, url)
+      // Check for error page before waiting for idle
+      const tab = await chrome.tabs.get(tabId)
+      if (tab.url?.startsWith('chrome-error://') || tab.url === '') {
+        currentUrl = tab.url || url
+        throw new Error(`nav: unreachable — ${url}`)
+      }
       try {
         await chrome.scripting.executeScript({
           target: { tabId },
@@ -158,7 +183,6 @@ function createKernel(tabId, { cdpClick, withDebugger, cdp } = {}) {
           world: 'MAIN'
         })
       } catch { /* scripting may fail on chrome:// — continue */ }
-      const tab = await chrome.tabs.get(tabId)
       currentUrl = tab.url || url
     },
 
@@ -180,8 +204,12 @@ function createKernel(tabId, { cdpClick, withDebugger, cdp } = {}) {
     },
 
     /** Capture screenshot. Returns base64 data URL. */
-    async screenshot() {
-      return await chrome.tabs.captureVisibleTab(null, { format: 'png' })
+    async screenshot(opts = {}) {
+      const format = opts.format || 'jpeg'
+      const quality = opts.quality ?? (format === 'jpeg' ? 50 : undefined)
+      const captureOpts = { format: format === 'jpeg' ? 'jpeg' : 'png' }
+      if (format === 'jpeg' && quality !== undefined) captureOpts.quality = quality
+      return await chrome.tabs.captureVisibleTab(null, captureOpts)
     },
 
     /** Run another tap. Wired by executor. */
@@ -265,8 +293,8 @@ function createStdlib(kernel) {
 
     /**
      * Type text into an element.
-     * CSP-safe: uses CDP DOM methods to find/focus element, insertText for bulk input.
-     * Works with standard inputs, textareas, contentEditable, and rich text editors.
+     * Auto-detects editor type (standard, contentEditable, CodeMirror, Draft.js, ProseMirror)
+     * and uses the optimal input strategy for each.
      */
     async type(selector, text) {
       // Step 1: Find, scroll, focus, click via CDP DOM methods (CSP-safe)
@@ -275,7 +303,6 @@ function createStdlib(kernel) {
       if (!node?.nodeId) throw new Error(`type: "${selector}" not found`)
       await kernel._cdp('DOM.scrollIntoViewIfNeeded', { nodeId: node.nodeId })
       await kernel._cdp('DOM.focus', { nodeId: node.nodeId })
-      // Click to activate (needed for contentEditable / rich text editors)
       const box = await kernel._cdp('DOM.getBoxModel', { nodeId: node.nodeId })
       if (box?.model?.content) {
         const q = box.model.content
@@ -283,30 +310,91 @@ function createStdlib(kernel) {
         const cy = (q[1] + q[3] + q[5] + q[7]) / 4
         await kernel.pointer(cx, cy, 'click')
       }
-      // Step 2: Select all + delete existing content
-      await kernel.keyboard('a', 'press', 4) // Meta+A (select all)
-      await kernel.wait(50)
-      await kernel.keyboard('Backspace', 'press')
-      await kernel.wait(50)
-      // Step 3: Bulk insert text (single CDP command, works with rich text editors)
-      await kernel.keyboard(text, 'insertText')
-      // Step 4: Trigger framework reactivity (best-effort, bypasses CSP via debugger)
+
+      // Step 2: Detect editor type + insert text with optimal strategy
       try {
         await kernel._cdp('Runtime.evaluate', {
           expression: `(() => {
             const el = document.querySelector(${JSON.stringify(selector)});
             if (!el) return;
-            if ('value' in el) {
+            // Detect editor type
+            const cm5 = el.closest('.CodeMirror') || el.querySelector('.CodeMirror');
+            const cm6 = el.closest('.cm-editor') || el.querySelector('.cm-editor');
+            const pm = el.closest('.ProseMirror') || el.querySelector('.ProseMirror');
+            const draft = el.closest('.DraftEditor-root') || el.querySelector('.DraftEditor-root');
+            const isEditable = el.contentEditable === 'true' || el.isContentEditable || pm || draft;
+
+            if (cm5?.CodeMirror) {
+              // CodeMirror 5: use instance API
+              cm5.CodeMirror.setValue(${JSON.stringify(text)});
+            } else if (cm6?.cmView?.view) {
+              // CodeMirror 6: use dispatch
+              const view = cm6.cmView.view;
+              view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: ${JSON.stringify(text)} } });
+            } else if (isEditable) {
+              // contentEditable / Draft.js / ProseMirror: execCommand
+              el.focus();
+              document.execCommand('selectAll', false, null);
+              document.execCommand('insertText', false, ${JSON.stringify(text)});
+            } else if ('value' in el) {
+              // Standard input/textarea: native setter + events
               const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
               const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
               if (setter) setter.call(el, ${JSON.stringify(text)});
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            } else {
+              // Unknown: execCommand as universal fallback
+              el.focus();
+              document.execCommand('selectAll', false, null);
+              document.execCommand('insertText', false, ${JSON.stringify(text)});
             }
-            el.dispatchEvent(new Event('input', { bubbles: true }));
-            el.dispatchEvent(new Event('change', { bubbles: true }));
           })()`,
           returnByValue: true
         })
-      } catch { /* insertText already handled input — reactivity trigger is best-effort */ }
+      } catch {
+        // Runtime.evaluate failed — fall back to kernel insertText
+        await kernel.keyboard('a', 'press', 4)
+        await kernel.wait(50)
+        await kernel.keyboard('Backspace', 'press')
+        await kernel.wait(50)
+        await kernel.keyboard(text, 'insertText')
+      }
+    },
+
+    /**
+     * Fill an element with text — clear then set atomically.
+     * Unlike type(), always uses setter/execCommand (no keyboard simulation).
+     * Fastest option for programmatic content injection.
+     */
+    async fill(selector, text) {
+      const doc = await kernel._cdp('DOM.getDocument', {})
+      const node = await kernel._cdp('DOM.querySelector', { nodeId: doc.root.nodeId, selector })
+      if (!node?.nodeId) throw new Error(`fill: "${selector}" not found`)
+      await kernel._cdp('DOM.scrollIntoViewIfNeeded', { nodeId: node.nodeId })
+      await kernel._cdp('DOM.focus', { nodeId: node.nodeId })
+
+      await kernel._cdp('Runtime.evaluate', {
+        expression: `(() => {
+          const el = document.querySelector(${JSON.stringify(selector)});
+          if (!el) return false;
+          const isEditable = el.contentEditable === 'true' || el.isContentEditable;
+          if (isEditable) {
+            el.focus();
+            document.execCommand('selectAll', false, null);
+            document.execCommand('insertText', false, ${JSON.stringify(text)});
+          } else if ('value' in el) {
+            const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+            const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+            if (setter) setter.call(el, ${JSON.stringify(text)});
+            else el.value = ${JSON.stringify(text)};
+          }
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
+        })()`,
+        returnByValue: true
+      })
     },
 
     /**
@@ -374,6 +462,9 @@ function createStdlib(kernel) {
         const node = await chrome.debugger.sendCommand({ tabId }, 'DOM.querySelector', {
           nodeId: doc.root.nodeId, selector
         })
+        // Strip webkitdirectory/directory attributes that block single-file upload
+        try { await chrome.debugger.sendCommand({ tabId }, 'DOM.removeAttribute', { nodeId: node.nodeId, name: 'webkitdirectory' }) } catch {}
+        try { await chrome.debugger.sendCommand({ tabId }, 'DOM.removeAttribute', { nodeId: node.nodeId, name: 'directory' }) } catch {}
         await chrome.debugger.sendCommand({ tabId }, 'DOM.setFileInputFiles', {
           nodeId: node.nodeId, files: fileList
         })
@@ -590,6 +681,7 @@ export function createPage(tabId, { cdpClick, withDebugger, cdp } = {}) {
     // --- Stdlib operations (the primary tap scripting interface) ---
     click: stdlib.click,
     type: stdlib.type,
+    fill: stdlib.fill,
     hover: stdlib.hover,
     scroll: stdlib.scroll,
     pressKey: stdlib.pressKey,
@@ -630,20 +722,21 @@ const KEY_MAP = {
   Space: { key: ' ', code: 'Space', windowsVirtualKeyCode: 32 },
 }
 
-/** Wait for a tab to finish loading. */
-function waitForTabLoad(tabId) {
+/** Wait for a tab to finish loading, or resolve early on SPA URL change. */
+function waitForTabLoad(tabId, targetUrl) {
   return new Promise((resolve) => {
+    let done = false
+    const finish = () => { if (!done) { done = true; chrome.tabs.onUpdated.removeListener(onUpdated); resolve() } }
     const onUpdated = (id, changeInfo) => {
-      if (id === tabId && changeInfo.status === 'complete') {
-        chrome.tabs.onUpdated.removeListener(onUpdated)
-        resolve()
+      if (id !== tabId) return
+      if (changeInfo.status === 'complete') finish()
+      // SPA optimization: URL changed to target = navigation succeeded
+      if (targetUrl && changeInfo.url && changeInfo.url.startsWith(targetUrl.split('?')[0])) {
+        setTimeout(finish, 500) // give SPA a moment to render
       }
     }
     chrome.tabs.onUpdated.addListener(onUpdated)
-    setTimeout(() => {
-      chrome.tabs.onUpdated.removeListener(onUpdated)
-      resolve()
-    }, 30000)
+    setTimeout(finish, 30000)
   })
 }
 
@@ -652,6 +745,8 @@ async function _fallbackClick(tabId, x, y) {
   await chrome.debugger.attach({ tabId }, '1.3')
   try {
     const params = { x, y, button: 'left', clickCount: 1 }
+    // mouseMoved first — triggers mouseenter/mouseover (required for React synthetic events)
+    await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
     await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mousePressed', ...params })
     await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...params })
   } finally {
