@@ -1,7 +1,7 @@
 ---
 name: tap
-description: "AI browser automation protocol — forge deterministic scripts from any site, then run forever with zero AI. 81 pre-built skills across 41 sites, MCP native."
-version: 0.1.0
+description: "AI browser automation protocol — run pre-built skills for 41 sites, or forge new ones. MCP native, deterministic, zero AI at runtime."
+version: 0.1.1
 metadata:
   openclaw:
     requires:
@@ -21,7 +21,7 @@ Tap gives you deterministic browser automation. Instead of burning tokens on eve
 
 ## How It Works
 
-Tap exposes 38 MCP tools in 6 categories:
+Tap exposes MCP tools in 6 categories:
 
 ### Run Pre-Built Skills (zero AI, instant results)
 
@@ -34,7 +34,7 @@ tap.run({ site: "zhihu", name: "hot" })               → Zhihu trending
 tap.run({ site: "xiaohongshu", name: "search", args: { keyword: "AI" } })
 ```
 
-These run in < 1 second, cost $0, and return structured data every time.
+These run in under 1 second, cost $0, and return structured data every time.
 
 **81 skills across 41 sites**: X/Twitter, Reddit, GitHub, YouTube, Bilibili, Zhihu, Xiaohongshu, Weibo, Medium, arXiv, Hacker News, Product Hunt, Bluesky, Steam, CoinGecko, and more.
 
@@ -42,31 +42,29 @@ These run in < 1 second, cost $0, and return structured data every time.
 
 When you need a site that doesn't have a pre-built skill:
 
-1. **Inspect** — `forge.inspect({ url: "https://example.com" })` analyzes the page: framework, SSR state, APIs, extraction strategies
-2. **Verify** — `forge.verify({ url: "...", expression: "fetch('/api/data')..." })` tests the extraction logic live
-3. **Save** — `forge.save({ site: "example", name: "data", code: "..." })` persists the script
+1. **Inspect** — `forge.inspect({ url: "https://example.com" })` analyzes the page structure and available data sources
+2. **Verify** — `forge.verify({ url: "...", expression: "..." })` tests the extraction logic live
+3. **Save** — `forge.save({ site: "example", name: "data" })` persists the skill
 
 After saving, `tap.run({ site: "example", name: "data" })` works forever. No AI needed.
 
 ### Direct Browser Control
 
-Full browser operation via the page API — use when you need one-off interactions:
+Operate the browser via the page API for one-off interactions:
 
-- `page.nav({ url })` — navigate
+- `page.nav({ url })` — navigate to a page
 - `page.click({ target })` — click by selector or visible text
-- `page.type({ selector, text })` — type into elements
-- `page.eval({ expression })` — execute JavaScript
-- `page.fetch({ url })` — API call with session cookies
+- `page.type({ selector, text })` — type into input fields
 - `page.find({ query })` — find elements by text
-- `page.screenshot()` — capture the page
-- `page.scroll`, `page.hover`, `page.pressKey`, `page.select`, `page.upload`
+- `page.screenshot()` — capture the current page
+- `page.scroll`, `page.hover`, `page.pressKey`, `page.select`
+- `page.fetch({ url })` — make API requests in the page context
 
 ### Inspect & Debug
 
-- `inspect.dom` — full DOM structure
+- `inspect.dom` — page DOM structure
 - `inspect.a11y` — accessibility tree
 - `inspect.page` — page metadata and state
-- `inspect.apiLog` / `inspect.networkDump` — network activity
 - `inspect.resources` — loaded resources
 
 ### Tab Management
@@ -75,18 +73,17 @@ Full browser operation via the page API — use when you need one-off interactio
 - `tab.new({ url })` — open new tab
 - `tab.close({ tabId })` — close tab
 
-### Network Interception
-
-- `intercept.on({ pattern })` — start intercepting requests
-- `intercept.fulfill({ requestId, body })` — mock responses
-- `intercept.continue` / `intercept.fail` — pass through or block
-
 ## Setup
 
 ### 1. Install Tap
 
+Download the latest binary from [GitHub Releases](https://github.com/LeonTing1010/tap/releases/latest) and add to PATH.
+
+Or build from source (requires Deno):
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/LeonTing1010/tap/master/install.sh | sh
+git clone https://github.com/LeonTing1010/tap && cd tap
+deno compile --allow-all --output tap src/cli.ts
 ```
 
 ### 2. Install Chrome Extension
@@ -153,6 +150,4 @@ Add to your OpenClaw MCP configuration:
 
 ## Key Advantage
 
-Other browser skills tell AI how to operate a site step-by-step — every run costs tokens and can fail.
-
-Tap skills are **deterministic scripts** — forged once by AI, then run forever with zero AI. The 81 pre-built skills cover the most common sites. For anything else, use the forge pipeline to create new skills on the fly.
+Other browser skills require AI at every step — each run costs tokens and can fail. Tap skills are deterministic scripts — forged once, then run forever with zero AI. The 81 pre-built skills cover the most common sites. For anything else, use the forge pipeline to create new ones.
