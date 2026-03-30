@@ -277,6 +277,53 @@ function getPage(tabId) {
 
 async function handleTapCommand(method, params = {}) {
   switch (method) {
+    // ---- Kernel primitives — abstract names from page proxy ----
+
+    case 'eval': {
+      const tabId = params.tabId ? Number(params.tabId) : activeTabId
+      if (!tabId) throw new Error('eval: no tab available')
+      const page = getPage(tabId)
+      return await page.eval(params.expression, ...(params.args || []))
+    }
+
+    case 'pointer': {
+      const tabId = await requireTab(params)
+      const page = getPage(tabId)
+      await page.pointer(params.x, params.y, params.action || 'click')
+      return {}
+    }
+
+    case 'keyboard': {
+      const tabId = await requireTab(params)
+      const page = getPage(tabId)
+      await page.keyboard(params.key, params.action || 'press', params.modifiers || 0)
+      return {}
+    }
+
+    case 'nav': {
+      let tabId = params.tabId ? Number(params.tabId) : activeTabId
+      if (!tabId) {
+        const tab = await chrome.tabs.create({ url: 'about:blank' })
+        tabId = tab.id
+        activeTabId = tab.id
+      }
+      const page = getPage(tabId)
+      await page.nav(params.url)
+      return {}
+    }
+
+    case 'wait': {
+      const ms = params.ms || 1000
+      await new Promise(r => setTimeout(r, ms))
+      return {}
+    }
+
+    case 'screenshot': {
+      const tabId = await requireTab(params)
+      const page = getPage(tabId)
+      return await page.screenshot()
+    }
+
     // ---- Core ----
 
     case 'run': {

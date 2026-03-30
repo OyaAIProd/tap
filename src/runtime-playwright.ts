@@ -41,69 +41,59 @@ export async function createPlaywrightRuntime(
   });
   let page = context.pages()[0] || await context.newPage();
 
-  // --- RpcSend: maps (type, method, params) to Playwright calls ---
-  // Handles both abstract names (nav, eval) and CDP names (Page.navigate, Runtime.evaluate)
+  // --- RpcSend: maps abstract method names to Playwright calls ---
   const send: RpcSend = async (_type, method, params) => {
     const p = params as Record<string, unknown>;
 
     switch (method) {
       // ================================================================
-      // KERNEL — 8 primitives (+ CDP aliases)
+      // KERNEL — 8 primitives
       // ================================================================
 
-      case "eval":
-      case "Runtime.evaluate": {
+      case "eval": {
         const expr = p.expression as string;
         const args = (p.args as unknown[]) || [];
-        // Expression is a function string or raw JS
         try {
           if (args.length > 0) {
-            return { result: { value: await page.evaluate(
+            return await page.evaluate(
               `(${expr})(${args.map((a: unknown) => JSON.stringify(a)).join(",")})`,
-            ) } };
+            );
           }
-          const result = await page.evaluate(expr);
-          return { result: { value: result } };
-        } catch (e) {
-          return { result: { value: undefined }, exceptionDetails: { text: String(e) } };
+          return await page.evaluate(expr);
+        } catch {
+          return undefined;
         }
       }
 
-      case "pointer":
-      case "Input.dispatchMouseEvent": {
+      case "pointer": {
         const x = (p.x as number) || 0;
         const y = (p.y as number) || 0;
-        const action = (p.action as string) || (p.type as string) || "click";
-        if (action === "click" || action === "mousePressed") {
-          await page.mouse.click(x, y);
-        } else if (action === "move" || action === "mouseMoved") {
-          await page.mouse.move(x, y);
-        } else if (action === "down") {
-          await page.mouse.down();
-        } else if (action === "up" || action === "mouseReleased") {
-          await page.mouse.up();
+        const action = (p.action as string) || "click";
+        switch (action) {
+          case "click": await page.mouse.click(x, y); break;
+          case "move": await page.mouse.move(x, y); break;
+          case "down": await page.mouse.down(); break;
+          case "up": await page.mouse.up(); break;
         }
         return {};
       }
 
-      case "keyboard":
-      case "Input.dispatchKeyEvent": {
+      case "keyboard": {
         const key = (p.key as string) || "";
-        const action = (p.action as string) || (p.type as string) || "press";
-        if (action === "type" || action === "char") {
+        const action = (p.action as string) || "press";
+        if (action === "type") {
           await page.keyboard.type(key);
         } else if (action === "press") {
           await page.keyboard.press(key);
-        } else if (action === "down" || action === "keyDown") {
+        } else if (action === "down") {
           await page.keyboard.down(key);
-        } else if (action === "up" || action === "keyUp") {
+        } else if (action === "up") {
           await page.keyboard.up(key);
         }
         return {};
       }
 
-      case "nav":
-      case "Page.navigate": {
+      case "nav": {
         const url = p.url as string;
         await page.goto(url, { waitUntil: "networkidle", timeout: 30000 });
         return {};
@@ -115,8 +105,7 @@ export async function createPlaywrightRuntime(
         return {};
       }
 
-      case "screenshot":
-      case "Page.captureScreenshot": {
+      case "screenshot": {
         const buffer = await page.screenshot({ type: "png" });
         const base64 = btoa(
           String.fromCharCode(...new Uint8Array(buffer)),

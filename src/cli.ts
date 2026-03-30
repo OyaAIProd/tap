@@ -326,7 +326,7 @@ async function cmdTap(
         status.update(label);
         return rt.send(_type, method, params);
       };
-      const result = await runTap(tap, tapArgs, send);
+      const result = await runTap(tap, tapArgs, send, dirs);
       status.done(`${site}/${name} — ${result.count} row(s)`);
       console.log(JSON.stringify(result, null, 2));
     } catch (e) {
@@ -345,7 +345,7 @@ async function cmdTap(
         status.update(label);
         return client.sendTap(type, method, params) as Promise<unknown>;
       };
-      const result = await runTap(tap, tapArgs, send);
+      const result = await runTap(tap, tapArgs, send, dirs);
       status.done(`${site}/${name} — ${result.count} row(s)`);
       console.log(JSON.stringify(result, null, 2));
     } catch (e) {
@@ -358,21 +358,19 @@ async function cmdTap(
 }
 
 /** Human-readable label for an RPC step. */
-function formatStep(type: string, method: string, params: Record<string, unknown>): string {
-  // CDP kernel methods
-  if (method === "Page.navigate") {
+function formatStep(_type: string, method: string, params: Record<string, unknown>): string {
+  if (method === "nav") {
     const url = String(params.url || "");
     try { return `nav ${new URL(url).hostname}`; } catch { return `nav ${url.slice(0, 50)}`; }
   }
-  if (method === "Runtime.evaluate") {
+  if (method === "eval") {
     const expr = String(params.expression || "");
     if (expr.startsWith("(async") || expr.startsWith("((")) return `extract`;
     return `eval`;
   }
-  if (method === "Page.captureScreenshot") return `screenshot`;
-  if (method === "Input.dispatchMouseEvent") return `pointer ${params.x},${params.y}`;
-  if (method === "Input.dispatchKeyEvent") return `key ${params.key || ""}`;
-  // Tool commands
+  if (method === "screenshot") return `screenshot`;
+  if (method === "pointer") return `pointer ${params.x},${params.y}`;
+  if (method === "keyboard") return `key ${params.key || ""}`;
   if (method === "run") return `tap ${params.site}/${params.name}`;
   if (method === "click") return `click "${params.target || ""}"`;
   if (method === "type") return `type → ${String(params.selector || "").slice(0, 30)}`;
@@ -455,7 +453,7 @@ async function executeToolCall(
         return client.sendTap(type, method, params, tabId) as Promise<unknown>;
       };
 
-      return await runTap(tap, tapArgs, send);
+      return await runTap(tap, tapArgs, send, dirs);
     }
     case "tap.screenshot": {
       const result = await client.sendTap("cdp", "Page.captureScreenshot", {
