@@ -983,7 +983,9 @@ async function executeToolCall(
 
       if (tap.runtime === "macos") {
         const { createMacOSRuntime } = await import("./runtime-macos.ts");
-        const rt = await createMacOSRuntime({ app: tapArgs.app as string });
+        // Use explicit --app arg, or tap.app declaration (e.g. "WeChat")
+        const appName = (tapArgs.app as string) || tap.app || undefined;
+        const rt = await createMacOSRuntime({ app: appName });
         tapSend = rt.send;
         rtCleanup = rt.close;
       } else if (tap.runtime === "playwright") {

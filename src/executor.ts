@@ -25,6 +25,7 @@ export interface TapModule {
   name: string;
   description: string;
   runtime?: "extension" | "playwright" | "macos";
+  app?: string;
   columns?: string[];
   args?: Record<string, TapArgSpec>;
   health?: TapHealthContract;

@@ -696,9 +696,11 @@ export async function createMacOSRuntime(
 
       case "page.copyAll": {
         // Edit menu Select All + Copy — works on WebViews where CGEvent keyboard doesn't.
-        // Dynamically detects frontmost app (not cached currentApp which may be stale).
+        // Re-activates target app first (focus may have shifted during wait periods).
         // Saves and restores user's clipboard (text only).
         return await jxa(`
+          Application(${JSON.stringify(currentApp || "System Events")}).activate();
+          delay(0.3);
           var se = Application("System Events");
           var front = se.applicationProcesses.whose({frontmost: true})[0];
           var proc = front;
