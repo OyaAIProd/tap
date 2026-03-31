@@ -11,7 +11,7 @@
  *   tap <site> <name> [--args]   — run a tap
  */
 
-export const VERSION = "0.3.0";
+export const VERSION = "0.4.0";
 
 import { startDaemon, EXTENSION_PORT, CLIENT_PORT } from "./daemon.ts";
 import { connectToDaemon, BridgeClient, isDaemonRunning } from "./bridge.ts";
