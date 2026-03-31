@@ -161,6 +161,11 @@ Deno.test("[safety/what] runTap executes extract-format tap via page.nav + page.
     if (method === "page.eval") {
       return Promise.resolve([{ title: "hello", score: "99" }]);
     }
+    // With L1 optimization, eval may be batched into evalBatch
+    if (method === "page.evalBatch") {
+      const exprs = params.expressions as string[] || [];
+      return Promise.resolve(exprs.map(() => [{ title: "hello", score: "99" }]));
+    }
     return Promise.resolve({});
   };
 
@@ -183,8 +188,9 @@ Deno.test("[safety/what] runTap executes extract-format tap via page.nav + page.
   const waitCall = calls.find(c => c.method === "page.waitFor");
   assertEquals(waitCall?.params?.selector, ".item");
 
-  const evalCall = calls.find(c => c.method === "page.eval");
-  assertExists(evalCall, "must call page.eval");
+  // Extract evaluation must happen via either page.eval or page.evalBatch (L1 auto-batching)
+  const evalOrBatch = calls.find(c => c.method === "page.eval" || c.method === "page.evalBatch");
+  assertExists(evalOrBatch, "must call page.eval or page.evalBatch for extract");
 
   assertEquals(result.rows.length >= 1, true);
 });
@@ -195,6 +201,10 @@ Deno.test("[safety/what] runTap extract with dynamic url function", async () => 
   const send = (type: string, method: string, params: Record<string, unknown>) => {
     calls.push({ type, method, params });
     if (method === "page.eval") return Promise.resolve([{ r: "1" }]);
+    if (method === "page.evalBatch") {
+      const exprs = params.expressions as string[] || [];
+      return Promise.resolve(exprs.map(() => [{ r: "1" }]));
+    }
     return Promise.resolve({});
   };
 
@@ -215,8 +225,14 @@ Deno.test("[safety/what] runTap extract with dynamic url function", async () => 
 Deno.test("[safety/what] runTap extract applies limit arg", async () => {
   // Why: runtime must honor limit to avoid returning thousands of rows
   const send = (_t: string, method: string, _p: Record<string, unknown>) => {
+    const rows50 = Array.from({ length: 50 }, (_, i) => ({ n: String(i) }));
     if (method === "page.eval") {
-      return Promise.resolve(Array.from({ length: 50 }, (_, i) => ({ n: String(i) })));
+      return Promise.resolve(rows50);
+    }
+    // With L1 optimization, may be batched into evalBatch
+    if (method === "page.evalBatch") {
+      const exprs = _p.expressions as string[] || [];
+      return Promise.resolve(exprs.map(() => rows50));
     }
     return Promise.resolve({});
   };
