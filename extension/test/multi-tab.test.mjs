@@ -270,15 +270,15 @@ test('executeToolCall auto-allocates tab when sessionTabId is unset', () => {
 })
 
 test('tab-needing tools are distinguished from tab-free tools', () => {
-  // TAB_FREE_TOOLS must exist somewhere in the file and be referenced by executeToolCall
-  assert(CLI_SRC.includes('TAB_FREE_TOOLS') && CLI_SRC.includes('tap.list') && CLI_SRC.includes('tap.logs'),
-    'CLI must have TAB_FREE_TOOLS set with tap.list, tap.logs, etc.')
+  // Must have a mechanism to skip tab allocation for tab-free tools
+  assert(CLI_SRC.includes('tap.list') && CLI_SRC.includes('tap.logs'),
+    'CLI must list tab-free tools (tap.list, tap.logs, etc.)')
   const execFn = CLI_SRC.substring(
     CLI_SRC.indexOf('async function executeToolCall'),
     CLI_SRC.indexOf('async function executeToolCall') + 500
   )
-  assert(execFn.includes('TAB_FREE_TOOLS'),
-    'executeToolCall must reference TAB_FREE_TOOLS to skip tab allocation for tab-free tools')
+  assert(execFn.includes('isTabFree') || execFn.includes('TAB_FREE'),
+    'executeToolCall must check if tool needs a tab before auto-allocating')
 })
 
 // ═══════════════════════════════════════════════════════════

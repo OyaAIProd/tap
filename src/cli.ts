@@ -24,9 +24,10 @@ import { handleInitialize, handleToolsList, handlePromptsList, handlePromptsGet,
 // --- Constants ---
 
 // Tools that never need a browser tab — skip auto-allocation for these.
-const TAB_FREE_TOOLS = new Set([
-  "tap.list", "tap.logs", "tap.reload", "tap.version", "forge.save",
-]);
+function isTabFree(name: string): boolean {
+  return name === "tap.list" || name === "tap.logs" || name === "tap.reload"
+    || name === "tap.version" || name === "forge.save";
+}
 
 const TARGETS: Record<string, string> = {
   "darwin-aarch64": "aarch64-apple-darwin",
@@ -953,7 +954,7 @@ async function executeToolCall(
   let tabId = (args.tabId as number) ?? (sessionTabId >= 0 ? sessionTabId : -1);
 
   // Auto-allocate a tab for this session if needed (fd model: each session owns its tab)
-  if (tabId < 0 && !TAB_FREE_TOOLS.has(name)) {
+  if (tabId < 0 && !isTabFree(name)) {
     const newTab = await client.sendTap("tool", "tab.new", {}) as Record<string, unknown>;
     tabId = (newTab?.tabId as number) ?? -1;
   }
