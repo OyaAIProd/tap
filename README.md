@@ -30,6 +30,16 @@ forge_inspect → forge_verify → forge_save → tap.run
 
 One agent forges a tap. Every agent benefits.
 
+### Why Tap
+
+| What users care about | How Tap delivers |
+|----------------------|-----------------|
+| **Will my account get banned?** | Undetectable. Uses Chrome Extensions API (`chrome.scripting`), not debugger protocol. Websites cannot distinguish Tap from a normal browser extension. No yellow "debugging" bar. |
+| **Is it accurate?** | Deterministic. Same script, same result, every time. Health contracts (`min_rows`, `non_empty`) catch failures before they reach you. No hallucinations on the 1000th run. |
+| **Can it extract any data?** | 8 kernel primitives cover every possible interaction. API-first when possible, DOM fallback when necessary. 106 skills across 50+ sites ready to use. |
+| **Does it work beyond the browser?** | 3 runtimes, same protocol: Chrome Extension (your real browser), Playwright (headless), macOS native apps (Accessibility API + CGEvent). Android next. |
+| **What does it cost?** | AI tokens once during forge (~$0.50). Then $0.00 forever. |
+
 **106 ready-to-use skills across 50 sites** — X/Twitter, Reddit, GitHub, YouTube, Bilibili, Zhihu, Xiaohongshu, Weibo, Medium, arXiv, and [many more](https://github.com/LeonTing1010/tap-skills). Uses your real Chrome session. No API keys needed.
 
 ## The Core Idea
@@ -265,17 +275,18 @@ Now `tap hackernews hot` runs forever. No AI. No tokens. No maintenance until th
 ## Architecture
 
 ```
-                    ┌─ Chrome Extension (kernel via CDP)
-AI Agent ←→ MCP ←→ Deno Executor ─┤
-  CLI / MCP          load + run     └─ Playwright (kernel via pw API)
+                    ┌─ Chrome Extension (kernel via chrome.scripting + CDP)
+AI Agent ←→ MCP ←→ Deno Executor ─┤─ Playwright    (kernel via pw API)
+  CLI / MCP          load + run     └─ macOS native  (kernel via JXA + CGEvent)
 ```
 
-**~1,800 lines. Zero dependencies.** The entire system — CLI, MCP server, executor, daemon, two runtimes — in under 2,000 lines of Deno. No frameworks. No build step. No node_modules.
+**~2,000 lines. Zero dependencies.** The entire system — CLI, MCP server, executor, daemon, three runtimes — in Deno. No frameworks. No build step. No node_modules.
 
-- **Chrome extension** — Runtime #1. Your real browser with real login sessions. No headless detection, no fingerprint spoofing.
+- **Chrome extension** — Runtime #1. Your real browser with real login sessions. Uses Chrome Extensions API (`chrome.scripting`) for undetectable automation, CDP only for input events and CSP fallback.
 - **Playwright** — Runtime #2. Headless capable, no extension needed. Server-side automation.
+- **macOS** — Runtime #3. Native desktop app automation via Accessibility API, CGEvent, and JXA.
 - **.tap.js** — Deterministic scripts. Pure JavaScript, zero AI, runs forever.
-- **MCP server** — 40 tools exposing the full protocol to any AI agent.
+- **MCP server** — 43 tools exposing the full protocol to any AI agent.
 
 ### .tap.js Format
 
@@ -339,13 +350,20 @@ export default {
 
 ## How Tap Compares
 
-| Your need | Best tool | Why |
-|-----------|-----------|-----|
-| Deterministic site operations for AI agents | **Tap** | 106 pre-built skills, zero LLM cost at runtime, MCP native |
-| General LLM-driven browsing | Browser-Use, Stagehand | LLM decides each step — flexible but slow and expensive |
-| Large-scale crawling | Crawl4AI, Scrapy | Purpose-built for throughput and scale |
-| CLI wrapper for websites | OpenCLI | Tool collection approach; Tap is a protocol |
-| E2E testing | Playwright, Cypress | Test frameworks, not agent protocols |
+|  | Tap | Inspector Jake | Browser-Use / Stagehand | Playwright / Puppeteer |
+|--|-----|---------------|------------------------|----------------------|
+| **AI at runtime** | No (forge once) | Yes (every step) | Yes (every step) | No (scripted) |
+| **Detection risk** | Undetectable (Extensions API) | Detectable (CDP debugger) | Detectable (CDP) | Detectable (headless) |
+| **Cost model** | ~$0.50 once, then $0 | Tokens per session | Tokens per session | Free (manual scripts) |
+| **Accuracy** | Deterministic | AI-dependent | AI-dependent | Deterministic |
+| **Cross-platform** | Browser + headless + macOS | Browser only | Browser only | Browser only |
+| **Reusable artifacts** | .tap.js (shareable) | None (ephemeral) | None (ephemeral) | Test scripts |
+| **Composability** | `page.tap()` pipelines | None | None | Limited |
+| **Skills ecosystem** | 106 across 50 sites | None | None | None |
+| **MCP native** | Yes | Yes | No | No |
+| **Self-healing** | Health contracts | None | AI retries | Assertions |
+
+**Tap and Inspector Jake are complementary.** Inspector Jake is a microscope — AI reads the ARIA tree and makes real-time decisions. Tap is a printing press — AI's understanding becomes a permanent, reusable program. Use Inspector Jake to explore, Tap to ship.
 
 ## Building
 
@@ -365,7 +383,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). The easiest way to contribute: **forge a
 
 - [x] **106 community skills** — `tap install` from [tap-skills](https://github.com/LeonTing1010/tap-skills)
 - [x] **Playwright runtime** — second kernel, headless capable
+- [x] **macOS runtime** — native desktop app automation via Accessibility API + CGEvent
 - [x] **One update** — `tap update` pulls core + skills + reloads all connected runtimes
+- [ ] **Self-healing taps** — auto re-forge when health contracts detect page changes
 - [ ] **Android runtime** — AccessibilityService-based kernel
 - [ ] **Tap registry** — publish and discover taps like packages
 

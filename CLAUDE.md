@@ -35,9 +35,10 @@ Tap follows the **POSIX design philosophy**: minimal kernel, maximal possibility
 └──────────────────────┬──────────────────────────┘
                        │ Runtime Interface
 ┌──────────────────────▼──────────────────────────┐
-│ Runtime #1: Chrome Extension                     │
+│ Runtime #1: Chrome Extension (chrome.scripting + CDP)│
 │ Runtime #2: Playwright (validated 2026-03-30)    │
-│ Runtime #N: Android, iOS, Desktop (future)       │
+│ Runtime #3: macOS (JXA + CGEvent + AX API)       │
+│ Runtime #N: Android, iOS (future)                │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -54,6 +55,7 @@ Tap follows the **POSIX design philosophy**: minimal kernel, maximal possibility
 
 ### Key Rules
 
+- **Extensions API first, CDP second.** `chrome.scripting` is undetectable by websites. CDP (`chrome.debugger`) triggers visible debugging state. Only use CDP for: input events (pointer/keyboard), CSP fallback, and performance fast path when debugger is already attached.
 - **No direct CDP in stdlib.** Stdlib calls kernel primitives. Only kernel touches `chrome.debugger`.
 - **No `chrome.scripting` in stdlib.** Use `kernel.eval()` instead.
 - **Composition is local.** `page.tap()` loads sub-taps from disk and runs them in the executor. Never delegates to extension's tap registry. The executor is the only place that knows how to find and run taps. Extension is a runtime, not an executor.
@@ -64,17 +66,18 @@ Tap follows the **POSIX design philosophy**: minimal kernel, maximal possibility
 ## Architecture
 
 ```
-                    ┌─ Chrome Extension (kernel via CDP)
-Claude Code ←→ MCP ←→ Deno Executor ─┤
-  cli.ts / mcp.ts    executor.ts     └─ Playwright (kernel via pw API)
+                    ┌─ Chrome Extension (chrome.scripting + CDP)
+Claude Code ←→ MCP ←→ Deno Executor ─┤─ Playwright (pw API)
+  cli.ts / mcp.ts    executor.ts     └─ macOS (JXA + CGEvent)
   tool dispatch       load + run tap
   + forge tools       page proxy → kernel RPC
 ```
 
-**Deno CLI** = MCP server + CLI + daemon + executor (~1,800 lines). Zero dependencies.
+**Deno CLI** = MCP server + CLI + daemon + executor (~2,000 lines). Zero dependencies.
 **Deno Executor** = Primary tap executor. Loads .tap.js from disk, runs tap logic locally, routes kernel calls to runtime.
-**Chrome Extension** = Runtime #1 (kernel provider). Receives kernel RPC via daemon WebSocket.
+**Chrome Extension** = Runtime #1 (kernel provider). Uses chrome.scripting (undetectable) for eval, CDP only for input events and CSP fallback.
 **Playwright** = Runtime #2. `tap --runtime playwright <site> <name>`. Headless capable.
+**macOS** = Runtime #3. `tap --runtime macos <site> <name> [--app "App Name"]`. Native desktop apps via Accessibility API.
 **.tap.js** = deterministic scripts using page API (8 kernel + 17 stdlib). Zero AI at runtime.
 
 ### Daemon Architecture
