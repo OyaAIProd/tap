@@ -616,6 +616,12 @@ async function cmdMcp(): Promise<void> {
       }
     }
   }
+
+  // MCP session ending — close auto-allocated tab to prevent leaks
+  if (client && sessionTabId >= 0) {
+    try { await client.sendTap("tool", "tab.close", { tabId: sessionTabId }); } catch { /* best effort */ }
+    client.close();
+  }
 }
 
 async function cmdTap(
