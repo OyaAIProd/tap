@@ -752,25 +752,28 @@ h2 em { font-style: italic; color: var(--gold); }
 }
 
 .install-steps {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 24px;
-  max-width: 900px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 700px;
   margin: 0 auto;
 }
 
 .install-step {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 24px;
   background: var(--bg-surface);
   border: 1px solid rgba(79, 70, 229, 0.06);
   border-radius: 16px;
-  padding: 32px 28px;
+  padding: 32px 32px;
+  align-items: start;
 }
 
 .install-step-num {
   font-family: var(--font-display);
-  font-size: 36px;
+  font-size: 40px;
   color: var(--indigo);
-  margin-bottom: 16px;
   line-height: 1;
 }
 
@@ -778,7 +781,7 @@ h2 em { font-style: italic; color: var(--gold); }
   font-size: 16px;
   font-weight: 600;
   color: var(--white);
-  margin-bottom: 12px;
+  margin-bottom: 6px;
 }
 
 .install-step p {
@@ -786,15 +789,16 @@ h2 em { font-style: italic; color: var(--gold); }
   color: var(--text-dim);
   line-height: 1.6;
   font-weight: 300;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .code-block {
   background: var(--bg-deep);
   border: 1px solid rgba(255,255,255,0.05);
   border-radius: 10px;
-  padding: 16px 18px;
+  padding: 14px 18px;
   font-family: var(--font-mono);
+  word-break: break-all;
   font-size: 13px;
   color: var(--text);
   overflow-x: auto;
@@ -866,7 +870,7 @@ footer {
   .stats-bar { grid-template-columns: repeat(2, 1fr); margin-top: 0; }
   .core-grid { grid-template-columns: 1fr; gap: 40px; }
   .skills-categories { grid-template-columns: repeat(2, 1fr); }
-  .install-steps { grid-template-columns: 1fr; }
+  .install-steps { max-width: 100%; }
   .arch-features { grid-template-columns: 1fr; }
   .nav-links { display: none; }
 }
@@ -1237,34 +1241,26 @@ footer {
     <div class="install-steps">
       <div class="install-step reveal">
         <div class="install-step-num">1</div>
-        <h4>Install CLI</h4>
-        <p>One-line install for macOS and Linux.</p>
-        <div class="code-block">
-          <span class="prompt">$ </span><span class="cmd">curl -fsSL https://raw.githubusercontent.com/LeonTing1010/tap/master/install.sh | sh</span>
+        <div>
+          <h4>Install CLI</h4>
+          <p>One-line install for macOS and Linux.</p>
+          <div class="code-block"><span class="prompt">$ </span><span class="cmd">curl -fsSL https://raw.githubusercontent.com/LeonTing1010/tap/master/install.sh | sh</span></div>
         </div>
       </div>
       <div class="install-step reveal">
         <div class="install-step-num">2</div>
-        <h4>Load Extension</h4>
-        <p>Download from <a href="https://github.com/LeonTing1010/tap/releases/latest" style="color:var(--indigo-light)">Releases</a>, unzip, load unpacked in Chrome.</p>
-        <div class="code-block">
-          <span class="comment"># Or install skills</span><br>
-          <span class="prompt">$ </span><span class="cmd">tap update</span>
+        <div>
+          <h4>Load Extension &amp; Skills</h4>
+          <p>Download <a href="https://github.com/LeonTing1010/tap/releases/latest" style="color:var(--indigo-light)">tap-extension.zip</a> from Releases, unzip, load unpacked in Chrome. Then install community skills.</p>
+          <div class="code-block"><span class="prompt">$ </span><span class="cmd">tap update</span></div>
         </div>
       </div>
       <div class="install-step reveal">
         <div class="install-step-num">3</div>
-        <h4>Connect Agent</h4>
-        <p>Add to your MCP config and start tapping.</p>
-        <div class="code-block">
-<span class="hl-dim">{</span>
-  <span class="cmd">"mcpServers"</span><span class="hl-dim">: {</span>
-    <span class="cmd">"tap"</span><span class="hl-dim">: {</span>
-      <span class="cmd">"command"</span><span class="hl-dim">:</span> <span style="color:var(--gold)">"tap"</span><span class="hl-dim">,</span>
-      <span class="cmd">"args"</span><span class="hl-dim">:</span> <span class="hl-dim">[</span><span style="color:var(--gold)">"mcp"</span><span class="hl-dim">]</span>
-    <span class="hl-dim">}</span>
-  <span class="hl-dim">}</span>
-<span class="hl-dim">}</span>
+        <div>
+          <h4>Connect Your AI Agent</h4>
+          <p>Add to your MCP config (Claude Code, Cursor, Windsurf, etc.) and start tapping.</p>
+          <div class="code-block"><span class="hl-dim">{</span> <span class="cmd">"mcpServers"</span><span class="hl-dim">:</span> <span class="hl-dim">{</span> <span class="cmd">"tap"</span><span class="hl-dim">:</span> <span class="hl-dim">{</span> <span class="cmd">"command"</span><span class="hl-dim">:</span> <span style="color:var(--gold)">"tap"</span><span class="hl-dim">,</span> <span class="cmd">"args"</span><span class="hl-dim">:</span> <span class="hl-dim">[</span><span style="color:var(--gold)">"mcp"</span><span class="hl-dim">]</span> <span class="hl-dim">} } }</span></div>
         </div>
       </div>
     </div>
