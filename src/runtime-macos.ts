@@ -38,7 +38,7 @@ export interface MacOSRuntime {
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
-/** Run a script via osascript stdin (avoids shell injection). */
+/** Run a one-shot script via osascript (used for AppleScript only). */
 async function run(
   script: string,
   lang: "AppleScript" | "JavaScript",
@@ -61,14 +61,158 @@ async function run(
 
 const as = (s: string) => run(s, "AppleScript");
 
-async function jxa(s: string): Promise<unknown> {
-  const out = await run(s, "JavaScript");
-  if (!out) return null;
-  try {
-    return JSON.parse(out);
-  } catch {
-    return out;
+/**
+ * Persistent JXA process — one osascript for the entire runtime lifetime.
+ * Eliminates focus-switching between operations (the #1 macOS tap stability issue).
+ *
+ * Protocol: newline-delimited JSON over stdin/stdout.
+ *   → {"id":1,"s":"Application('WeChat').activate()"}
+ *   ← {"id":1,"r":"WeChat"}           // success
+ *   ← {"id":1,"e":"Error: ..."}       // error
+ */
+class JxaProcess {
+  private child: Deno.ChildProcess;
+  private writer: WritableStreamDefaultWriter<Uint8Array>;
+  private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+  private nextId = 1;
+  private buf = "";
+  private readyResolve!: () => void;
+
+  constructor() {
+    // Bootstrap: JXA REPL that reads JSON messages from stdin, eval()s, writes results to stdout.
+    // Must be a file because osascript reads ALL of stdin as script before executing.
+    // With a file arg, osascript runs the file and stdin is free for the message protocol.
+    const bootstrap = `
+ObjC.import('CoreGraphics');
+ObjC.import('Foundation');
+var __app = Application.currentApplication();
+__app.includeStandardAdditions = true;
+var __stdin = $.NSFileHandle.fileHandleWithStandardInput;
+var __stdout = $.NSFileHandle.fileHandleWithStandardOutput;
+function __write(s) {
+  __stdout.writeData($.NSString.alloc.initWithUTF8String(s + "\\n").dataUsingEncoding($.NSUTF8StringEncoding));
+}
+__write(JSON.stringify({id:0,r:"ready"}));
+var __buf = "";
+while (true) {
+  var __data = __stdin.availableData;
+  if (__data.length === 0) break;
+  __buf += $.NSString.alloc.initWithDataEncoding(__data, $.NSUTF8StringEncoding).js;
+  var __lines = __buf.split("\\n");
+  __buf = __lines.pop();
+  for (var __i = 0; __i < __lines.length; __i++) {
+    if (!__lines[__i].trim()) continue;
+    var __msg = JSON.parse(__lines[__i]);
+    try {
+      var __result = eval(__msg.s);
+      __write(JSON.stringify({id: __msg.id, r: __result}));
+    } catch(__err) {
+      __write(JSON.stringify({id: __msg.id, e: String(__err)}));
+    }
   }
+}
+`;
+    // Write bootstrap to temp file
+    const tmp = Deno.makeTempFileSync({ suffix: ".js" });
+    Deno.writeTextFileSync(tmp, bootstrap);
+
+    // Run osascript with file arg — stdin is free for messages
+    const cmd = new Deno.Command("osascript", {
+      args: ["-l", "JavaScript", tmp],
+      stdin: "piped",
+      stdout: "piped",
+      stderr: "null",
+    });
+    this.child = cmd.spawn();
+    this.writer = this.child.stdin.getWriter();
+
+    // Bootstrap sends {id:0, r:"ready"} when REPL loop starts
+    this.ready = new Promise((resolve) => {
+      this.readyResolve = resolve;
+      this.pending.set(0, { resolve: () => resolve(), reject: () => resolve() });
+    });
+
+    // Read stdout line-by-line, dispatch to pending
+    this.readLoop();
+
+    // Clean up temp file after process starts
+    delay(500).then(() => Deno.remove(tmp).catch(() => {}));
+  }
+
+  private async readLoop() {
+    const reader = this.child.stdout.getReader();
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        this.buf += dec.decode(value);
+        const lines = this.buf.split("\n");
+        this.buf = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const msg = JSON.parse(line);
+            const p = this.pending.get(msg.id);
+            if (p) {
+              this.pending.delete(msg.id);
+              if (msg.e) p.reject(new Error(msg.e));
+              else p.resolve(msg.r ?? null);
+            }
+          } catch { /* skip malformed lines */ }
+        }
+      }
+    } catch { /* process exited */ }
+    // Reject all remaining pending
+    for (const [, p] of this.pending) p.reject(new Error("JXA process exited"));
+    this.pending.clear();
+  }
+
+  private ready: Promise<void>;
+
+  /** Wait for the bootstrap "ready" signal before sending evals. */
+  waitReady(): Promise<void> { return this.ready; }
+
+  eval(script: string, timeoutMs = 30000): Promise<unknown> {
+    const id = this.nextId++;
+    const line = JSON.stringify({ id, s: script }) + "\n";
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`JXA eval timeout after ${timeoutMs}ms`));
+      }, timeoutMs);
+      this.pending.set(id, {
+        resolve: (v) => { clearTimeout(timer); resolve(v); },
+        reject: (e) => { clearTimeout(timer); reject(e); },
+      });
+      this.writer.write(enc.encode(line)).catch(reject);
+    });
+  }
+
+  async close() {
+    try { await this.writer.close(); } catch { /* already closed */ }
+    try { this.child.kill(); } catch { /* already dead */ }
+  }
+}
+
+// Module-level singleton: lazily created, reused across runtime instances
+let _jxaProc: JxaProcess | null = null;
+async function getJxa(): Promise<JxaProcess> {
+  if (!_jxaProc) {
+    _jxaProc = new JxaProcess();
+    await _jxaProc.waitReady();
+  }
+  return _jxaProc;
+}
+
+/** Execute JXA in the persistent process (single process, no focus switching). */
+async function jxa(s: string): Promise<unknown> {
+  const proc = await getJxa();
+  const result = await proc.eval(s);
+  // Match old jxa() behavior: if result is a JSON string, parse it
+  if (typeof result === "string") {
+    try { return JSON.parse(result); } catch { return result; }
+  }
+  return result ?? null;
 }
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -537,26 +681,24 @@ export async function createMacOSRuntime(
 
       case "page.copyAll": {
         // Edit menu Select All + Copy — works on WebViews where CGEvent keyboard doesn't.
+        // Dynamically detects frontmost app (not cached currentApp which may be stale).
         // Saves and restores user's clipboard (text only).
         return await jxa(`
-          var app = Application.currentApplication();
-          app.includeStandardAdditions = true;
           var se = Application("System Events");
-          var proc = se.processes[${JSON.stringify(currentApp)}];
-          Application(${JSON.stringify(currentApp)}).activate();
-          delay(0.3);
+          var front = se.applicationProcesses.whose({frontmost: true})[0];
+          var proc = front;
           // Save user clipboard
           var saved = "";
-          try { saved = String(app.theClipboard()); } catch(e) {}
-          app.setTheClipboardTo("");
+          try { saved = String(__app.theClipboard()); } catch(e) {}
+          __app.setTheClipboardTo("");
           delay(0.1);
           proc.menuBars[0].menuBarItems["Edit"].menus[0].menuItems["Select All"].click();
           delay(0.5);
           proc.menuBars[0].menuBarItems["Edit"].menus[0].menuItems["Copy"].click();
           delay(0.5);
-          var result = String(app.theClipboard());
+          var result = String(__app.theClipboard());
           // Restore user clipboard
-          try { app.setTheClipboardTo(saved); } catch(e) {}
+          try { __app.setTheClipboardTo(saved); } catch(e) {}
           result;
         `);
       }
@@ -797,7 +939,7 @@ export async function createMacOSRuntime(
   return {
     send,
     close: async () => {
-      /* no persistent resources to clean up */
+      if (_jxaProc) { await _jxaProc.close(); _jxaProc = null; }
     },
     app: currentApp,
     getWindowRect: async () => {
