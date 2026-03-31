@@ -210,13 +210,13 @@ export function buildToolsSchema() {
     // Tap operations
     {
       name: "tap.list",
-      description: "List all available taps. ALWAYS call this first before any page.* tool. If a matching tap exists, use tap.run — it executes with zero AI, faster and more stable than manual page operations.",
+      description: "List all available taps. ALWAYS call this first before any page.* tool. If a matching tap exists, use tap.run — it executes with zero AI, faster and more stable than manual page operations. NEVER bypass a tap by using manual page.* calls to replicate what a tap already does.",
       inputSchema: { type: "object", properties: {} },
     },
     {
       name: "tap.run",
       description:
-        "Run a pre-built tap. Preferred over page.* tools — deterministic, zero AI at runtime. Workflow: tap.list → tap.run (if match) → forge if none. Returns {columns, rows, count, timing}. If rows is empty, use forge.inspect to re-forge.",
+        "Run a pre-built tap. Preferred over page.* tools — deterministic, zero AI at runtime. Workflow: tap.list → tap.run (if match) → forge if none. Returns {columns, rows, count, timing}. If rows is empty, use forge.inspect to re-forge. On transient failure (timeout, connection), RETRY tap.run — do not fall back to manual page.* operations.",
       inputSchema: {
         type: "object",
         properties: {
@@ -235,6 +235,7 @@ export function buildToolsSchema() {
         properties: {
           format: { type: "string", enum: ["jpeg", "png"], default: "jpeg" },
           quality: { type: "integer", default: 50 },
+          tabId: { type: "integer", description: "Target tab. Omit for current tab." },
         },
       },
     },
@@ -298,10 +299,13 @@ export function buildToolsSchema() {
     // Page
     {
       name: "page.nav",
-      description: "Navigate to a URL. Before calling this, check tap.list — if a tap exists for this site/task, use tap.run instead. Returns {tabId, url, title}. If url differs from requested, a redirect occurred.",
+      description: "Navigate to a URL. Before calling this, check tap.list — if a tap exists for this site/task, use tap.run instead. Returns {tabId, url, title}. If url differs from requested, a redirect occurred. For concurrent agents: call tab.new first, then pass its tabId here to isolate tabs.",
       inputSchema: {
         type: "object",
-        properties: { url: { type: "string" } },
+        properties: {
+          url: { type: "string" },
+          tabId: { type: "integer", description: "Target tab (from tab.new or prior page.nav). Omit for current tab." },
+        },
         required: ["url"],
       },
     },
@@ -310,7 +314,10 @@ export function buildToolsSchema() {
       description: "Click on an element by visible text or CSS selector. Returns the resulting url and title. Use page.find first if unsure whether the element exists.",
       inputSchema: {
         type: "object",
-        properties: { target: { type: "string" } },
+        properties: {
+          target: { type: "string" },
+          tabId: { type: "integer", description: "Target tab. Omit for current tab." },
+        },
         required: ["target"],
       },
     },
@@ -322,6 +329,7 @@ export function buildToolsSchema() {
         properties: {
           selector: { type: "string" },
           text: { type: "string" },
+          tabId: { type: "integer", description: "Target tab. Omit for current tab." },
         },
         required: ["selector", "text"],
       },
@@ -335,6 +343,7 @@ export function buildToolsSchema() {
         properties: {
           selector: { type: "string" },
           text: { type: "string" },
+          tabId: { type: "integer", description: "Target tab. Omit for current tab." },
         },
         required: ["selector", "text"],
       },
@@ -344,7 +353,10 @@ export function buildToolsSchema() {
       description: "Evaluate JavaScript in the browser. The universal escape hatch — use when other page.* tools can't do what you need. Falls back to CDP Runtime.evaluate on CSP-strict sites.",
       inputSchema: {
         type: "object",
-        properties: { expression: { type: "string" } },
+        properties: {
+          expression: { type: "string" },
+          tabId: { type: "integer", description: "Target tab. Omit for current tab." },
+        },
         required: ["expression"],
       },
     },
@@ -356,6 +368,7 @@ export function buildToolsSchema() {
         properties: {
           query: { type: "string" },
           role: { type: "string" },
+          tabId: { type: "integer", description: "Target tab. Omit for current tab." },
         },
         required: ["query"],
       },
@@ -365,7 +378,10 @@ export function buildToolsSchema() {
       description: "Hover over an element.",
       inputSchema: {
         type: "object",
-        properties: { selector: { type: "string" } },
+        properties: {
+          selector: { type: "string" },
+          tabId: { type: "integer", description: "Target tab. Omit for current tab." },
+        },
         required: ["selector"],
       },
     },
@@ -374,7 +390,10 @@ export function buildToolsSchema() {
       description: "Scroll an element into view.",
       inputSchema: {
         type: "object",
-        properties: { selector: { type: "string" } },
+        properties: {
+          selector: { type: "string" },
+          tabId: { type: "integer", description: "Target tab. Omit for current tab." },
+        },
         required: ["selector"],
       },
     },
@@ -386,6 +405,7 @@ export function buildToolsSchema() {
         properties: {
           key: { type: "string" },
           modifiers: { type: "integer", default: 0 },
+          tabId: { type: "integer", description: "Target tab. Omit for current tab." },
         },
         required: ["key"],
       },
@@ -398,6 +418,7 @@ export function buildToolsSchema() {
         properties: {
           selector: { type: "string" },
           value: { type: "string" },
+          tabId: { type: "integer", description: "Target tab. Omit for current tab." },
         },
         required: ["selector", "value"],
       },
@@ -410,6 +431,7 @@ export function buildToolsSchema() {
         properties: {
           selector: { type: "string" },
           files: { type: "string" },
+          tabId: { type: "integer", description: "Target tab. Omit for current tab." },
         },
         required: ["selector", "files"],
       },
@@ -422,13 +444,14 @@ export function buildToolsSchema() {
         properties: {
           accept: { type: "boolean", default: true },
           prompt_text: { type: "string" },
+          tabId: { type: "integer", description: "Target tab. Omit for current tab." },
         },
       },
     },
     {
       name: "page.cookies",
       description: "Get cookies for the current page.",
-      inputSchema: { type: "object", properties: {} },
+      inputSchema: { type: "object", properties: { tabId: { type: "integer", description: "Target tab. Omit for current tab." } } },
     },
     {
       name: "page.setCookie",
@@ -439,6 +462,7 @@ export function buildToolsSchema() {
           name: { type: "string" },
           value: { type: "string" },
           domain: { type: "string" },
+          tabId: { type: "integer", description: "Target tab. Omit for current tab." },
         },
         required: ["name", "value"],
       },
@@ -448,7 +472,10 @@ export function buildToolsSchema() {
       description: "Read localStorage/sessionStorage.",
       inputSchema: {
         type: "object",
-        properties: { type: { type: "string" } },
+        properties: {
+          type: { type: "string" },
+          tabId: { type: "integer", description: "Target tab. Omit for current tab." },
+        },
       },
     },
     // Inspect
@@ -457,59 +484,68 @@ export function buildToolsSchema() {
       description: "Get page DOM structure.",
       inputSchema: {
         type: "object",
-        properties: { selector: { type: "string" } },
+        properties: {
+          selector: { type: "string" },
+          tabId: { type: "integer", description: "Target tab. Omit for current tab." },
+        },
       },
     },
     {
       name: "inspect.page",
       description: "Get page info (url, title, meta).",
-      inputSchema: { type: "object", properties: {} },
+      inputSchema: { type: "object", properties: { tabId: { type: "integer", description: "Target tab. Omit for current tab." } } },
     },
     {
       name: "inspect.a11y",
       description: "Get accessibility tree.",
-      inputSchema: { type: "object", properties: {} },
+      inputSchema: { type: "object", properties: { tabId: { type: "integer", description: "Target tab. Omit for current tab." } } },
     },
     {
       name: "inspect.element",
       description: "Inspect a specific element.",
       inputSchema: {
         type: "object",
-        properties: { selector: { type: "string" } },
+        properties: {
+          selector: { type: "string" },
+          tabId: { type: "integer", description: "Target tab. Omit for current tab." },
+        },
         required: ["selector"],
       },
     },
     {
       name: "inspect.resources",
       description: "List page resources.",
-      inputSchema: { type: "object", properties: {} },
+      inputSchema: { type: "object", properties: { tabId: { type: "integer", description: "Target tab. Omit for current tab." } } },
     },
     {
       name: "inspect.globals",
       description: "List global JS variables.",
-      inputSchema: { type: "object", properties: {} },
+      inputSchema: { type: "object", properties: { tabId: { type: "integer", description: "Target tab. Omit for current tab." } } },
     },
     {
       name: "inspect.apiLog",
       description: "Get captured API calls.",
-      inputSchema: { type: "object", properties: {} },
+      inputSchema: { type: "object", properties: { tabId: { type: "integer", description: "Target tab. Omit for current tab." } } },
     },
     {
       name: "inspect.networkStart",
       description: "Start network capture.",
-      inputSchema: { type: "object", properties: {} },
+      inputSchema: { type: "object", properties: { tabId: { type: "integer", description: "Target tab. Omit for current tab." } } },
     },
     {
       name: "inspect.networkDump",
       description: "Dump captured network log.",
-      inputSchema: { type: "object", properties: {} },
+      inputSchema: { type: "object", properties: { tabId: { type: "integer", description: "Target tab. Omit for current tab." } } },
     },
     {
       name: "inspect.download",
       description: "Download and parse a URL.",
       inputSchema: {
         type: "object",
-        properties: { url: { type: "string" } },
+        properties: {
+          url: { type: "string" },
+          tabId: { type: "integer", description: "Target tab. Omit for current tab." },
+        },
         required: ["url"],
       },
     },
@@ -521,7 +557,7 @@ export function buildToolsSchema() {
     },
     {
       name: "tab.new",
-      description: "Open a new tab.",
+      description: "Open a new tab. Returns {tabId, url}. For concurrent agents: each agent should call tab.new first, then pass its tabId to all page.* calls for tab isolation.",
       inputSchema: {
         type: "object",
         properties: { url: { type: "string" } },
@@ -541,25 +577,31 @@ export function buildToolsSchema() {
       description: "Enable request interception.",
       inputSchema: {
         type: "object",
-        properties: { patterns: { type: "array", items: { type: "string" } } },
+        properties: {
+          patterns: { type: "array", items: { type: "string" } },
+          tabId: { type: "integer", description: "Target tab. Omit for current tab." },
+        },
       },
     },
     {
       name: "intercept.off",
       description: "Disable request interception.",
-      inputSchema: { type: "object", properties: {} },
+      inputSchema: { type: "object", properties: { tabId: { type: "integer", description: "Target tab. Omit for current tab." } } },
     },
     {
       name: "intercept.list",
       description: "List intercepted requests.",
-      inputSchema: { type: "object", properties: {} },
+      inputSchema: { type: "object", properties: { tabId: { type: "integer", description: "Target tab. Omit for current tab." } } },
     },
     {
       name: "intercept.continue",
       description: "Continue an intercepted request.",
       inputSchema: {
         type: "object",
-        properties: { requestId: { type: "string" } },
+        properties: {
+          requestId: { type: "string" },
+          tabId: { type: "integer", description: "Target tab. Omit for current tab." },
+        },
         required: ["requestId"],
       },
     },
@@ -572,6 +614,7 @@ export function buildToolsSchema() {
           requestId: { type: "string" },
           status: { type: "integer" },
           body: { type: "string" },
+          tabId: { type: "integer", description: "Target tab. Omit for current tab." },
         },
         required: ["requestId"],
       },
@@ -584,6 +627,7 @@ export function buildToolsSchema() {
         properties: {
           requestId: { type: "string" },
           reason: { type: "string" },
+          tabId: { type: "integer", description: "Target tab. Omit for current tab." },
         },
         required: ["requestId"],
       },

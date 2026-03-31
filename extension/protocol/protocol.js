@@ -126,33 +126,16 @@ function createKernel(tabId, { cdpClick, withDebugger, withDebuggerNav, cdp, cdp
       }
     },
 
-    /** Navigate to URL. Waits for load or SPA URL change. Detects error pages immediately. */
+    /** Navigate to URL. Waits for tab status=complete. Detects error pages.
+     *  Idle/readiness is userspace: tap scripts call waitFor() for what they need. */
     async nav(url) {
       await chrome.tabs.update(tabId, { url })
       await waitForTabLoad(tabId, url)
-      // Check for error page before waiting for idle
       const tab = await chrome.tabs.get(tabId)
       if (tab.url?.startsWith('chrome-error://') || tab.url === '') {
         currentUrl = tab.url || url
         throw new Error(`nav: unreachable — ${url}`)
       }
-      try {
-        await chrome.scripting.executeScript({
-          target: { tabId },
-          func: () => new Promise(resolve => {
-            const onReady = () => {
-              if (typeof requestIdleCallback === 'function') {
-                requestIdleCallback(resolve, { timeout: 5000 })
-              } else {
-                setTimeout(resolve, 500)
-              }
-            }
-            if (document.readyState === 'complete') onReady()
-            else window.addEventListener('load', onReady, { once: true })
-          }),
-          world: 'MAIN'
-        })
-      } catch { /* scripting may fail on chrome:// — continue */ }
       currentUrl = tab.url || url
     },
 
