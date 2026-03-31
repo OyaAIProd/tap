@@ -363,8 +363,9 @@ deno compile --allow-all --output tap src/cli.ts  # 编译二进制
 
 ## 路线图
 
-- [x] **106 个社区 skills** — 从 [tap-skills](https://github.com/LeonTing1010/tap-skills) `tap install`
+- [x] **106 个社区 skills** — 从 [tap-skills](https://github.com/LeonTing1010/tap-skills) `tap update`
 - [x] **Playwright 运行时** — 第二个内核，支持无头模式
+- [x] **macOS 运行时** — 原生桌面应用自动化，Accessibility API + CGEvent
 - [x] **统一更新** — `tap update` 拉核心代码 + skills + reload 所有连接的运行时
 - [ ] **Android 运行时** — 基于 AccessibilityService 的内核
 - [ ] **Tap 注册中心** — 像 npm 包一样发布和发现 tap

@@ -381,7 +381,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). The easiest way to contribute: **forge a
 
 ## Roadmap
 
-- [x] **106 community skills** — `tap install` from [tap-skills](https://github.com/LeonTing1010/tap-skills)
+- [x] **106 community skills** — `tap update` from [tap-skills](https://github.com/LeonTing1010/tap-skills)
 - [x] **Playwright runtime** — second kernel, headless capable
 - [x] **macOS runtime** — native desktop app automation via Accessibility API + CGEvent
 - [x] **One update** — `tap update` pulls core + skills + reloads all connected runtimes

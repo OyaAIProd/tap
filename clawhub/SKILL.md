@@ -93,7 +93,7 @@ Download `tap-extension.zip` from the [latest release](https://github.com/LeonTi
 ### 3. Install Community Skills (optional)
 
 ```bash
-tap install    # 81 skills across 41 sites
+tap update    # 81 skills across 41 sites
 ```
 
 ### 4. Add MCP Server
@@ -154,7 +154,7 @@ Add to your OpenClaw MCP configuration:
 
 **Chrome extension permissions.** The extension requires `debugger` permission to send CDP commands to the active tab. It does NOT request `<all_urls>`, `cookies`, or `webRequest` in its manifest. The extension only activates when Tap is explicitly invoked.
 
-**Community skills.** `tap install` clones scripts from [tap-skills](https://github.com/LeonTing1010/tap-skills). All scripts are plain `.tap.js` files (readable JavaScript) — review before running. User-forged taps are stored locally in `~/.tap/taps/`.
+**Community skills.** `tap update` clones scripts from [tap-skills](https://github.com/LeonTing1010/tap-skills). All scripts are plain `.tap.js` files (readable JavaScript) — review before running. User-forged taps are stored locally in `~/.tap/taps/`.
 
 **Scope of access.** Tap operates on the active browser tab when invoked. It does not run in the background, does not access tabs you haven't navigated to, and does not persist any data beyond `~/.tap/`.
 
