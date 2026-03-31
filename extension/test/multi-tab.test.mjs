@@ -206,6 +206,152 @@ test('extension handles tab.close command', () => {
     'background.js must handle tab.close command')
 })
 
+// ═══════════════════════════════════════════════════════════
+// Rule 8: MCP Schema Tab Isolation (fd model)
+// ═══════════════════════════════════════════════════════════
+
+console.log('\n  ── Rule 8: MCP Schema Tab Isolation ──\n')
+
+const MCP_SRC = readFileSync(new URL('../../src/mcp.ts', import.meta.url), 'utf-8')
+
+test('all page.* MCP tools expose tabId parameter', () => {
+  // For each page.* tool, check that tabId appears before the next tool definition
+  const toolNames = [...MCP_SRC.matchAll(/name:\s*"(page\.\w+)"/g)].map(m => m[1])
+  const missing = []
+  for (const name of toolNames) {
+    const start = MCP_SRC.indexOf(`name: "${name}"`)
+    // Find the next tool definition (next `name: "`) or end of tools array
+    const rest = MCP_SRC.substring(start + name.length + 10)
+    const nextTool = rest.search(/name:\s*"/)
+    const block = nextTool > 0 ? rest.substring(0, nextTool) : rest.substring(0, 500)
+    if (!block.includes('tabId')) missing.push(name)
+  }
+  assert.equal(missing.length, 0,
+    `page.* tools missing tabId in MCP schema: ${missing.join(', ')} — concurrent agents need explicit tab targeting`)
+})
+
+test('all inspect.* MCP tools expose tabId parameter', () => {
+  const toolNames = [...MCP_SRC.matchAll(/name:\s*"(inspect\.\w+)"/g)].map(m => m[1])
+  const missing = []
+  for (const name of toolNames) {
+    const start = MCP_SRC.indexOf(`name: "${name}"`)
+    const rest = MCP_SRC.substring(start + name.length + 10)
+    const nextTool = rest.search(/name:\s*"/)
+    const block = nextTool > 0 ? rest.substring(0, nextTool) : rest.substring(0, 500)
+    if (!block.includes('tabId')) missing.push(name)
+  }
+  assert.equal(missing.length, 0,
+    `inspect.* tools missing tabId in MCP schema: ${missing.join(', ')} — concurrent agents need explicit tab targeting`)
+})
+
+test('tab.new description mentions tab isolation for concurrent agents', () => {
+  const tabNewSection = MCP_SRC.substring(
+    MCP_SRC.indexOf('name: "tab.new"'),
+    MCP_SRC.indexOf('name: "tab.new"') + 300
+  )
+  assert(tabNewSection.includes('concurrent') || tabNewSection.includes('isolat'),
+    'tab.new description must guide concurrent agents to use it for tab isolation')
+})
+
+// ═══════════════════════════════════════════════════════════
+// Rule 9: Session Tab Auto-Allocation (fd model)
+// ═══════════════════════════════════════════════════════════
+
+console.log('\n  ── Rule 9: Session Tab Auto-Allocation ──\n')
+
+const CLI_SRC = readFileSync(new URL('../../src/cli.ts', import.meta.url), 'utf-8')
+
+test('executeToolCall auto-allocates tab when sessionTabId is unset', () => {
+  // The area around executeToolCall must call tab.new for auto-allocation
+  const fnStart = CLI_SRC.indexOf('async function executeToolCall')
+  const area = CLI_SRC.substring(Math.max(0, fnStart - 300), fnStart + 800)
+  assert(area.includes('tab.new'),
+    'executeToolCall must auto-allocate a tab via tab.new when no session tab exists')
+})
+
+test('tab-needing tools are distinguished from tab-free tools', () => {
+  // Must have a set/list of tools that do NOT need a tab, near executeToolCall
+  const fnStart = CLI_SRC.indexOf('async function executeToolCall')
+  const area = CLI_SRC.substring(Math.max(0, fnStart - 300), fnStart + 800)
+  assert(
+    area.includes('tap.list') && area.includes('tap.logs') &&
+    (area.includes('TAB_FREE') || area.includes('needsTab') || area.includes('tab.new')),
+    'executeToolCall must distinguish tab-free tools (tap.list, tap.logs, etc.) from tab-needing tools')
+})
+
+// ═══════════════════════════════════════════════════════════
+// Rule 10: activeTabId Pollution Prevention
+// ═══════════════════════════════════════════════════════════
+
+console.log('\n  ── Rule 10: activeTabId Pollution Prevention ──\n')
+
+test('requireTab does NOT set activeTabId on auto-create', () => {
+  const requireTabFn = BG_SRC.substring(
+    BG_SRC.indexOf('async function requireTab'),
+    BG_SRC.indexOf('async function requireTab') + 600
+  )
+  // Count how many times activeTabId is assigned (not just read)
+  const assignments = (requireTabFn.match(/activeTabId\s*=/g) || [])
+  assert.equal(assignments.length, 0,
+    `requireTab must not set activeTabId (found ${assignments.length} assignments) — prevents cross-session pollution`)
+})
+
+test('page.nav handler does NOT set activeTabId on auto-create', () => {
+  const navCase = BG_SRC.substring(
+    BG_SRC.indexOf("case 'page.nav'"),
+    BG_SRC.indexOf("case 'page.nav'") + 400
+  )
+  const assignments = (navCase.match(/activeTabId\s*=/g) || [])
+  assert.equal(assignments.length, 0,
+    `page.nav must not set activeTabId (found ${assignments.length} assignments) — prevents cross-session pollution`)
+})
+
+test('routeCDP does NOT set activeTabId on auto-create', () => {
+  const routeFn = BG_SRC.substring(
+    BG_SRC.indexOf('async function routeCDP'),
+    BG_SRC.indexOf('// --- Bridge Commands ---')
+  )
+  const assignments = (routeFn.match(/activeTabId\s*=/g) || [])
+  assert.equal(assignments.length, 0,
+    `routeCDP must not set activeTabId (found ${assignments.length} assignments) — prevents cross-session pollution`)
+})
+
+test('only Bridge.attach and Bridge.newTab may set activeTabId', () => {
+  // Split source into Bridge section and non-Bridge section
+  const bridgeStart = BG_SRC.indexOf('async function handleBridgeCommand')
+  const bridgeEnd = BG_SRC.indexOf('// --- Tap Protocol Commands')
+  const nonBridgeCode = BG_SRC.substring(0, bridgeStart) + BG_SRC.substring(bridgeEnd)
+
+  // In non-bridge code, only the declaration (let activeTabId = null) and
+  // cleanup (activeTabId = null) are allowed. No setting to a tab id.
+  const lines = nonBridgeCode.split('\n')
+  const violations = lines.filter(line => {
+    const t = line.trim()
+    return t.includes('activeTabId =') &&
+      !t.includes('= null') &&
+      !t.startsWith('let ') &&
+      !t.startsWith('//')
+  })
+  assert.equal(violations.length, 0,
+    `only Bridge commands may set activeTabId to a tab id (found ${violations.length} in non-bridge code: ${violations.map(v => v.trim()).join('; ')})`)
+})
+
+// ═══════════════════════════════════════════════════════════
+// Rule 11: Tab Allocation Returns tabId
+// ═══════════════════════════════════════════════════════════
+
+console.log('\n  ── Rule 11: Tab Allocation Returns tabId ──\n')
+
+test('tap.run response includes tabId for session tracking', () => {
+  // Find the case "tap.run" inside executeToolCall (not earlier references)
+  const execStart = CLI_SRC.indexOf('async function executeToolCall')
+  const tapRunInExec = CLI_SRC.indexOf('"tap.run"', execStart)
+  const tapRunCase = CLI_SRC.substring(tapRunInExec, tapRunInExec + 500)
+  // The wrap() call must include tabId in the result
+  assert(tapRunCase.includes('tabId') && tapRunCase.includes('wrap'),
+    'tap.run case must include tabId in wrap() response for MCP session tracking')
+})
+
 // --- Summary ---
 console.log(`\n${passed + failed} constraints, ${passed} passed, ${failed} failed\n`)
 process.exit(failed > 0 ? 1 : 0)

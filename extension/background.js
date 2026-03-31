@@ -55,7 +55,7 @@ async function routeCDP(method, params = {}) {
   if (!tabId) {
     const tab = await chrome.tabs.create({ url: 'about:blank' })
     tabId = tab.id
-    activeTabId = tab.id
+    // Don't set activeTabId here — prevents cross-session pollution (fd model)
     console.log(`[tap] created new tab ${tab.id}`)
   }
 
@@ -68,7 +68,7 @@ async function routeCDP(method, params = {}) {
       if (current.url?.startsWith('chrome://')) {
         const tab = await chrome.tabs.create({ url: params.url })
         tabId = tab.id
-        activeTabId = tab.id
+        // Don't set activeTabId — prevents cross-session pollution (fd model)
         console.log(`[tap] created tab ${tab.id} (was on chrome:// page)`)
       } else {
         await chrome.tabs.update(tabId, { url: params.url })
@@ -281,7 +281,6 @@ async function requireTab(params = {}) {
       const [active] = await chrome.tabs.query({ active: true, currentWindow: true })
       if (active?.id) {
         tabId = active.id
-        activeTabId = active.id
         console.log(`[tap] tab gone, fell back to active tab ${tabId}`)
       } else {
         tabId = null
@@ -291,7 +290,8 @@ async function requireTab(params = {}) {
   if (!tabId) {
     const tab = await chrome.tabs.create({ url: 'about:blank' })
     tabId = tab.id
-    activeTabId = tab.id
+    // Don't set activeTabId — prevents cross-session pollution (fd model).
+    // Each MCP session auto-allocates its own tab via tab.new in CLI layer.
     console.log(`[tap] auto-created tab ${tab.id} (no active tab)`)
   }
   return tabId
@@ -405,7 +405,7 @@ async function handleTapCommand(method, params = {}) {
       if (!tabId) {
         const tab = await chrome.tabs.create({ url: 'about:blank' })
         tabId = tab.id
-        activeTabId = tab.id
+        // Don't set activeTabId — prevents cross-session pollution (fd model)
       }
       const page = getPage(tabId)
       await page.nav(params.url)

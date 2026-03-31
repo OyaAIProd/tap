@@ -28,6 +28,8 @@ import type { RpcSend } from "./page.ts";
 export interface MacOSRuntime {
   send: RpcSend;
   close: () => Promise<void>;
+  app: string;
+  getWindowId: () => Promise<string>;
 }
 
 // --- Helpers ---
@@ -89,6 +91,25 @@ const KEY_CODES: Record<string, number> = {
   F7: 98, F8: 100, F9: 101, F10: 109, F11: 103, F12: 111,
 };
 
+/** Character → macOS virtual key code (for CGEvent physical keyboard simulation). */
+const CHAR_CODES: Record<string, number> = {
+  a: 0, s: 1, d: 2, f: 3, h: 4, g: 5, z: 6, x: 7, c: 8, v: 9,
+  b: 11, q: 12, w: 13, e: 14, r: 15, y: 16, t: 17, o: 31, u: 32,
+  i: 34, p: 35, l: 37, j: 38, k: 40, n: 45, m: 46,
+  "1": 18, "2": 19, "3": 20, "4": 21, "5": 23, "6": 22,
+  "7": 26, "8": 28, "9": 25, "0": 29,
+  "-": 27, "=": 24, "[": 33, "]": 30, ";": 41, "'": 39,
+  "\\": 42, ",": 43, ".": 47, "/": 44, "`": 50,
+};
+
+/** CGEvent modifier flag constants. */
+const CG_MOD_FLAGS: Record<string, number> = {
+  "command down": 0x100000,  // kCGEventFlagMaskCommand
+  "shift down":   0x020000,  // kCGEventFlagMaskShift
+  "control down": 0x040000,  // kCGEventFlagMaskControl
+  "option down":  0x080000,  // kCGEventFlagMaskAlternate
+};
+
 /** Parse key combo like "Meta+A" into key + modifiers. */
 function parseKey(key: string): {
   char?: string;
@@ -109,6 +130,13 @@ function parseKey(key: string): {
   const code = KEY_CODES[main];
   if (code !== undefined) return { code, mods };
   return { char: main, mods };
+}
+
+/** Resolve a parsed key to its virtual key code (special keys + characters). */
+function resolveKeyCode(parsed: { char?: string; code?: number }): number | undefined {
+  if (parsed.code !== undefined) return parsed.code;
+  if (parsed.char) return CHAR_CODES[parsed.char.toLowerCase()];
+  return undefined;
 }
 
 /** Get frontmost app process name. */
@@ -256,6 +284,19 @@ export async function createMacOSRuntime(
         }
       }
 
+      case "page.evalBatch": {
+        const expressions = (p.expressions as string[]) || [];
+        const results: unknown[] = [];
+        for (const expr of expressions) {
+          try {
+            results.push(await jxa(expr));
+          } catch {
+            results.push(undefined);
+          }
+        }
+        return results;
+      }
+
       case "page.pointer": {
         const x = (p.x as number) || 0;
         const y = (p.y as number) || 0;
@@ -289,30 +330,67 @@ export async function createMacOSRuntime(
         const key = (p.key as string) || "";
         const action = (p.action as string) || "press";
         if (action === "type" || action === "insertText") {
-          // Type full text string via System Events
-          const escaped = key.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-          await as(`tell application "System Events" to keystroke "${escaped}"`);
-        } else if (action === "press") {
-          const parsed = parseKey(key);
-          const modStr = parsed.mods.length
-            ? ` using {${parsed.mods.join(", ")}}`
-            : "";
-          if (parsed.code !== undefined) {
-            await as(
-              `tell application "System Events" to key code ${parsed.code}${modStr}`,
-            );
+          // Type full text string — clipboard paste for reliable CJK support
+          const hasNonAscii = /[^\x00-\x7F]/.test(key);
+          if (hasNonAscii) {
+            // CJK: paste via clipboard (AppleScript keystroke can't handle)
+            await jxa(`
+              var app = Application.currentApplication();
+              app.includeStandardAdditions = true;
+              app.setTheClipboardTo(${JSON.stringify(key)});
+            `);
+            await delay(50);
+            // CGEvent Cmd+V to paste
+            await jxa(`
+              ObjC.import('CoreGraphics');
+              var d = $.CGEventCreateKeyboardEvent(null, 9, true);
+              $.CGEventSetFlags(d, $.kCGEventFlagMaskCommand);
+              $.CGEventPost($.kCGHIDEventTap, d);
+              var u = $.CGEventCreateKeyboardEvent(null, 9, false);
+              $.CGEventSetFlags(u, $.kCGEventFlagMaskCommand);
+              $.CGEventPost($.kCGHIDEventTap, u);
+            `);
           } else {
+            // ASCII: direct keystroke
+            const escaped = key.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+            await as(`tell application "System Events" to keystroke "${escaped}"`);
+          }
+        } else if (action === "press") {
+          // Use CGEvent (HID-level, equivalent to physical keyboard).
+          // AppleScript keystroke uses Accessibility Events which WebViews may ignore.
+          const parsed = parseKey(key);
+          const vkCode = resolveKeyCode(parsed);
+          if (vkCode !== undefined) {
+            // CGEvent path: physical keyboard simulation
+            const flags = parsed.mods.reduce((f, m) => f | (CG_MOD_FLAGS[m] || 0), 0);
+            await jxa(`
+              ObjC.import('CoreGraphics');
+              var d = $.CGEventCreateKeyboardEvent(null, ${vkCode}, true);
+              ${flags ? `$.CGEventSetFlags(d, ${flags});` : ""}
+              $.CGEventPost($.kCGHIDEventTap, d);
+              delay(0.03);
+              var u = $.CGEventCreateKeyboardEvent(null, ${vkCode}, false);
+              ${flags ? `$.CGEventSetFlags(u, ${flags});` : ""}
+              $.CGEventPost($.kCGHIDEventTap, u);
+            `);
+          } else {
+            // Fallback to AppleScript for unmapped keys
+            const modStr = parsed.mods.length
+              ? ` using {${parsed.mods.join(", ")}}`
+              : "";
             await as(
               `tell application "System Events" to keystroke "${parsed.char}"${modStr}`,
             );
           }
         } else if (action === "down" || action === "up") {
           const parsed = parseKey(key);
-          const code = parsed.code ?? (parsed.char?.charCodeAt(0) || 0);
+          const code = resolveKeyCode(parsed) ?? (parsed.char?.charCodeAt(0) || 0);
           const isDown = action === "down";
+          const flags = parsed.mods.reduce((f, m) => f | (CG_MOD_FLAGS[m] || 0), 0);
           await jxa(`
             ObjC.import('CoreGraphics');
             var e = $.CGEventCreateKeyboardEvent(null, ${code}, ${isDown});
+            ${flags ? `$.CGEventSetFlags(e, ${flags});` : ""}
             $.CGEventPost($.kCGHIDEventTap, e);
           `);
         }
@@ -601,6 +679,21 @@ export async function createMacOSRuntime(
     send,
     close: async () => {
       /* no persistent resources to clean up */
+    },
+    app: currentApp,
+    getWindowId: async () => {
+      const appStr = JSON.stringify(currentApp);
+      const result = await jxa(`
+        ObjC.import('CoreGraphics');
+        var list = ObjC.deepUnwrap(
+          $.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly, 0)
+        );
+        var win = list.find(function(w) {
+          return w.kCGWindowOwnerName === ${appStr} && w.kCGWindowLayer === 0;
+        });
+        win ? String(win.kCGWindowNumber) : "";
+      `);
+      return String(result || "");
     },
   };
 }
