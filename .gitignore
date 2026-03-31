@@ -7,3 +7,6 @@ npm/bin/tap-*-*
 npm/dist/
 .posts/
 .cws/
+# Temporary analysis/demand taps in root
+wechat-verify-demand.tap.js
+xiaohongshu-demand-analysis.tap.js

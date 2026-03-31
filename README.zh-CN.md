@@ -69,6 +69,9 @@ fetch · find · cookies · download · waitFor · waitForNetwork · ssrState ·
 ## 安装
 
 ```bash
+# Homebrew (macOS)
+brew install LeonTing1010/tap/tap
+
 # 一键安装 (macOS / Linux)
 curl -fsSL https://raw.githubusercontent.com/LeonTing1010/tap/master/install.sh | sh
 ```

@@ -12,4 +12,5 @@
 ## Test
 
 - [ ] `node extension/test/tap-format.test.mjs` passes
-- [ ] `cargo test` passes (if Rust changes)
+- [ ] `deno test --no-check --allow-all src/test/` passes
+- [ ] `node extension/test/architecture.test.mjs` passes

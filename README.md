@@ -79,6 +79,9 @@ A new runtime implements 8 methods — instantly gains 17 operations and every e
 ## Install
 
 ```bash
+# Homebrew (macOS)
+brew install LeonTing1010/tap/tap
+
 # One-line install (macOS / Linux)
 curl -fsSL https://raw.githubusercontent.com/LeonTing1010/tap/master/install.sh | sh
 ```
