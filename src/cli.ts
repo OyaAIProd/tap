@@ -23,6 +23,11 @@ import { handleInitialize, handleToolsList, handlePromptsList, handlePromptsGet,
 
 // --- Constants ---
 
+// Tools that never need a browser tab — skip auto-allocation for these.
+const TAB_FREE_TOOLS = new Set([
+  "tap.list", "tap.logs", "tap.reload", "tap.version", "forge.save",
+]);
+
 const TARGETS: Record<string, string> = {
   "darwin-aarch64": "aarch64-apple-darwin",
   "darwin-x86_64": "x86_64-apple-darwin",
@@ -936,11 +941,6 @@ async function handleToolCall(
     };
   }
 }
-
-// Tools that never need a browser tab — skip auto-allocation for these.
-const TAB_FREE_TOOLS = new Set([
-  "tap.list", "tap.logs", "tap.reload", "tap.version", "forge.save",
-]);
 
 async function executeToolCall(
   name: string,
