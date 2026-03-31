@@ -168,7 +168,7 @@ node extension/test/multi-tab.test.mjs                 # multi-tab constraints
 ```
 ~/.tap/
   taps/       ← user taps (forge_save, manual). Higher priority.
-  skills/     ← community skills (tap install). git clone of tap-skills repo.
+  skills/     ← community skills (tap update). git clone of tap-skills repo.
 ```
 
 `tapDirs() = [~/.tap/taps, ~/.tap/skills]` — user taps override skills with same site/name.

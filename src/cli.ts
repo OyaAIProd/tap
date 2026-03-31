@@ -4,7 +4,7 @@
  *
  * Usage:
  *   tap list                     — list available taps
- *   tap install                  — install community skills
+ *   tap update                   — update everything (core + skills + runtimes)
  *   tap update                   — update community skills
  *   tap daemon                   — run bridge daemon (foreground)
  *   tap mcp                      — run MCP server (stdin/stdout)
@@ -460,7 +460,7 @@ async function cmdDoctor(): Promise<void> {
   checks.push({
     name: "skills",
     ok: taps.length > 0,
-    detail: taps.length > 0 ? `${taps.length} taps available` : "none — run 'tap install'",
+    detail: taps.length > 0 ? `${taps.length} taps available` : "none — run 'tap update'",
   });
 
   // 2. Daemon running?
@@ -749,6 +749,11 @@ async function handleToolCall(
   }
 }
 
+// Tools that never need a browser tab — skip auto-allocation for these.
+const TAB_FREE_TOOLS = new Set([
+  "tap.list", "tap.logs", "tap.reload", "tap.version", "forge.save",
+]);
+
 async function executeToolCall(
   name: string,
   args: Record<string, unknown>,
@@ -756,7 +761,13 @@ async function executeToolCall(
   sessionTabId: number,
 ): Promise<{ result: unknown; tabId: number }> {
   // Explicit tabId in args > session tabId > -1 (let extension decide)
-  const tabId = (args.tabId as number) ?? (sessionTabId >= 0 ? sessionTabId : -1);
+  let tabId = (args.tabId as number) ?? (sessionTabId >= 0 ? sessionTabId : -1);
+
+  // Auto-allocate a tab for this session if needed (fd model: each session owns its tab)
+  if (tabId < 0 && !TAB_FREE_TOOLS.has(name)) {
+    const newTab = await client.sendTap("tool", "tab.new", {}) as Record<string, unknown>;
+    tabId = (newTab?.tabId as number) ?? -1;
+  }
 
   const wrap = (result: unknown, newTabId = tabId) => ({ result, tabId: newTabId });
 
@@ -777,7 +788,8 @@ async function executeToolCall(
       const tap = await loadTap(tapPath);
       const send = createBridgeSend(client, tabId);
 
-      return wrap(await runTap(tap, tapArgs, send, dirs));
+      const result = await runTap(tap, tapArgs, send, dirs);
+      return wrap({ ...result, tabId }, tabId);
     }
     case "tap.screenshot": {
       const send = createBridgeSend(client, tabId);
