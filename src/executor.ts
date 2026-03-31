@@ -123,6 +123,22 @@ export async function runTap(
   // This is transparent to tap code — tap authors don't need to change anything.
   // Design: intercept send() calls, buffer eval calls, flush on non-eval RPC or timeout.
 
+  // Track tabId from nav responses so all subsequent calls target the same tab
+  let sessionTabId: number | undefined;
+
+  /** Wrap raw send to auto-attach sessionTabId */
+  const tabSend: RpcSend = async (type: string, method: string, params: Record<string, unknown>) => {
+    if (sessionTabId !== undefined && !("tabId" in params)) {
+      params = { ...params, tabId: sessionTabId };
+    }
+    const result = await send(type, method, params);
+    // Capture tabId from nav response
+    if (method === "page.nav" && result && typeof result === "object" && "tabId" in (result as Record<string, unknown>)) {
+      sessionTabId = (result as Record<string, unknown>).tabId as number;
+    }
+    return result;
+  };
+
   const evalBuffer: { expr: string; resolve: (val: unknown) => void }[] = [];
   let flushTimer: number | undefined;
   let flushScheduled = false;
@@ -137,7 +153,7 @@ export async function runTap(
 
     const batch = evalBuffer.splice(0);
     const expressions = batch.map(e => e.expr);
-    const results = ((await send("tool", "page.evalBatch", { expressions })) || []) as unknown[];
+    const results = ((await tabSend("tool", "page.evalBatch", { expressions })) || []) as unknown[];
 
     // Resolve each pending eval with its result
     batch.forEach((item, i) => {
@@ -170,7 +186,7 @@ export async function runTap(
 
     // All non-eval RPCs flush the buffer first
     await flushEvalBuffer();
-    return send(type, method, params);
+    return tabSend(type, method, params);
   };
 
   const page = createPageProxy(wrappedSend);
