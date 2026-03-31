@@ -8,7 +8,7 @@
  *   pointer(x, y, action, opts?)     — pointer event at coordinates
  *   keyboard(key, action, mods?)     — keyboard event
  *   nav(url)                         — navigate to URL
- *   wait(ms | condition)             — wait for time or condition
+ *   wait(ms)                         — sleep for milliseconds
  *   screenshot()                     — visual capture
  *   tap(site, name, args?)           — composition (call another tap)
  *   capabilities()                   — declare what this runtime supports
@@ -139,21 +139,9 @@ function createKernel(tabId, { cdpClick, withDebugger, withDebuggerNav, cdp, cdp
       currentUrl = tab.url || url
     },
 
-    /** Wait for milliseconds or a function condition. */
-    async wait(msOrFn, timeoutMs = 10000) {
-      if (typeof msOrFn === 'number') {
-        return new Promise(resolve => setTimeout(resolve, msOrFn))
-      }
-      // Function condition: poll until truthy
-      const start = Date.now()
-      while (Date.now() - start < timeoutMs) {
-        const results = await chrome.scripting.executeScript({
-          target: { tabId }, func: msOrFn, world: 'MAIN'
-        })
-        if (results?.[0]?.result) return results[0].result
-        await new Promise(r => setTimeout(r, 300))
-      }
-      throw new Error(`wait: condition not met within ${timeoutMs}ms`)
+    /** Sleep for milliseconds. Condition-based waiting belongs in stdlib (waitFor, waitForNetwork). */
+    async wait(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms))
     },
 
     /** Capture screenshot. Returns base64 data URL. */

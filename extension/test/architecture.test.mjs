@@ -230,5 +230,40 @@ test('every new Promise in protocol.js contains a setTimeout', () => {
     `found ${unbounded.length} Promise(s) without setTimeout deadline at line(s): ${unbounded.map(p => p.line).join(', ')} — every Promise must have a timeout safety net`)
 })
 
+// ═══════════════════════════════════════════════════════════
+// Rule 6: kernel.wait Is Pure Sleep
+// Why: kernel.wait(ms) is a timer primitive — like POSIX sleep(3).
+//      Condition-based waiting (polling) was removed because stdlib
+//      does it better: waitFor uses MutationObserver (1 RPC, event-driven)
+//      vs kernel.wait(fn) which polled via chrome.scripting (N RPCs).
+//      If someone re-adds polling to kernel.wait, it reintroduces the
+//      inefficiency and violates kernel minimality.
+// ═══════════════════════════════════════════════════════════
+
+console.log('\n  ── Rule 6: kernel.wait Is Pure Sleep ──\n')
+
+{
+  const waitStart = PAGE_API_SRC.indexOf('async wait(')
+  const nextMethod = PAGE_API_SRC.indexOf('async ', waitStart + 11)
+  const waitBody = PAGE_API_SRC.substring(waitStart, nextMethod)
+
+  test('kernel.wait does not use chrome.scripting (no polling)', () => {
+    assert(!waitBody.includes('chrome.scripting'),
+      'kernel.wait must not poll via chrome.scripting — condition waiting belongs in stdlib (waitFor)')
+  })
+
+  test('kernel.wait does not contain a while loop', () => {
+    assert(!/while\s*\(/.test(waitBody),
+      'kernel.wait must not have a polling loop — use stdlib waitFor for conditions')
+  })
+
+  test('kernel.wait accepts only ms (no function parameter)', () => {
+    // The signature should be wait(ms), not wait(msOrFn) or wait(ms, timeout)
+    const sig = waitBody.match(/async wait\(([^)]*)\)/)?.[1] || ''
+    assert(!sig.includes('Fn') && !sig.includes('timeout') && !sig.includes(','),
+      `kernel.wait signature "${sig}" suggests condition support — must be wait(ms) only`)
+  })
+}
+
 console.log(`\n${passed + failed} constraints, ${passed} passed, ${failed} failed\n`)
 process.exit(failed > 0 ? 1 : 0)
