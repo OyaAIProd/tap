@@ -322,7 +322,9 @@ export async function createMacOSRuntime(
     } else {
       await as(`tell application "${currentApp}" to activate`);
       await delay(300);
-      currentApp = await frontmostApp();
+      // Trust the declared app name — don't re-query frontmost,
+      // because another process (terminal/IDE) may steal focus between
+      // activate and the frontmostApp() query.
     }
   } else {
     if (background) throw new Error("--background requires --app");
@@ -510,6 +512,8 @@ export async function createMacOSRuntime(
 
       case "page.pointer": {
         if (background) throw new Error("pointer not available in background mode — use page.click (AXPress)");
+        // Re-activate target app (focus may drift in MCP/background contexts)
+        if (currentApp) await jxa(`Application(${JSON.stringify(currentApp)}).activate(); delay(0.1);`);
         const x = (p.x as number) || 0;
         const y = (p.y as number) || 0;
         const action = (p.action as string) || "click";
@@ -575,6 +579,8 @@ export async function createMacOSRuntime(
         }
 
         // Foreground: CGEvent (HID-level physical keyboard simulation)
+        // Re-activate target app (focus may drift in MCP/background contexts)
+        if (currentApp) await jxa(`Application(${JSON.stringify(currentApp)}).activate(); delay(0.1);`);
         if (action === "type" || action === "insertText") {
           // Type full text string — clipboard paste for reliable CJK support
           const hasNonAscii = /[^\x00-\x7F]/.test(key);
