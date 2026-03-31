@@ -359,7 +359,7 @@ async function handleTapCommand(method, params = {}) {
     case 'page.evalBatch': {
       const tabId = await requireTab(params)
       const expressions = params.expressions || []
-      const useCDP = debuggerSessions.get(tabId)?.attached
+      let useCDP = debuggerSessions.get(tabId)?.attached
       const results = []
       for (const expr of expressions) {
         const safeExpr = '{\n' + expr + '\n}'
@@ -376,7 +376,17 @@ async function handleTapCommand(method, params = {}) {
               try { return { __ok: true, v: await (0, eval)(e) } }
               catch (err) { return { __ok: false, e: String(err) } }
             }, safeExpr)
-            results.push(wrapped?.__ok ? wrapped.v : { error: wrapped?.e })
+            if (wrapped?.__ok) {
+              results.push(wrapped.v)
+            } else {
+              // CSP blocks eval() — fall back to CDP for this + remaining expressions
+              const r = await withDebugger(tabId, () => chrome.debugger.sendCommand(
+                { tabId }, 'Runtime.evaluate',
+                { expression: safeExpr, returnByValue: true, awaitPromise: true }
+              ))
+              useCDP = true
+              results.push(r?.exceptionDetails ? { error: r.exceptionDetails.exception?.description } : r?.result?.value)
+            }
           }
         } catch (e) {
           results.push({ error: String(e.message || e) })
