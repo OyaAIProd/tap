@@ -5,3 +5,5 @@ CLAUDE.md
 /tap
 npm/bin/tap-*-*
 npm/dist/
+.posts/
+.cws/
