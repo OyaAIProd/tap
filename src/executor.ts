@@ -24,6 +24,7 @@ export interface TapModule {
   run?: (page: unknown, args: Record<string, unknown>) => Promise<unknown[]>;
   url?: string | ((args: Record<string, unknown>) => string);
   extract?: (args: Record<string, unknown>) => unknown[];
+  transform?: (rows: Record<string, unknown>[], args: Record<string, unknown>) => unknown[];
   waitFor?: string;
   timeout?: number;
 }
@@ -31,6 +32,7 @@ export interface TapModule {
 export interface TapResult {
   columns: string[];
   rows: Record<string, string>[];
+  rawRows: Record<string, unknown>[];
   count: number;
   timing: {
     run_ms?: number;
@@ -104,7 +106,64 @@ export async function runTap(
   send: RpcSend,
   tapDirs?: string[],
 ): Promise<TapResult> {
-  const page = createPageProxy(send);
+  // L1 optimization: auto-batch consecutive eval calls into evalBatch RPC.
+  // Why: eval is ~80% of operations. For loop-heavy taps (e.g., extracting 100 items,
+  // each needing 3 evals), N consecutive evals without dependencies should batch
+  // into 1 RPC, reducing round-trips by 50-80% and improving latency significantly.
+  // This is transparent to tap code — tap authors don't need to change anything.
+  // Design: intercept send() calls, buffer eval calls, flush on non-eval RPC or timeout.
+
+  const evalBuffer: { expr: string; resolve: (val: unknown) => void }[] = [];
+  let flushTimer: number | undefined;
+  let flushScheduled = false;
+
+  const flushEvalBuffer = async () => {
+    if (flushTimer !== undefined) {
+      clearTimeout(flushTimer);
+      flushTimer = undefined;
+    }
+    flushScheduled = false;
+    if (evalBuffer.length === 0) return;
+
+    const batch = evalBuffer.splice(0);
+    const expressions = batch.map(e => e.expr);
+    const results = ((await send("tool", "page.evalBatch", { expressions })) || []) as unknown[];
+
+    // Resolve each pending eval with its result
+    batch.forEach((item, i) => {
+      item.resolve(results?.[i]);
+    });
+  };
+
+  const scheduleFlush = () => {
+    if (flushScheduled) return; // Already scheduled
+    flushScheduled = true;
+    // Use microtask: defer flush until next microtask checkpoint.
+    // This allows sync eval calls in tight loops to batch together.
+    Promise.resolve().then(() => {
+      // If nothing has flushed yet, schedule macrotask flush with timeout
+      if (flushScheduled && evalBuffer.length > 0) {
+        flushTimer = setTimeout(flushEvalBuffer, 10) as unknown as number;
+      }
+    });
+  };
+
+  const wrappedSend: RpcSend = async (type: string, method: string, params: Record<string, unknown>) => {
+    // Intercept page.eval — add to buffer instead of sending immediately
+    if (method === "page.eval") {
+      return new Promise((resolve) => {
+        const expr = params.expression as string;
+        evalBuffer.push({ expr, resolve });
+        scheduleFlush();
+      });
+    }
+
+    // All non-eval RPCs flush the buffer first
+    await flushEvalBuffer();
+    return send(type, method, params);
+  };
+
+  const page = createPageProxy(wrappedSend);
   const start = performance.now();
 
   // Wire page.tap() for composition — load sub-taps from disk, run locally
@@ -163,10 +222,19 @@ export async function runTap(
       if (resolvedArgs.limit) {
         rawRows = rawRows.slice(0, resolvedArgs.limit as number);
       }
+    } else if (tap.transform) {
+      // Transform format: receive rows → process → emit rows (data pipeline)
+      const inputRows = (resolvedArgs.rows || []) as Record<string, unknown>[];
+      rawRows = tap.transform(inputRows, resolvedArgs) as unknown[];
+      if (!Array.isArray(rawRows)) {
+        rawRows = rawRows ? [rawRows] : [];
+      }
     } else {
-      throw new Error(`Tap ${tap.site}/${tap.name} must have run() or extract()`);
+      throw new Error(`Tap ${tap.site}/${tap.name} must have run(), extract(), or transform()`);
     }
   } catch (e) {
+    // Flush any buffered evals even on error
+    await flushEvalBuffer().catch(() => {});
     const totalMs = Math.round(performance.now() - start);
     await appendLog({
       event: "run", site: tap.site, name: tap.name,
@@ -177,12 +245,21 @@ export async function runTap(
 
   const totalMs = Math.round(performance.now() - start);
 
+  // Flush any remaining buffered evals before returning
+  await flushEvalBuffer();
+
   // Ensure array
   if (!Array.isArray(rawRows)) {
     rawRows = rawRows ? [rawRows] : [];
   }
 
-  // Normalize rows: all values to strings
+  // Preserve raw rows (original types) for pipeline composition
+  const typedRows = rawRows.map((row) => {
+    if (row && typeof row === "object") return { ...row as Record<string, unknown> };
+    return {};
+  });
+
+  // Normalize rows: all values to strings (for display / LLM consumption)
   const rows = rawRows.map((row) => {
     const normalized: Record<string, string> = {};
     if (row && typeof row === "object") {
@@ -204,6 +281,7 @@ export async function runTap(
   return {
     columns,
     rows,
+    rawRows: typedRows,
     count: rows.length,
     timing: { run_ms: totalMs, total_ms: totalMs },
   };

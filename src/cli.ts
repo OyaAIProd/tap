@@ -136,6 +136,8 @@ if (!command || command === "-h" || command === "--help" || command === "help") 
 Usage:
   tap list                          list all available taps
   tap <site> <name> [--arg value]   run a tap
+  tap <site> <name> --json          output JSON lines (for piping)
+  tap <site> <name> --stdin         read rows from stdin (pipeline input)
   tap daemon                        start bridge daemon (foreground)
   tap daemon stop                   stop running daemon
   tap daemon restart                restart daemon (background)
@@ -590,80 +592,82 @@ async function cmdTap(
   name: string,
   tapArgs: Record<string, unknown>,
 ): Promise<void> {
+  const jsonOutput = tapArgs.json === true;
+  const stdinInput = tapArgs.stdin === true;
+  delete tapArgs.json;
+  delete tapArgs.stdin;
+
+  // Read upstream rows from stdin for pipeline composition
+  if (stdinInput) {
+    const buf = new Uint8Array(1024 * 1024);
+    const chunks: string[] = [];
+    let n: number | null;
+    while ((n = await Deno.stdin.read(buf)) !== null) {
+      chunks.push(new TextDecoder().decode(buf.subarray(0, n)));
+    }
+    const text = chunks.join("").trim();
+    if (text) {
+      try { tapArgs.rows = JSON.parse(text); }
+      catch { tapArgs.rows = text.split("\n").filter(Boolean).map(l => JSON.parse(l)); }
+    }
+  }
+
   const status = new StatusLine();
-  status.start(`${site}/${name} [${runtime}] — connecting`);
+  if (!jsonOutput) status.start(`${site}/${name} [${runtime}] — connecting`);
 
   const dirs = tapDirs();
   let tapPath: string;
   try {
     tapPath = await findTap(site, name, dirs);
   } catch {
-    status.fail(`tap not found: ${site}/${name}`);
+    if (!jsonOutput) status.fail(`tap not found: ${site}/${name}`);
+    else console.error(`tap not found: ${site}/${name}`);
     Deno.exit(1);
   }
 
   const tap = await loadTap(tapPath);
 
+  // Create runtime-specific send + cleanup, then run uniformly
+  let send: RpcSend;
+  let cleanup: () => Promise<void> = async () => {};
+
   if (runtime === "playwright") {
-    // --- Playwright runtime: no daemon/extension needed ---
     const { createPlaywrightRuntime } = await import("./runtime-playwright.ts");
     const rt = await createPlaywrightRuntime({ headless: tapArgs.headless === true || tapArgs.headless === "true" });
-    try {
-      status.update(`${site}/${name} — running`);
-      const send: RpcSend = (_type, method, params) => {
-        const label = formatStep(_type, method, params);
-        status.update(label);
-        return rt.send(_type, method, params);
-      };
-      const result = await runTap(tap, tapArgs, send, dirs);
-      status.done(`${site}/${name} — ${result.count} row(s)`);
-      console.log(JSON.stringify(result, null, 2));
-    } catch (e) {
-      status.fail(`${site}/${name} — ${e}`);
-      Deno.exit(1);
-    } finally {
-      await rt.close();
-    }
+    send = (_type, method, params) => rt.send(_type, method, params);
+    cleanup = () => rt.close();
   } else if (runtime === "macos") {
-    // --- macOS runtime: native app automation via Accessibility API ---
     const { createMacOSRuntime } = await import("./runtime-macos.ts");
     const rt = await createMacOSRuntime({ app: tapArgs.app as string });
-    try {
-      status.update(`${site}/${name} — running`);
-      const send: RpcSend = (_type, method, params) => {
-        const label = formatStep(_type, method, params);
-        status.update(label);
-        return rt.send(_type, method, params);
-      };
-      const result = await runTap(tap, tapArgs, send, dirs);
-      status.done(`${site}/${name} — ${result.count} row(s)`);
-      console.log(JSON.stringify(result, null, 2));
-    } catch (e) {
-      status.fail(`${site}/${name} — ${e}`);
-      Deno.exit(1);
-    } finally {
-      await rt.close();
-    }
+    send = (_type, method, params) => rt.send(_type, method, params);
+    cleanup = () => rt.close();
   } else {
-    // --- Extension runtime: connect through daemon ---
     const client = await connectToDaemon();
-    try {
-      status.update(`${site}/${name} — running`);
-      const send: RpcSend = (type, method, params) => {
-        const label = formatStep(type, method, params);
-        status.update(label);
-        return client.sendTap(type, method, params) as Promise<unknown>;
-      };
-      const result = await runTap(tap, tapArgs, send, dirs);
+    send = (type, method, params) => client.sendTap(type, method, params) as Promise<unknown>;
+    cleanup = async () => client.close();
+  }
+
+  // Wrap send with status updates
+  const trackedSend: RpcSend = (type, method, params) => {
+    if (!jsonOutput) status.update(formatStep(type, method, params));
+    return send(type, method, params);
+  };
+
+  try {
+    if (!jsonOutput) status.update(`${site}/${name} — running`);
+    const result = await runTap(tap, tapArgs, trackedSend, dirs);
+    if (jsonOutput) {
+      status.clear();
+      console.log(JSON.stringify(result.rawRows));
+    } else {
       status.done(`${site}/${name} — ${result.count} row(s)`);
       console.log(JSON.stringify(result, null, 2));
-    } catch (e) {
-      status.fail(`${site}/${name} — ${e}`);
-      if (e instanceof Error && e.stack) console.error(e.stack);
-      Deno.exit(1);
-    } finally {
-      client.close();
     }
+  } catch (e) {
+    status.fail(`${site}/${name} — ${e}`);
+    Deno.exit(1);
+  } finally {
+    await cleanup();
   }
 }
 
