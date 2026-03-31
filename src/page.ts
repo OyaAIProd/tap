@@ -44,6 +44,7 @@ export interface Page {
   waitForNetwork(ms?: number, idle?: number): Promise<unknown>;
   ssrState(name?: string): Promise<unknown>;
   storage(type?: string): Promise<unknown>;
+  copyAll(): Promise<unknown>;
 }
 
 export function createPageProxy(send: RpcSend): Page {
@@ -90,5 +91,6 @@ export function createPageProxy(send: RpcSend): Page {
       send("tool", "page.waitForNetwork", { ms, idle }),
     ssrState: (name) => send("tool", "page.ssrState", { name }),
     storage: (type) => send("tool", "page.storage", { type }),
+    copyAll: () => send("tool", "page.copyAll", {}),
   };
 }

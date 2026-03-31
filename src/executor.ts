@@ -19,9 +19,11 @@ export interface TapModule {
   site: string;
   name: string;
   description: string;
+  runtime?: "extension" | "playwright" | "macos";
   columns?: string[];
   args?: Record<string, TapArgSpec>;
   run?: (page: unknown, args: Record<string, unknown>) => Promise<unknown[]>;
+  cleanup?: (page: unknown) => Promise<void>;
   url?: string | ((args: Record<string, unknown>) => string);
   extract?: (args: Record<string, unknown>) => unknown[];
   transform?: (rows: Record<string, unknown>[], args: Record<string, unknown>) => unknown[];
@@ -105,6 +107,7 @@ export async function runTap(
   args: Record<string, unknown>,
   send: RpcSend,
   tapDirs?: string[],
+  opts?: { sessionId?: string },
 ): Promise<TapResult> {
   // L1 optimization: auto-batch consecutive eval calls into evalBatch RPC.
   // Why: eval is ~80% of operations. For loop-heavy taps (e.g., extracting 100 items,
@@ -233,14 +236,24 @@ export async function runTap(
       throw new Error(`Tap ${tap.site}/${tap.name} must have run(), extract(), or transform()`);
     }
   } catch (e) {
+    // Run cleanup even on error — guaranteed lifecycle
+    if (tap.cleanup) {
+      try { await tap.cleanup(page); } catch { /* cleanup must not break execution */ }
+    }
     // Flush any buffered evals even on error
     await flushEvalBuffer().catch(() => {});
     const totalMs = Math.round(performance.now() - start);
     await appendLog({
       event: "run", site: tap.site, name: tap.name,
       ms: totalMs, rows: 0, error: String(e),
+      ...(opts?.sessionId && { sid: opts.sessionId }),
     });
     throw e;
+  }
+
+  // Run cleanup on success — guaranteed lifecycle
+  if (tap.cleanup) {
+    try { await tap.cleanup(page); } catch { /* cleanup must not break execution */ }
   }
 
   const totalMs = Math.round(performance.now() - start);
@@ -276,6 +289,7 @@ export async function runTap(
   await appendLog({
     event: "run", site: tap.site, name: tap.name,
     ms: totalMs, rows: rows.length,
+    ...(opts?.sessionId && { sid: opts.sessionId }),
   });
 
   return {

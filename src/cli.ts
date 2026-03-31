@@ -120,13 +120,32 @@ class StatusLine {
   }
 }
 
-// Extract --runtime flag before command parsing
+// Extract --runtime and --record flags before command parsing
 const rawArgs = [...Deno.args];
 let runtime = "extension"; // default
 const rtIdx = rawArgs.indexOf("--runtime");
 if (rtIdx !== -1 && rawArgs[rtIdx + 1]) {
   runtime = rawArgs[rtIdx + 1];
   rawArgs.splice(rtIdx, 2);
+}
+let record = false;
+let recordPath = "";
+const recIdx = rawArgs.indexOf("--record");
+if (recIdx !== -1) {
+  record = true;
+  // Next arg is output path if it doesn't start with --
+  if (rawArgs[recIdx + 1] && !rawArgs[recIdx + 1].startsWith("--")) {
+    recordPath = rawArgs[recIdx + 1];
+    rawArgs.splice(recIdx, 2);
+  } else {
+    rawArgs.splice(recIdx, 1);
+  }
+}
+let background = false;
+const bgIdx = rawArgs.indexOf("--background");
+if (bgIdx !== -1) {
+  background = true;
+  rawArgs.splice(bgIdx, 1);
 }
 
 const args = rawArgs;
@@ -156,6 +175,10 @@ Usage:
 Options:
   --runtime extension               use Chrome Extension kernel (default)
   --runtime playwright              use Playwright kernel (headless capable)
+  --runtime macos                   use macOS kernel (native desktop apps)
+  --record [path]                   record window during tap (macOS only)
+                                    supports .mov (default), .gif, .mp4
+  --background                      run without stealing focus (macOS only)
 
 Examples:
   tap weibo hot                     微博热搜
@@ -504,6 +527,7 @@ async function cmdDoctor(): Promise<void> {
 async function cmdMcp(): Promise<void> {
   let client: BridgeClient | null = null;
   let sessionTabId = -1; // Track active tab across tool calls
+  const sessionId = crypto.randomUUID().slice(0, 8);
 
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
@@ -574,7 +598,7 @@ async function cmdMcp(): Promise<void> {
               break;
             }
           }
-          const callResult = await handleToolCall(id, request.params, client, sessionTabId);
+          const callResult = await handleToolCall(id, request.params, client, sessionTabId, sessionId);
           response = callResult.response;
           if (callResult.tabId >= 0) sessionTabId = callResult.tabId;
           break;
@@ -637,6 +661,7 @@ async function cmdTap(
   // Create runtime-specific send + cleanup, then run uniformly
   let send: RpcSend;
   let cleanup: () => Promise<void> = async () => {};
+  let macosGetWindowRect: (() => Promise<string>) | null = null;
 
   if (runtime === "playwright") {
     const { createPlaywrightRuntime } = await import("./runtime-playwright.ts");
@@ -645,9 +670,10 @@ async function cmdTap(
     cleanup = () => rt.close();
   } else if (runtime === "macos") {
     const { createMacOSRuntime } = await import("./runtime-macos.ts");
-    const rt = await createMacOSRuntime({ app: tapArgs.app as string });
+    const rt = await createMacOSRuntime({ app: tapArgs.app as string, background });
     send = (_type, method, params) => rt.send(_type, method, params);
     cleanup = () => rt.close();
+    macosGetWindowRect = () => rt.getWindowRect();
   } else {
     const client = await connectToDaemon();
     send = (type, method, params) => client.sendTap(type, method, params) as Promise<unknown>;
@@ -659,6 +685,41 @@ async function cmdTap(
     if (!jsonOutput) status.update(formatStep(type, method, params));
     return send(type, method, params);
   };
+
+  // Start window recording (macOS only)
+  let recorder: Deno.ChildProcess | undefined;
+  let recordMovFile = "";  // always .mov (screencapture native)
+  let recordFinalFile = ""; // user's desired output (may be .gif, .mp4, etc.)
+  if (record && runtime === "macos") {
+    try {
+      const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      const dir = `${tapHome()}/recordings`;
+      await Deno.mkdir(dir, { recursive: true });
+      if (recordPath) {
+        recordFinalFile = recordPath.startsWith("/") ? recordPath : `${Deno.cwd()}/${recordPath}`;
+      } else {
+        recordFinalFile = `${dir}/${site}-${name}-${ts}.mov`;
+      }
+      // screencapture always records .mov; convert later if needed
+      recordMovFile = recordFinalFile.endsWith(".mov")
+        ? recordFinalFile
+        : `${dir}/.tmp-${ts}.mov`;
+      // --app specified → record that app's window region; otherwise → main display
+      const rect = macosGetWindowRect ? await macosGetWindowRect() : "";
+      const scArgs = rect
+        ? ["-v", "-R", rect, "-x", recordMovFile]      // app window region
+        : ["-v", "-D", "1", "-x", recordMovFile];       // main display
+      recorder = new Deno.Command("screencapture", { args: scArgs,
+        stdin: "null", stdout: "null", stderr: "null",
+      }).spawn();
+      await new Promise(r => setTimeout(r, 500)); // let recording initialize
+      if (!jsonOutput) status.update(`recording${rect ? ` window [${rect}]` : " display 1"}`);
+    } catch (e) {
+      if (!jsonOutput) console.error(`recording failed to start: ${e}`);
+    }
+  } else if (record && runtime !== "macos") {
+    console.error("--record is only supported with --runtime macos");
+  }
 
   try {
     if (!jsonOutput) status.update(`${site}/${name} — running`);
@@ -674,6 +735,36 @@ async function cmdTap(
     status.fail(`${site}/${name} — ${e}`);
     Deno.exit(1);
   } finally {
+    // Stop recording before cleanup
+    if (recorder) {
+      try { recorder.kill("SIGINT"); } catch { /* already stopped */ }
+      await recorder.status.catch(() => {});
+      try {
+        const stat = await Deno.stat(recordMovFile);
+        if (stat.size > 0) {
+          if (recordMovFile !== recordFinalFile) {
+            // Convert to target format via ffmpeg
+            const ext = recordFinalFile.split(".").pop()?.toLowerCase() || "";
+            const ffArgs = ext === "gif"
+              ? ["-i", recordMovFile, "-filter_complex",
+                 "fps=15,scale=-1:-1:flags=lanczos,split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=3",
+                 "-y", recordFinalFile]
+              : ["-i", recordMovFile, "-y", recordFinalFile];
+            const { success } = await new Deno.Command("ffmpeg", {
+              args: ffArgs, stdout: "null", stderr: "null",
+            }).output();
+            if (success) {
+              await Deno.remove(recordMovFile).catch(() => {});
+              console.error(`Recording: ${recordFinalFile}`);
+            } else {
+              console.error(`Recording (ffmpeg conversion failed): ${recordMovFile}`);
+            }
+          } else {
+            console.error(`Recording: ${recordFinalFile}`);
+          }
+        }
+      } catch { /* file not created */ }
+    }
     await cleanup();
   }
 }
@@ -711,6 +802,7 @@ async function handleToolCall(
   params: Record<string, unknown>,
   client: BridgeClient,
   sessionTabId: number,
+  sessionId = "",
 ): Promise<{ response: Record<string, unknown>; tabId: number }> {
   const toolName = (params.name as string) || "";
   const args = (params.arguments as Record<string, unknown>) || {};
@@ -718,7 +810,7 @@ async function handleToolCall(
   try { Deno.writeTextFileSync(`${Deno.env.get("HOME")}/.tap/logs/mcp-debug.log`, `tool=${toolName}\n`, { append: true }); } catch {}
 
   try {
-    const { result, tabId } = await executeToolCall(toolName, args, client, sessionTabId);
+    const { result, tabId } = await executeToolCall(toolName, args, client, sessionTabId, sessionId);
     const text = typeof result === "string"
       ? result
       : JSON.stringify(result, null, 2);
@@ -759,6 +851,7 @@ async function executeToolCall(
   args: Record<string, unknown>,
   client: BridgeClient,
   sessionTabId: number,
+  sessionId = "",
 ): Promise<{ result: unknown; tabId: number }> {
   // Explicit tabId in args > session tabId > -1 (let extension decide)
   let tabId = (args.tabId as number) ?? (sessionTabId >= 0 ? sessionTabId : -1);
@@ -786,10 +879,31 @@ async function executeToolCall(
       const dirs = tapDirs();
       const tapPath = await findTap(site, tapName, dirs);
       const tap = await loadTap(tapPath);
-      const send = createBridgeSend(client, tabId);
 
-      const result = await runTap(tap, tapArgs, send, dirs);
-      return wrap({ ...result, tabId }, tabId);
+      // Auto-route runtime based on tap.runtime declaration
+      let tapSend: RpcSend;
+      let rtCleanup: () => Promise<void> = async () => {};
+
+      if (tap.runtime === "macos") {
+        const { createMacOSRuntime } = await import("./runtime-macos.ts");
+        const rt = await createMacOSRuntime({ app: tapArgs.app as string });
+        tapSend = rt.send;
+        rtCleanup = rt.close;
+      } else if (tap.runtime === "playwright") {
+        const { createPlaywrightRuntime } = await import("./runtime-playwright.ts");
+        const rt = await createPlaywrightRuntime({});
+        tapSend = (_t: string, m: string, p: Record<string, unknown>) => rt.send(_t, m, p);
+        rtCleanup = rt.close;
+      } else {
+        tapSend = createBridgeSend(client, tabId);
+      }
+
+      try {
+        const result = await runTap(tap, tapArgs, tapSend, dirs, { sessionId });
+        return wrap({ ...result, tabId }, tabId);
+      } finally {
+        await rtCleanup();
+      }
     }
     case "tap.screenshot": {
       const send = createBridgeSend(client, tabId);

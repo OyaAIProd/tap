@@ -346,7 +346,7 @@ test('tap.run response includes tabId for session tracking', () => {
   // Find the case "tap.run" inside executeToolCall (not earlier references)
   const execStart = CLI_SRC.indexOf('async function executeToolCall')
   const tapRunInExec = CLI_SRC.indexOf('"tap.run"', execStart)
-  const tapRunCase = CLI_SRC.substring(tapRunInExec, tapRunInExec + 500)
+  const tapRunCase = CLI_SRC.substring(tapRunInExec, tapRunInExec + 1200)
   // The wrap() call must include tabId in the result
   assert(tapRunCase.includes('tabId') && tapRunCase.includes('wrap'),
     'tap.run case must include tabId in wrap() response for MCP session tracking')

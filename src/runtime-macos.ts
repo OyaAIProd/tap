@@ -29,7 +29,8 @@ export interface MacOSRuntime {
   send: RpcSend;
   close: () => Promise<void>;
   app: string;
-  getWindowId: () => Promise<string>;
+  /** Returns "x,y,w,h" of the app's frontmost window, or "" if not found. */
+  getWindowRect: () => Promise<string>;
 }
 
 // --- Helpers ---
@@ -149,15 +150,23 @@ async function frontmostApp(): Promise<string> {
 // --- Runtime ---
 
 export async function createMacOSRuntime(
-  options: { app?: string } = {},
+  options: { app?: string; background?: boolean } = {},
 ): Promise<MacOSRuntime> {
+  const background = options.background || false;
   let currentApp = options.app || "";
 
   if (currentApp) {
-    await as(`tell application "${currentApp}" to activate`);
-    await delay(300);
-    currentApp = await frontmostApp();
+    if (background) {
+      // Launch without stealing focus
+      await as(`tell application "${currentApp}" to launch`);
+      await delay(300);
+    } else {
+      await as(`tell application "${currentApp}" to activate`);
+      await delay(300);
+      currentApp = await frontmostApp();
+    }
   } else {
+    if (background) throw new Error("--background requires --app");
     currentApp = await frontmostApp();
   }
 
@@ -166,7 +175,7 @@ export async function createMacOSRuntime(
     return `
       var se = Application("System Events");
       var proc = se.processes[${JSON.stringify(currentApp)}];
-      proc.frontmost = true;
+      ${background ? "" : "proc.frontmost = true;"}
       function search(el, q, role, results, depth) {
         if (depth > 8 || results.length >= 20) return;
         try {
@@ -212,7 +221,7 @@ export async function createMacOSRuntime(
     return `
       var se = Application("System Events");
       var proc = se.processes[${JSON.stringify(currentApp)}];
-      proc.frontmost = true;
+      ${background ? "" : "proc.frontmost = true;"}
       function findFirst(el, q, depth) {
         if (depth > 8) return null;
         try {
@@ -266,6 +275,49 @@ export async function createMacOSRuntime(
     `;
   }
 
+  /** JXA: find element and set its value via AX API (background-safe). */
+  function axSetValueScript(target: string, text: string): string {
+    return `
+      var se = Application("System Events");
+      var proc = se.processes[${JSON.stringify(currentApp)}];
+      function findFirst(el, q, depth) {
+        if (depth > 8) return null;
+        try {
+          var n = String(el.name() || "");
+          var d = String(el.description() || "");
+          var v = String(el.value() || "");
+          var ql = q.toLowerCase();
+          if (n.toLowerCase().includes(ql) || d.toLowerCase().includes(ql) || v.toLowerCase().includes(ql)) {
+            return el;
+          }
+        } catch(e) {}
+        try {
+          var kids = el.uiElements();
+          for (var i = 0; i < kids.length; i++) {
+            var found = findFirst(kids[i], q, depth + 1);
+            if (found) return found;
+          }
+        } catch(e) {}
+        return null;
+      }
+      var el = null;
+      var wins = proc.windows();
+      for (var w = 0; w < wins.length; w++) {
+        el = findFirst(wins[w], ${JSON.stringify(target)}, 0);
+        if (el) break;
+      }
+      if (!el) JSON.stringify({ error: "not found" });
+      else {
+        try {
+          el.value = ${JSON.stringify(text)};
+          JSON.stringify({ ok: true });
+        } catch(e) {
+          JSON.stringify({ error: String(e) });
+        }
+      }
+    `;
+  }
+
   // --- RpcSend: maps abstract method names to macOS calls ---
   const send: RpcSend = async (_type, method, params) => {
     const p = params as Record<string, unknown>;
@@ -298,6 +350,7 @@ export async function createMacOSRuntime(
       }
 
       case "page.pointer": {
+        if (background) throw new Error("pointer not available in background mode — use page.click (AXPress)");
         const x = (p.x as number) || 0;
         const y = (p.y as number) || 0;
         const action = (p.action as string) || "click";
@@ -329,23 +382,56 @@ export async function createMacOSRuntime(
       case "page.keyboard": {
         const key = (p.key as string) || "";
         const action = (p.action as string) || "press";
+
+        // Background: targeted process events via System Events (no CGEvent)
+        if (background) {
+          const appEsc = currentApp.replace(/"/g, '\\"');
+          if (action === "type" || action === "insertText") {
+            if (/[^\x00-\x7F]/.test(key)) {
+              // CJK: AXSetValue on focused element (keystroke can't handle)
+              await jxa(`
+                var se = Application("System Events");
+                var proc = se.processes[${JSON.stringify(currentApp)}];
+                var focused = proc.focusedUIElement();
+                var cur = "";
+                try { cur = String(focused.value() || ""); } catch(e) {}
+                focused.value = cur + ${JSON.stringify(key)};
+              `);
+            } else {
+              const keyEsc = key.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+              await as(`tell application "System Events" to tell process "${appEsc}" to keystroke "${keyEsc}"`);
+            }
+          } else if (action === "press") {
+            const parsed = parseKey(key);
+            const vkCode = resolveKeyCode(parsed);
+            const modStr = parsed.mods.length ? ` using {${parsed.mods.join(", ")}}` : "";
+            if (vkCode !== undefined) {
+              await as(`tell application "System Events" to tell process "${appEsc}" to key code ${vkCode}${modStr}`);
+            } else if (parsed.char) {
+              const charEsc = parsed.char.replace(/"/g, '\\"');
+              await as(`tell application "System Events" to tell process "${appEsc}" to keystroke "${charEsc}"${modStr}`);
+            }
+          }
+          return {};
+        }
+
+        // Foreground: CGEvent (HID-level physical keyboard simulation)
         if (action === "type" || action === "insertText") {
           // Type full text string — clipboard paste for reliable CJK support
           const hasNonAscii = /[^\x00-\x7F]/.test(key);
           if (hasNonAscii) {
-            // CJK: paste via clipboard (AppleScript keystroke can't handle)
-            await jxa(`
-              var app = Application.currentApplication();
-              app.includeStandardAdditions = true;
-              app.setTheClipboardTo(${JSON.stringify(key)});
-            `);
-            await delay(50);
-            // CGEvent Cmd+V to paste
+            // CJK: clipboard paste in one JXA call (avoids focus switch between calls)
             await jxa(`
               ObjC.import('CoreGraphics');
+              var app = Application.currentApplication();
+              app.includeStandardAdditions = true;
+              Application(${JSON.stringify(currentApp)}).activate();
+              app.setTheClipboardTo(${JSON.stringify(key)});
+              delay(0.05);
               var d = $.CGEventCreateKeyboardEvent(null, 9, true);
               $.CGEventSetFlags(d, $.kCGEventFlagMaskCommand);
               $.CGEventPost($.kCGHIDEventTap, d);
+              delay(0.03);
               var u = $.CGEventCreateKeyboardEvent(null, 9, false);
               $.CGEventSetFlags(u, $.kCGEventFlagMaskCommand);
               $.CGEventPost($.kCGHIDEventTap, u);
@@ -419,22 +505,21 @@ export async function createMacOSRuntime(
       case "page.screenshot": {
         const tmp = `/tmp/tap-macos-${Date.now()}.png`;
         let captured = false;
-        // Try to capture just the frontmost window
+        // Try to capture just the app's frontmost window via Accessibility API bounds
         try {
-          const wid = await jxa(`
-            ObjC.import('CoreGraphics');
-            var list = ObjC.deepUnwrap(
-              $.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly, 0)
-            );
-            var win = list.find(function(w) {
-              return w.kCGWindowOwnerName === ${JSON.stringify(currentApp)} && w.kCGWindowLayer === 0;
-            });
-            win ? String(win.kCGWindowNumber) : "";
-          `);
-          if (wid) {
-            const id = String(wid);
+          const rect = await as(`
+            tell application "System Events"
+              tell process "${currentApp.replace(/"/g, '\\"')}"
+                set frontWin to front window
+                set pos to position of frontWin
+                set sz to size of frontWin
+                return (item 1 of pos as text) & "," & (item 2 of pos as text) & "," & (item 1 of sz as text) & "," & (item 2 of sz as text)
+              end tell
+            end tell
+          `).catch(() => "");
+          if (rect.trim()) {
             const { success } = await new Deno.Command("screencapture", {
-              args: ["-x", `-l${id}`, tmp],
+              args: ["-x", "-R", rect.trim(), tmp],
             }).output();
             captured = success &&
               await Deno.stat(tmp).then(() => true).catch(() => false);
@@ -448,6 +533,32 @@ export async function createMacOSRuntime(
         const data = await Deno.readFile(tmp);
         await Deno.remove(tmp).catch(() => {});
         return { data: toBase64(data) };
+      }
+
+      case "page.copyAll": {
+        // Edit menu Select All + Copy — works on WebViews where CGEvent keyboard doesn't.
+        // Saves and restores user's clipboard (text only).
+        return await jxa(`
+          var app = Application.currentApplication();
+          app.includeStandardAdditions = true;
+          var se = Application("System Events");
+          var proc = se.processes[${JSON.stringify(currentApp)}];
+          Application(${JSON.stringify(currentApp)}).activate();
+          delay(0.3);
+          // Save user clipboard
+          var saved = "";
+          try { saved = String(app.theClipboard()); } catch(e) {}
+          app.setTheClipboardTo("");
+          delay(0.1);
+          proc.menuBars[0].menuBarItems["Edit"].menus[0].menuItems["Select All"].click();
+          delay(0.5);
+          proc.menuBars[0].menuBarItems["Edit"].menus[0].menuItems["Copy"].click();
+          delay(0.5);
+          var result = String(app.theClipboard());
+          // Restore user clipboard
+          try { app.setTheClipboardTo(saved); } catch(e) {}
+          result;
+        `);
       }
 
       case "tap.run":
@@ -481,6 +592,7 @@ export async function createMacOSRuntime(
           throw new Error(`click: element "${target}" ${result.error}`);
         }
         if (result && !result.clicked && result.x !== undefined) {
+          if (background) throw new Error(`click: AXPress unavailable for "${target}" in background mode`);
           // AXPress unavailable — fall back to pointer click at center
           await send(_type, "page.pointer", {
             x: result.x,
@@ -494,7 +606,14 @@ export async function createMacOSRuntime(
       case "page.type": {
         const selector = p.selector as string;
         const text = p.text as string;
-        // Focus the field
+        if (background) {
+          // Background: find element via AX, set value directly (no focus/keyboard needed)
+          // deno-lint-ignore no-explicit-any
+          const result = (await jxa(axSetValueScript(selector, text))) as any;
+          if (result?.error) throw new Error(`type: "${selector}" ${result.error}`);
+          return {};
+        }
+        // Foreground: Focus the field
         await send(_type, "page.click", { target: selector });
         await delay(100);
         // Select all + replace
@@ -681,19 +800,19 @@ export async function createMacOSRuntime(
       /* no persistent resources to clean up */
     },
     app: currentApp,
-    getWindowId: async () => {
-      const appStr = JSON.stringify(currentApp);
-      const result = await jxa(`
-        ObjC.import('CoreGraphics');
-        var list = ObjC.deepUnwrap(
-          $.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly, 0)
-        );
-        var win = list.find(function(w) {
-          return w.kCGWindowOwnerName === ${appStr} && w.kCGWindowLayer === 0;
-        });
-        win ? String(win.kCGWindowNumber) : "";
-      `);
-      return String(result || "");
+    getWindowRect: async () => {
+      // Uses Accessibility API (no Screen Recording permission needed)
+      const rect = await as(`
+        tell application "System Events"
+          tell process "${currentApp.replace(/"/g, '\\"')}"
+            set frontWin to front window
+            set pos to position of frontWin
+            set sz to size of frontWin
+            return (item 1 of pos as text) & "," & (item 2 of pos as text) & "," & (item 1 of sz as text) & "," & (item 2 of sz as text)
+          end tell
+        end tell
+      `).catch(() => "");
+      return rect.trim();
     },
   };
 }
