@@ -168,7 +168,9 @@ Usage:
   tap daemon stop                   stop running daemon
   tap daemon restart                restart daemon (background)
   tap daemon status                 check daemon status
-  tap doctor                        diagnose setup issues
+  tap doctor                        check health of your taps (~/.tap/taps/)
+  tap doctor <site> [<site>...]     check specific sites
+  tap doctor <site>/<name>          check specific tap
   tap update                        update everything (core + skills + runtimes)
   tap mcp                           start MCP server (stdin/stdout)
 
@@ -201,7 +203,7 @@ switch (command) {
     await cmdDaemon(args[1]);
     break;
   case "doctor":
-    await cmdDoctor();
+    await cmdDoctor(args.slice(1));
     break;
   case "mcp":
     await cmdMcp();
@@ -474,54 +476,142 @@ async function cmdDaemon(sub?: string): Promise<void> {
   await handle.stop();
 }
 
-async function cmdDoctor(): Promise<void> {
-  const checks: { name: string; ok: boolean; detail: string }[] = [];
-
-  // 1. Skills installed?
+async function cmdDoctor(doctorArgs: string[]): Promise<void> {
   const dirs = tapDirs();
-  const taps = await listTaps(dirs);
-  checks.push({
-    name: "skills",
-    ok: taps.length > 0,
-    detail: taps.length > 0 ? `${taps.length} taps available` : "none — run 'tap update'",
-  });
+  const home = tapHome();
+  const userTapsDir = `${home}/taps`;
 
-  // 2. Daemon running?
+  // Determine which taps to check
+  let targets: Awaited<ReturnType<typeof listTaps>> = [];
+
+  if (doctorArgs.length === 0) {
+    // No args: check user taps only (~/.tap/taps/)
+    try {
+      targets = await listTaps([userTapsDir]);
+    } catch { /* no user taps dir */ }
+    if (targets.length === 0) {
+      console.log("No user taps in ~/.tap/taps/\n");
+      console.log("Usage:");
+      console.log("  tap doctor                  check your forged taps");
+      console.log("  tap doctor github zhihu     check specific sites");
+      console.log("  tap doctor github/trending  check specific tap");
+      return;
+    }
+  } else {
+    // Parse args: "github" = site, "github/trending" = specific tap
+    const allTaps = await listTaps(dirs);
+    for (const arg of doctorArgs) {
+      if (arg.includes("/")) {
+        const [site, name] = arg.split("/", 2);
+        const tap = allTaps.find(t => t.site === site && t.name === name);
+        if (tap) targets.push(tap);
+        else console.log(`✘ ${arg} — not found`);
+      } else {
+        const siteTaps = allTaps.filter(t => t.site === arg);
+        if (siteTaps.length === 0) console.log(`✘ ${arg} — no taps found for this site`);
+        else targets.push(...siteTaps);
+      }
+    }
+    if (targets.length === 0) {
+      Deno.exit(1);
+    }
+  }
+
+  console.log(`Checking ${targets.length} tap(s)...\n`);
+
+  // Try to connect to Chrome Extension runtime (uses real login sessions)
+  let send: RpcSend | null = null;
+  let cleanup: () => Promise<void> = async () => {};
+
   const daemonOk = await isDaemonRunning();
-  checks.push({
-    name: "daemon",
-    ok: daemonOk,
-    detail: daemonOk ? `running (:${EXTENSION_PORT}/:${CLIENT_PORT})` : "not running — run 'tap daemon'",
-  });
-
-  // 3. Extension connected?
-  let extOk = false;
   if (daemonOk) {
     try {
-      const client = new BridgeClient(`ws://127.0.0.1:${CLIENT_PORT}`);
-      await client.waitReady();
-      await client.sendTap("tool", "page.capabilities", {});
-      extOk = true;
-      client.close();
-    } catch { /* not connected */ }
+      const client = await connectToDaemon();
+      send = (type, method, params) =>
+        client.sendTap(type, method, params) as Promise<unknown>;
+      cleanup = async () => client.close();
+    } catch { /* can't connect */ }
   }
-  checks.push({
-    name: "extension",
-    ok: extOk,
-    detail: extOk ? "connected" : "not connected — load extension in Chrome",
-  });
 
-  // Print
-  for (const c of checks) {
-    console.log(`${c.ok ? "✔" : "✘"} ${c.name.padEnd(12)} ${c.detail}`);
+  if (!send) {
+    console.log("⚠ No runtime (start daemon + extension for live checks)\n");
   }
-  const allOk = checks.every((c) => c.ok);
-  if (allOk) {
-    console.log("\nAll good. Ready to tap.");
-  } else {
-    console.log("\nSome issues found. Fix them and run 'tap doctor' again.");
-    Deno.exit(1);
+
+  // Check each tap
+  let passed = 0, failed = 0, skipped = 0;
+  const issues: { id: string; issue: string }[] = [];
+  const TIMEOUT = 30_000;
+
+  for (const tap of targets) {
+    const id = `${tap.site}/${tap.name}`;
+
+    if (!send) {
+      // Format-only (loaded = format ok)
+      console.log(`  - ${id} — loaded ok (no runtime)`);
+      skipped++;
+      continue;
+    }
+
+    // Run with timeout
+    try {
+      const result = await Promise.race([
+        runTap(tap, {}, send, dirs),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("timeout")), TIMEOUT)
+        ),
+      ]);
+
+      // Check health contract
+      let healthFail = "";
+      if (tap.health) {
+        if (tap.health.min_rows && result.count < tap.health.min_rows) {
+          healthFail = `${result.count} rows < min_rows(${tap.health.min_rows})`;
+        }
+        if (!healthFail && tap.health.non_empty && result.rows.length > 0) {
+          for (const field of tap.health.non_empty) {
+            if (result.rows.every(r => !r[field])) {
+              healthFail = `"${field}" empty in all rows`;
+              break;
+            }
+          }
+        }
+      }
+
+      if (healthFail) {
+        console.log(`  ✘ ${id} — ${healthFail}`);
+        issues.push({ id, issue: healthFail });
+        failed++;
+      } else if (result.count === 0) {
+        console.log(`  ✘ ${id} — 0 rows`);
+        issues.push({ id, issue: "0 rows returned" });
+        failed++;
+      } else {
+        console.log(`  ✔ ${id} — ${result.count} rows (${result.timing.total_ms}ms)`);
+        passed++;
+      }
+    } catch (e) {
+      const msg = String(e).split("\n")[0];
+      console.log(`  ✘ ${id} — ${msg}`);
+      issues.push({ id, issue: msg });
+      failed++;
+    }
   }
+
+  // Summary
+  const total = passed + failed + skipped;
+  console.log(`\n${total} checked, ${passed} passed, ${failed} failed${skipped ? `, ${skipped} skipped` : ""}`);
+
+  if (issues.length > 0) {
+    console.log("\nNeeds re-forge:");
+    for (const { id, issue } of issues) {
+      console.log(`  ${id} — ${issue}`);
+    }
+  } else if (failed === 0 && skipped === 0) {
+    console.log("\nAll healthy.");
+  }
+
+  await cleanup();
+  if (failed > 0) Deno.exit(1);
 }
 
 async function cmdMcp(): Promise<void> {

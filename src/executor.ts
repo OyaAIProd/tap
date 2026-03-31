@@ -15,6 +15,11 @@ export interface TapArgSpec {
   description?: string;
 }
 
+export interface TapHealthContract {
+  min_rows?: number;
+  non_empty?: string[];
+}
+
 export interface TapModule {
   site: string;
   name: string;
@@ -22,6 +27,7 @@ export interface TapModule {
   runtime?: "extension" | "playwright" | "macos";
   columns?: string[];
   args?: Record<string, TapArgSpec>;
+  health?: TapHealthContract;
   run?: (page: unknown, args: Record<string, unknown>) => Promise<unknown[]>;
   cleanup?: (page: unknown) => Promise<void>;
   url?: string | ((args: Record<string, unknown>) => string);
