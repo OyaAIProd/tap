@@ -532,18 +532,22 @@ function createStdlib(kernel) {
 
     /**
      * Wait for a CSS selector to appear.
-     * Stdlib: wait(condition)
+     * Stdlib: single eval with MutationObserver (1 RPC instead of N polling round-trips)
      */
     async waitFor(selector, timeoutMs = 10000) {
-      const start = Date.now()
-      while (Date.now() - start < timeoutMs) {
-        try {
-          const found = await kernel.eval((sel) => !!document.querySelector(sel), selector)
-          if (found) return
-        } catch { /* page mid-navigation — retry */ }
-        await kernel.wait(300)
-      }
-      throw new Error(`waitFor: "${selector}" not found within ${timeoutMs}ms`)
+      const ok = await kernel.eval((sel, timeout) => {
+        if (document.querySelector(sel)) return true
+        return new Promise((resolve) => {
+          const timer = setTimeout(() => { obs.disconnect(); resolve(false) }, timeout)
+          const obs = new MutationObserver(() => {
+            if (document.querySelector(sel)) {
+              obs.disconnect(); clearTimeout(timer); resolve(true)
+            }
+          })
+          obs.observe(document.documentElement, { childList: true, subtree: true })
+        })
+      }, selector, timeoutMs)
+      if (!ok) throw new Error(`waitFor: "${selector}" not found within ${timeoutMs}ms`)
     },
 
     /**

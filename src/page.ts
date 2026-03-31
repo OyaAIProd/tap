@@ -16,8 +16,9 @@ export type RpcSend = (
 ) => Promise<unknown>;
 
 export interface Page {
-  // Kernel (8)
+  // Kernel (8 + 1 batch)
   eval(expression: string, ...args: unknown[]): Promise<unknown>;
+  evalBatch(expressions: string[]): Promise<unknown[]>;
   pointer(x: number, y: number, action: string, opts?: Record<string, unknown>): Promise<unknown>;
   keyboard(key: string, action: string, mods?: number): Promise<unknown>;
   nav(url: string): Promise<unknown>;
@@ -47,7 +48,7 @@ export interface Page {
 
 export function createPageProxy(send: RpcSend): Page {
   return {
-    // Kernel (8) — abstract names, each runtime translates to native API
+    // Kernel (8 + 1 batch) — abstract names, each runtime translates to native API
     eval: (expression, ...args) => {
       // Taps may pass a function (for extension-native eval) — convert to IIFE string
       const expr = typeof expression === "function"
@@ -55,6 +56,8 @@ export function createPageProxy(send: RpcSend): Page {
         : String(expression);
       return send("tool", "page.eval", { expression: expr });
     },
+    evalBatch: (expressions) =>
+      send("tool", "page.evalBatch", { expressions }) as Promise<unknown[]>,
     pointer: (x, y, action, opts) =>
       send("tool", "page.pointer", { x, y, action, ...opts }),
     keyboard: (key, action, mods) =>

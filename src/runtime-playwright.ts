@@ -69,6 +69,19 @@ export async function createPlaywrightRuntime(
         }
       }
 
+      case "page.evalBatch": {
+        const expressions = (p.expressions as string[]) || [];
+        const results: unknown[] = [];
+        for (const expr of expressions) {
+          try {
+            results.push(await page.evaluate(expr));
+          } catch {
+            results.push(undefined);
+          }
+        }
+        return results;
+      }
+
       case "page.pointer": {
         const x = (p.x as number) || 0;
         const y = (p.y as number) || 0;

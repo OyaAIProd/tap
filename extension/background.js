@@ -314,10 +314,28 @@ async function handleTapCommand(method, params = {}) {
 
     case 'page.eval': {
       const tabId = await requireTab(params)
-      const page = getPage(tabId)
       // Wrap in block scope to prevent const/let redeclaration across calls
       const safeExpr = '{\n' + params.expression + '\n}'
-      // Try chrome.scripting first (no debugger needed)
+
+      // Fast path: debugger already attached → single-layer CDP eval (no chrome.scripting overhead)
+      if (debuggerSessions.get(tabId)?.attached) {
+        try {
+          const r = await chrome.debugger.sendCommand(
+            { tabId }, 'Runtime.evaluate',
+            { expression: safeExpr, returnByValue: true, awaitPromise: true }
+          )
+          scheduleDetach(tabId)
+          if (r?.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || 'eval failed')
+          return r?.result?.value
+        } catch (e) {
+          if (!isDetachError(e)) throw e
+          // Debugger gone — fall through to chrome.scripting path
+          debuggerSessions.delete(tabId)
+        }
+      }
+
+      // Normal path: chrome.scripting (no debugger needed, undetectable)
+      const page = getPage(tabId)
       const wrapped = await page.eval(async (expr) => {
         try {
           const result = await (0, eval)(expr)
@@ -336,6 +354,36 @@ async function handleTapCommand(method, params = {}) {
         throw new Error(cdpResult.exceptionDetails.exception?.description || 'eval failed')
       }
       return cdpResult?.result?.value
+    }
+
+    case 'page.evalBatch': {
+      const tabId = await requireTab(params)
+      const expressions = params.expressions || []
+      const useCDP = debuggerSessions.get(tabId)?.attached
+      const results = []
+      for (const expr of expressions) {
+        const safeExpr = '{\n' + expr + '\n}'
+        try {
+          if (useCDP) {
+            const r = await chrome.debugger.sendCommand(
+              { tabId }, 'Runtime.evaluate',
+              { expression: safeExpr, returnByValue: true, awaitPromise: true }
+            )
+            results.push(r?.exceptionDetails ? { error: r.exceptionDetails.exception?.description } : r?.result?.value)
+          } else {
+            const page = getPage(tabId)
+            const wrapped = await page.eval(async (e) => {
+              try { return { __ok: true, v: await (0, eval)(e) } }
+              catch (err) { return { __ok: false, e: String(err) } }
+            }, safeExpr)
+            results.push(wrapped?.__ok ? wrapped.v : { error: wrapped?.e })
+          }
+        } catch (e) {
+          results.push({ error: String(e.message || e) })
+        }
+      }
+      if (useCDP) scheduleDetach(tabId)
+      return results
     }
 
     case 'page.pointer': {
