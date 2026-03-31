@@ -437,8 +437,33 @@ async function handleTapCommand(method, params = {}) {
       const tabId = await requireTab(params)
       const format = params.format || 'jpeg'
       const quality = params.quality ?? (format === 'jpeg' ? 50 : undefined)
-      // Use CDP route which supports format + quality (kernel.screenshot is always PNG)
-      return await routeCDP('Page.captureScreenshot', { tabId, format, quality })
+      const grayscale = params.grayscale === true
+
+      if (grayscale) {
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId }, func: () => { document.documentElement.style.filter = 'grayscale(1)' }, world: 'MAIN'
+          })
+          await new Promise(r => setTimeout(r, 50))
+        } catch {}
+      }
+
+      // CDP Page.captureScreenshot targets the specific tab (not captureVisibleTab which grabs foreground)
+      const cdpOpts = { format: format === 'jpeg' ? 'jpeg' : 'png' }
+      if (format === 'jpeg' && quality !== undefined) cdpOpts.quality = quality
+      const result = await withDebugger(tabId, async (tid) => {
+        return await chrome.debugger.sendCommand({ tabId: tid }, 'Page.captureScreenshot', cdpOpts)
+      })
+
+      if (grayscale) {
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId }, func: () => { document.documentElement.style.filter = '' }, world: 'MAIN'
+          })
+        } catch {}
+      }
+
+      return result
     }
 
     // ---- Interaction tools — delegate to protocol.js (single protocol implementation) ----
