@@ -138,13 +138,13 @@ Deno.test("[quality/what] findSimilarTaps returns matches by strategy type", () 
   assertEquals(Array.isArray(result), true);
 });
 
-Deno.test("[safety/what] findSimilarTaps bounded to 3 entries", () => {
-  // Why: too many examples overwhelm AI context — 3 is enough for few-shot
+Deno.test("[safety/what] findSimilarTaps bounded to 5 entries", () => {
+  // Why: too many examples overwhelm AI context — 5 covers same-site + strategy matches
   const taps: TapModule[] = Array.from({ length: 10 }, (_, i) => ({
     site: "example", name: `tap${i}`, description: "test", extract: () => [],
   }));
   const result = findSimilarTaps("https://example.com", [], taps);
-  assertEquals(result.length <= 3, true);
+  assertEquals(result.length <= 5, true);
 });
 
 // --- Quality: save quality gates ---

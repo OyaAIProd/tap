@@ -265,5 +265,93 @@ console.log('\n  ── Rule 6: kernel.wait Is Pure Sleep ──\n')
   })
 }
 
+// ═══════════════════════════════════════════════════════════
+// Rule 7: Network Capture Survives Debugger Idle
+// Why: scheduleDetach disconnects debugger after idle timeout.
+//      If it doesn't check netLog.active, network events stop
+//      flowing 2s after Network.enable — making inspect.networkDump
+//      always return 0 entries. Discovered during reddit/reply forge.
+// ═══════════════════════════════════════════════════════════
+
+console.log('\n  ── Rule 7: Network Capture Lifecycle ──\n')
+
+{
+  // Extract scheduleDetach body
+  const sdStart = BACKGROUND_SRC.indexOf('function scheduleDetach(')
+  const sdBodyStart = BACKGROUND_SRC.indexOf('{', sdStart)
+  let depth = 0, sdEnd = sdBodyStart
+  for (let i = sdBodyStart; i < BACKGROUND_SRC.length; i++) {
+    if (BACKGROUND_SRC[i] === '{') depth++
+    if (BACKGROUND_SRC[i] === '}') depth--
+    if (depth === 0) { sdEnd = i + 1; break }
+  }
+  const scheduleDetachBody = BACKGROUND_SRC.substring(sdStart, sdEnd)
+
+  test('scheduleDetach checks netLog.active before detaching', () => {
+    // Why: debugger detach kills Network events — capture must block detach
+    assert(scheduleDetachBody.includes('netLog') && scheduleDetachBody.includes('active'),
+      'scheduleDetach must check netLog.active — otherwise network capture silently stops after 2s')
+  })
+
+  // Extract networkStart handler
+  const nsCase = BACKGROUND_SRC.indexOf("case 'inspect.networkStart':")
+  const nsEnd = BACKGROUND_SRC.indexOf('case ', nsCase + 30)
+  const networkStartBody = BACKGROUND_SRC.substring(nsCase, nsEnd)
+
+  test('networkStart sets active = true', () => {
+    // Why: active flag gates event capture in onEvent listener
+    assert(networkStartBody.includes('active = true') || networkStartBody.includes('.active = true'),
+      'networkStart must set netLog.active = true')
+  })
+
+  test('networkStart calls Network.enable via CDP', () => {
+    assert(networkStartBody.includes('Network.enable'),
+      'networkStart must call Network.enable to start capturing')
+  })
+
+  // Extract networkDump handler
+  const ndCase = BACKGROUND_SRC.indexOf("case 'inspect.networkDump':")
+  const ndEnd = BACKGROUND_SRC.indexOf('case ', ndCase + 30)
+  const networkDumpBody = BACKGROUND_SRC.substring(ndCase, ndEnd)
+
+  test('networkDump deactivates capture', () => {
+    // Why: if capture stays active forever, debugger never detaches (resource leak)
+    assert(networkDumpBody.includes('active = false') || networkDumpBody.includes('.active = false'),
+      'networkDump must set netLog.active = false to allow eventual debugger detach')
+  })
+
+  test('networkDump calls scheduleDetach after deactivation', () => {
+    assert(networkDumpBody.includes('scheduleDetach'),
+      'networkDump must call scheduleDetach so debugger can be released')
+  })
+
+  // Extract onEvent handler
+  const onEventStart = BACKGROUND_SRC.indexOf('chrome.debugger.onEvent.addListener')
+  const onEventEnd = BACKGROUND_SRC.indexOf('\n})', onEventStart) + 3
+  const onEventBody = BACKGROUND_SRC.substring(onEventStart, onEventEnd)
+
+  test('onEvent captures Network.requestWillBeSent', () => {
+    assert(onEventBody.includes('Network.requestWillBeSent'),
+      'event handler must capture request events')
+  })
+
+  test('onEvent captures Network.responseReceived', () => {
+    assert(onEventBody.includes('Network.responseReceived'),
+      'event handler must capture response status')
+  })
+
+  test('onEvent captures Network.loadingFinished for response bodies', () => {
+    // Why: without loadingFinished, responseBody is never fetched — bodies param is useless
+    assert(onEventBody.includes('Network.loadingFinished'),
+      'event handler must handle loadingFinished to fetch response bodies')
+  })
+
+  test('onEvent captures postData from requests', () => {
+    // Why: POST body is critical for forge API analysis (understanding write endpoints)
+    assert(onEventBody.includes('postData'),
+      'event handler must capture request postData for API analysis')
+  })
+}
+
 console.log(`\n${passed + failed} constraints, ${passed} passed, ${failed} failed\n`)
 process.exit(failed > 0 ? 1 : 0)

@@ -197,21 +197,43 @@ function createStdlib(kernel) {
      */
     async click(target) {
       const pos = await kernel.eval((t) => {
-        let el = null
-        try { el = document.querySelector(t) } catch {}
-        if (!el) {
-          const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT)
-          let best = null
-          while (walker.nextNode()) {
-            const node = walker.currentNode
-            if (node.offsetParent === null) continue
-            const nodeText = node.innerText?.trim()
-            if (nodeText && nodeText.includes(t)) {
-              if (!best || node.innerText.length <= best.innerText.length) best = node
+        // querySelector through shadow DOM
+        function deepQuery(root, selector) {
+          try {
+            const el = root.querySelector(selector)
+            if (el) return el
+          } catch { return null }
+          for (const child of root.querySelectorAll('*')) {
+            if (child.shadowRoot) {
+              const found = deepQuery(child.shadowRoot, selector)
+              if (found) return found
             }
           }
-          el = best
+          return null
         }
+
+        // Text search through shadow DOM
+        function deepTextSearch(root, text) {
+          let best = null
+          const walk = (node) => {
+            for (const child of node.querySelectorAll('*')) {
+              const rect = child.getBoundingClientRect()
+              const visible = (rect.width > 0 || rect.height > 0) &&
+                (child.offsetParent !== null || child === document.body || child.getRootNode()?.host)
+              if (!visible) continue
+              const nodeText = child.innerText?.trim()
+              if (nodeText && nodeText.includes(text)) {
+                if (!best || child.innerText.length <= best.innerText.length) best = child
+              }
+              if (child.shadowRoot) walk(child.shadowRoot)
+            }
+          }
+          walk(root)
+          return best
+        }
+
+        let el = deepQuery(document, t)
+        if (!el) el = deepTextSearch(document, t)
         if (!el) return null
         const rect = el.getBoundingClientRect()
         let cx = rect.x + rect.width / 2, cy = rect.y + rect.height / 2
@@ -453,13 +475,37 @@ function createStdlib(kernel) {
           return el.tagName.toLowerCase()
         }
 
-        const candidates = Array.from(document.querySelectorAll('*')).filter(el => {
-          if (el.offsetParent === null && el !== document.body) return false
+        // Traverse all elements including Shadow DOM subtrees
+        function allElements(root) {
+          const els = []
+          for (const el of root.querySelectorAll('*')) {
+            els.push(el)
+            if (el.shadowRoot) allElements(el.shadowRoot).forEach(e => els.push(e))
+          }
+          return els
+        }
+
+        function isVisible(el) {
+          // offsetParent is null for shadow DOM elements — use boundingRect instead
+          const rect = el.getBoundingClientRect()
+          if (rect.width === 0 && rect.height === 0) return false
+          if (el.offsetParent === null && el !== document.body && !el.getRootNode()?.host) return false
+          return true
+        }
+
+        const candidates = allElements(document).filter(el => {
+          if (!isVisible(el)) return false
           const text = el.innerText?.trim() || ''
           if (!text.toLowerCase().includes(q.toLowerCase())) return false
           if (r && el.getAttribute('role') !== r) return false
           for (const child of el.children) {
-            if (child.innerText?.trim().toLowerCase().includes(q.toLowerCase()) && child.offsetParent !== null) return false
+            if (child.innerText?.trim().toLowerCase().includes(q.toLowerCase()) && isVisible(child)) return false
+          }
+          // Also check shadow children — don't return host if shadow child has the text
+          if (el.shadowRoot) {
+            for (const child of el.shadowRoot.querySelectorAll('*')) {
+              if (child.innerText?.trim().toLowerCase().includes(q.toLowerCase()) && isVisible(child)) return false
+            }
           }
           return true
         }).slice(0, 20)

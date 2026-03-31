@@ -618,9 +618,11 @@ async function handleTapCommand(method, params = {}) {
 
     case 'inspect.networkDump': {
       const tabId = await requireTab(params)
+      const netLog = getNetworkLog(tabId)
+      // Deactivate capture so debugger can detach on next idle
+      netLog.active = false
+      scheduleDetach(tabId)
       if (params.bodies) {
-        // Return entries with response bodies (was network_log_dump_bodies)
-        const netLog = getNetworkLog(tabId)
         const filter = params.url_filter || ''
         let entries = netLog.entries.filter(e => e.responseBody && (!filter || e.url.includes(filter)))
         entries = entries.slice(-50).map(e => ({
@@ -629,11 +631,12 @@ async function handleTapCommand(method, params = {}) {
         }))
         return { count: entries.length, entries }
       }
-      // Original: return entries without bodies
-      const entries = getNetworkLog(tabId).entries.map(e => ({
-        url: e.url, method: e.method, status: e.status,
-        type: e.type, time: e.time
-      }))
+      // Return entries with request body for POST/PUT (critical for forge API analysis)
+      const entries = netLog.entries.map(e => {
+        const entry = { url: e.url, method: e.method, status: e.status, type: e.type, time: e.time }
+        if (e.postData) entry.postData = e.postData
+        return entry
+      })
       return { count: entries.length, entries }
     }
 
@@ -1064,6 +1067,9 @@ async function ensureDebugger(tabId) {
 function scheduleDetach(tabId) {
   const s = debuggerSessions.get(tabId)
   if (!s) return
+  // Don't detach while network capture is active — events stop flowing on detach
+  const netLog = networkLogs.get(tabId)
+  if (netLog?.active) return
   if (s.detachTimer) clearTimeout(s.detachTimer)
   s.detachTimer = setTimeout(async () => {
     await chrome.debugger.detach({ tabId }).catch(() => {})
@@ -1187,14 +1193,29 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
   const netLog = networkLogs.get(source.tabId)
   if (netLog?.active) {
     if (method === 'Network.requestWillBeSent') {
-      netLog.entries.push({
+      const entry = {
         requestId: params.requestId,
         url: params.request?.url, method: params.request?.method,
         type: params.type, time: params.timestamp
-      })
+      }
+      // Capture POST/PUT body — critical for forge API analysis
+      if (params.request?.postData) {
+        entry.postData = params.request.postData.slice(0, 2000)
+      }
+      netLog.entries.push(entry)
     } else if (method === 'Network.responseReceived') {
       const entry = netLog.entries.find(e => e.requestId === params.requestId)
       if (entry) { entry.status = params.response?.status }
+    } else if (method === 'Network.loadingFinished') {
+      // Fetch response body for API calls (JSON/HTML, not images/fonts)
+      const entry = netLog.entries.find(e => e.requestId === params.requestId)
+      if (entry && /\/(api|svc|graphql|json)/.test(entry.url || '')) {
+        chrome.debugger.sendCommand({ tabId: source.tabId }, 'Network.getResponseBody', {
+          requestId: params.requestId
+        }).then(result => {
+          if (result?.body) entry.responseBody = result.body.slice(0, 5000)
+        }).catch(() => {})
+      }
     }
   }
 })

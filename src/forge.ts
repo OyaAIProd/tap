@@ -16,7 +16,7 @@ export function findSimilarTaps(
   url: string,
   strategies: Array<Record<string, unknown>>,
   taps: TapModule[],
-): Array<{ site: string; name: string; strategy: string; code: string }> {
+): Array<{ site: string; name: string; strategy: string; code: string; description: string; hint: string }> {
   let hostname = "";
   try { hostname = new URL(url).hostname.replace(/^www\./, ""); } catch { /* */ }
   const site = hostname.split(".")[0] || "";
@@ -24,19 +24,42 @@ export function findSimilarTaps(
 
   const scored = taps.map((tap) => {
     let score = 0;
-    if (tap.site === site) score += 10;
+    const hints: string[] = [];
+    if (tap.site === site) { score += 10; hints.push("same site"); }
     const code = tap.extract?.toString() || tap.run?.toString() || "";
     let strategy = "dom";
     if (code.includes("fetch(") || code.includes("fetch (")) strategy = "api";
     else if (code.includes("__NEXT_DATA__") || code.includes("__INITIAL") || code.includes("__NUXT")) strategy = "ssr";
-    if (strategyTypes.includes(strategy)) score += 5;
-    return { site: tap.site, name: tap.name, strategy, code, score };
+    if (strategyTypes.includes(strategy)) { score += 5; hints.push(`${strategy} strategy`); }
+    return {
+      site: tap.site, name: tap.name, strategy, code,
+      description: tap.description || "",
+      hint: hints.join(", ") || "similar pattern",
+      score,
+    };
   });
 
   return scored
     .filter((s) => s.score > 0)
     .sort((a, b) => b.score - a.score)
-    .slice(0, 3);
+    .slice(0, 5);
+}
+
+/**
+ * Find all existing taps for the same site.
+ * Shown prominently in forge_inspect so AI knows what already exists.
+ */
+export function findExistingTaps(
+  url: string,
+  taps: TapModule[],
+): Array<{ site: string; name: string; description: string }> {
+  let hostname = "";
+  try { hostname = new URL(url).hostname.replace(/^www\./, ""); } catch { /* */ }
+  // Match by hostname prefix (e.g., "reddit" from "reddit.com", "old.reddit.com")
+  const site = hostname.split(".").find((p) => p !== "www" && p !== "old" && p !== "m") || "";
+  return taps
+    .filter((t) => t.site === site)
+    .map((t) => ({ site: t.site, name: t.name, description: t.description || "" }));
 }
 
 /**
@@ -170,6 +193,24 @@ export const analyzePageContextSource = `(() => {
  */
 export function checkTapQuality(code: string): string[] {
   const warnings: string[] = [];
+
+  // --- Format validation (these cause tap.run to fail) ---
+  if (!code.includes("export default")) {
+    warnings.push("ERROR: Missing 'export default' — tap must export a default object");
+  }
+  if (!/site\s*:\s*["'`]/.test(code)) {
+    warnings.push("ERROR: Missing site field — tap must have site: \"...\" (tap.run will fail)");
+  }
+  if (!/name\s*:\s*["'`]/.test(code)) {
+    warnings.push("ERROR: Missing name field — tap must have name: \"...\" (tap.run will fail)");
+  }
+  const hasRun = /\brun\s*\(/.test(code) || /\brun\s*:/.test(code);
+  const hasExtract = /\bextract\s*\(/.test(code) || /\bextract\s*:/.test(code);
+  if (!hasRun && !hasExtract) {
+    warnings.push("ERROR: Missing run() or extract() — tap needs an execution method");
+  }
+
+  // --- Quality warnings (non-blocking) ---
   if (!code.includes("health:") && !code.includes("health :")) {
     warnings.push("Missing health contract — add health: { min_rows: N, non_empty: ['field'] }");
   }
@@ -386,11 +427,13 @@ export async function forgeInspect(
   const strategies = recommendStrategies(analysis, url);
 
   // Find similar taps as reference (few-shot context for AI)
-  let similar_taps: Array<{ site: string; name: string; strategy: string; code: string }> = [];
+  let similar_taps: Array<{ site: string; name: string; strategy: string; code: string; description: string; hint: string }> = [];
+  let existing_taps: Array<{ site: string; name: string; description: string }> = [];
   if (tapDirs && tapDirs.length > 0) {
     try {
       const allTaps = await listTaps(tapDirs);
       similar_taps = findSimilarTaps(url, strategies, allTaps);
+      existing_taps = findExistingTaps(url, allTaps);
     } catch { /* non-critical */ }
   }
 
@@ -403,6 +446,7 @@ export async function forgeInspect(
     auth,
     meta: analysis.meta,
     strategies,
+    existing_taps,
     similar_taps,
   };
 }

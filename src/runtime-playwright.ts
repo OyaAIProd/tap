@@ -263,7 +263,7 @@ export async function createPlaywrightRuntime(
       }
 
       case "page.find": {
-        // Reuse extension's find logic via eval
+        // Reuse extension's find logic via eval — with Shadow DOM piercing
         return await page.evaluate(
           (q: string, r: string) => {
             const vw = window.innerWidth, vh = window.innerHeight;
@@ -292,12 +292,32 @@ export async function createPlaywrightRuntime(
               }
               return el.tagName.toLowerCase();
             }
-            const candidates = Array.from(document.querySelectorAll("*"))
+            // Traverse all elements including Shadow DOM subtrees
+            function allElements(root: Document | ShadowRoot): Element[] {
+              const els: Element[] = [];
+              for (const el of root.querySelectorAll("*")) {
+                els.push(el);
+                if ((el as HTMLElement).shadowRoot) {
+                  allElements((el as HTMLElement).shadowRoot!).forEach(
+                    (e) => els.push(e),
+                  );
+                }
+              }
+              return els;
+            }
+            function isVisible(el: Element) {
+              const rect = el.getBoundingClientRect();
+              if (rect.width === 0 && rect.height === 0) return false;
+              if (
+                (el as HTMLElement).offsetParent === null &&
+                el !== document.body &&
+                !(el.getRootNode() as ShadowRoot)?.host
+              ) return false;
+              return true;
+            }
+            const candidates = allElements(document)
               .filter((el) => {
-                if (
-                  (el as HTMLElement).offsetParent === null &&
-                  el !== document.body
-                ) return false;
+                if (!isVisible(el)) return false;
                 const text = (el as HTMLElement).innerText?.trim() || "";
                 if (!text.toLowerCase().includes(q.toLowerCase())) return false;
                 if (r && el.getAttribute("role") !== r) return false;
@@ -305,8 +325,18 @@ export async function createPlaywrightRuntime(
                   if (
                     (child as HTMLElement).innerText?.trim().toLowerCase()
                       .includes(q.toLowerCase()) &&
-                    (child as HTMLElement).offsetParent !== null
+                    isVisible(child)
                   ) return false;
+                }
+                if ((el as HTMLElement).shadowRoot) {
+                  for (const child of (el as HTMLElement).shadowRoot!
+                    .querySelectorAll("*")) {
+                    if (
+                      (child as HTMLElement).innerText?.trim().toLowerCase()
+                        .includes(q.toLowerCase()) &&
+                      isVisible(child)
+                    ) return false;
+                  }
                 }
                 return true;
               }).slice(0, 20);
