@@ -191,5 +191,44 @@ console.log('\n  ── Rule 4: Unified Wire Names ──\n')
   })
 }
 
+// ═══════════════════════════════════════════════════════════
+// Rule 5: Every Promise Must Have a Deadline
+// Why: A Promise that waits for an event (load, MutationObserver,
+//      PerformanceObserver) without a setTimeout safety net can
+//      hang forever if the event never fires. This caused a systemic
+//      60s timeout bug in kernel.nav() — idle callback had no deadline,
+//      affecting all sites (xiaohongshu, wechat, jimeng).
+//      Fix: kernel.nav() no longer waits for idle. Constraint ensures
+//      no new unbounded Promises are introduced.
+// ═══════════════════════════════════════════════════════════
+
+console.log('\n  ── Rule 5: Every Promise Must Have a Deadline ──\n')
+
+test('every new Promise in protocol.js contains a setTimeout', () => {
+  // Find all new Promise(...) blocks and verify each has a setTimeout
+  const promises = []
+  const needle = 'new Promise'
+  let idx = 0
+  while ((idx = PAGE_API_SRC.indexOf(needle, idx)) !== -1) {
+    // Find the opening paren of Promise(
+    const parenStart = PAGE_API_SRC.indexOf('(', idx + needle.length)
+    // Count parens to find matching close
+    let depth = 0, end = parenStart
+    for (let i = parenStart; i < PAGE_API_SRC.length; i++) {
+      if (PAGE_API_SRC[i] === '(') depth++
+      if (PAGE_API_SRC[i] === ')') depth--
+      if (depth === 0) { end = i + 1; break }
+    }
+    const body = PAGE_API_SRC.substring(parenStart, end)
+    const line = PAGE_API_SRC.substring(0, idx).split('\n').length
+    promises.push({ body, line })
+    idx = end
+  }
+
+  const unbounded = promises.filter(p => !p.body.includes('setTimeout'))
+  assert(unbounded.length === 0,
+    `found ${unbounded.length} Promise(s) without setTimeout deadline at line(s): ${unbounded.map(p => p.line).join(', ')} — every Promise must have a timeout safety net`)
+})
+
 console.log(`\n${passed + failed} constraints, ${passed} passed, ${failed} failed\n`)
 process.exit(failed > 0 ? 1 : 0)
