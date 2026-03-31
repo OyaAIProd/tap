@@ -77,7 +77,7 @@ Claude Code ←→ MCP ←→ Deno Executor ─┤─ Playwright (pw API)
 **Deno Executor** = Primary tap executor. Loads .tap.js from disk, runs tap logic locally, routes kernel calls to runtime.
 **Chrome Extension** = Runtime #1 (kernel provider). Uses chrome.scripting (undetectable) for eval, CDP only for input events and CSP fallback.
 **Playwright** = Runtime #2. `tap --runtime playwright <site> <name>`. Headless capable.
-**macOS** = Runtime #3. `tap --runtime macos <site> <name> [--app "App Name"]`. Native desktop apps via Accessibility API.
+**macOS** = Runtime #3. `tap --runtime macos <site> <name> [--app "App Name"]`. Native desktop apps via Accessibility API. **MCP tools use Chrome extension runtime — macOS taps must run via CLI `--runtime macos`, not through MCP `tap_run`.**
 **.tap.js** = deterministic scripts using page API (8 kernel + 17 stdlib). Zero AI at runtime.
 
 ### Daemon Architecture
@@ -136,7 +136,7 @@ extension/
 ```
 forge.inspect(url)  → framework, SSR state, APIs, strategy templates
 forge.verify(url, expr) → test extraction logic, validate columns
-forge.save(site, name)  → persist to ~/.tap/taps/ + extension/taps/
+forge.save(site, name)  → persist to ~/.tap/taps/ only (user taps, never extension/taps/)
 ```
 
 ## Build & Development
