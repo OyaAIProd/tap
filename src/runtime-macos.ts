@@ -188,14 +188,29 @@ while (true) {
     });
   }
 
-  async close() {
-    try { await this.writer.close(); } catch { /* already closed */ }
-    try { this.child.kill(); } catch { /* already dead */ }
+  close() {
+    try { this.writer.close().catch(() => {}); } catch { /* already closed */ }
+    try { this.child.kill("SIGKILL"); } catch { /* already dead */ }
   }
 }
 
 // Module-level singleton: lazily created, reused across runtime instances
 let _jxaProc: JxaProcess | null = null;
+
+// Ensure osascript is killed when Deno exits (prevents zombie processes eating 100% CPU)
+globalThis.addEventListener("unload", () => {
+  if (_jxaProc) { _jxaProc.close(); _jxaProc = null; }
+});
+// Also handle SIGINT/SIGTERM
+for (const sig of ["SIGINT", "SIGTERM"] as const) {
+  try {
+    Deno.addSignalListener(sig, () => {
+      if (_jxaProc) { _jxaProc.close(); _jxaProc = null; }
+      Deno.exit(0);
+    });
+  } catch { /* ignore if signal not supported */ }
+}
+
 async function getJxa(): Promise<JxaProcess> {
   if (!_jxaProc) {
     _jxaProc = new JxaProcess();
