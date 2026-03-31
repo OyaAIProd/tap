@@ -69,18 +69,10 @@ fetch · find · cookies · download · waitFor · waitForNetwork · ssrState ·
 ## 安装
 
 ```bash
-# Homebrew (macOS)
-brew install LeonTing1010/tap/tap
-
-# 一键安装 (macOS / Linux)
 curl -fsSL https://raw.githubusercontent.com/LeonTing1010/tap/master/install.sh | sh
 ```
 
-然后安装 Chrome 扩展：
-
-1. 从 [Releases](https://github.com/LeonTing1010/tap/releases/latest) 下载 `tap-extension.zip`
-2. 解压，打开 `chrome://extensions/`，启用开发者模式
-3. 点击「加载已解压的扩展程序」→ 选择解压后的文件夹
+然后加载 Chrome 扩展：打开 `chrome://extensions/` → 开发者模式 → 加载已解压的扩展程序 → `~/.tap/extension`
 
 连接到你的 AI Agent（Claude Code、Cursor、Windsurf、OpenClaw 等）：
 
@@ -94,20 +86,6 @@ curl -fsSL https://raw.githubusercontent.com/LeonTing1010/tap/master/install.sh 
   }
 }
 ```
-
-<details>
-<summary>其他安装方式</summary>
-
-```bash
-# 从源码安装（需要 Deno）
-git clone https://github.com/LeonTing1010/tap && cd tap
-deno compile --allow-all --output tap src/cli.ts
-
-# 通过 GitHub Packages
-npx @LeonTing1010/tap-mcp
-```
-
-</details>
 
 安装社区 skills：
 

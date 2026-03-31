@@ -79,18 +79,10 @@ A new runtime implements 8 methods — instantly gains 17 operations and every e
 ## Install
 
 ```bash
-# Homebrew (macOS)
-brew install LeonTing1010/tap/tap
-
-# One-line install (macOS / Linux)
 curl -fsSL https://raw.githubusercontent.com/LeonTing1010/tap/master/install.sh | sh
 ```
 
-Then install the Chrome extension:
-
-1. Download `tap-extension.zip` from [Releases](https://github.com/LeonTing1010/tap/releases/latest)
-2. Unzip, open `chrome://extensions/`, enable Developer mode
-3. Click "Load unpacked" and select the unzipped folder
+Then load the Chrome extension: open `chrome://extensions/` → Developer mode → Load unpacked → `~/.tap/extension`
 
 Connect to your AI agent (Claude Code, Cursor, Windsurf, OpenClaw, etc.):
 
@@ -104,20 +96,6 @@ Connect to your AI agent (Claude Code, Cursor, Windsurf, OpenClaw, etc.):
   }
 }
 ```
-
-<details>
-<summary>Other install methods</summary>
-
-```bash
-# From source (requires Deno)
-git clone https://github.com/LeonTing1010/tap && cd tap
-deno compile --allow-all --output tap src/cli.ts
-
-# Via GitHub Packages
-npx @LeonTing1010/tap-mcp
-```
-
-</details>
 
 Install community skills:
 
