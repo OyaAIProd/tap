@@ -81,6 +81,13 @@ class StatusLine {
     this.log(`✔ ${summary} ${total}`);
   }
 
+  clear() {
+    if (isTTY) {
+      this.clearLine();
+      if (this.timer) { clearInterval(this.timer); this.timer = null; }
+    }
+  }
+
   fail(msg: string) {
     if (isTTY) {
       this.clearLine();
