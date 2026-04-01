@@ -1069,7 +1069,10 @@ async function executeToolCall(
         event: "forge_save", site, name: tapName, path,
         warnings: warnings.length,
       });
-      return wrap({ saved: path, warnings });
+      // Archive to history filesystem for Meta-Forge
+      const { archiveVersion } = await import("./history.ts");
+      const version = await archiveVersion(site, tapName, code).catch(() => "");
+      return wrap({ saved: path, warnings, version });
     }
     // Inspect tools — eval-based, run in Deno via page.eval()
     case "inspect.page":

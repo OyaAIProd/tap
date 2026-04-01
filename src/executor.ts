@@ -6,6 +6,7 @@
  */
 
 import { createPageProxy, type RpcSend } from "./page.ts";
+import { saveTrace } from "./history.ts";
 
 export interface TapArgSpec {
   type: string;
@@ -38,6 +39,14 @@ export interface TapModule {
   timeout?: number;
 }
 
+export interface TraceStep {
+  method: string;
+  params_summary: string;
+  result_summary?: string;
+  duration_ms: number;
+  error?: string;
+}
+
 export interface TapResult {
   columns: string[];
   rows: Record<string, string>[];
@@ -47,6 +56,12 @@ export interface TapResult {
     run_ms?: number;
     total_ms: number;
   };
+  trace?: TraceStep[];
+}
+
+function summarize(s: string, max: number): string {
+  if (!s || s.length <= max) return s || "";
+  return s.slice(0, max) + "...";
 }
 
 /** Load a single .tap.js from disk via dynamic import. */
@@ -189,7 +204,31 @@ export async function runTap(
     return tabSend(type, method, params);
   };
 
-  const page = createPageProxy(wrappedSend);
+  // Trace collection: record every RPC call for Meta-Forge history
+  const traceSteps: TraceStep[] = [];
+  const tracingSend: RpcSend = async (type: string, method: string, params: Record<string, unknown>) => {
+    const t0 = performance.now();
+    try {
+      const result = await wrappedSend(type, method, params);
+      traceSteps.push({
+        method,
+        params_summary: summarize(JSON.stringify(params), 200),
+        result_summary: summarize(JSON.stringify(result), 500),
+        duration_ms: Math.round(performance.now() - t0),
+      });
+      return result;
+    } catch (e) {
+      traceSteps.push({
+        method,
+        params_summary: summarize(JSON.stringify(params), 200),
+        duration_ms: Math.round(performance.now() - t0),
+        error: String(e).slice(0, 200),
+      });
+      throw e;
+    }
+  };
+
+  const page = createPageProxy(tracingSend);
   const start = performance.now();
 
   // Wire page.tap() for composition — load sub-taps from disk, run locally
@@ -315,11 +354,18 @@ export async function runTap(
     ...(opts?.sessionId && { sid: opts.sessionId }),
   });
 
+  // Persist trace to history filesystem (non-blocking, must never break execution)
+  // Skip in test mode to avoid Deno sanitizer leaks
+  if (!Deno.env.get("TAP_TEST")) {
+    saveTrace(tap.site, tap.name, traceSteps, resolvedArgs).catch(() => {});
+  }
+
   return {
     columns,
     rows,
     rawRows: typedRows,
     count: rows.length,
     timing: { run_ms: totalMs, total_ms: totalMs },
+    trace: traceSteps,
   };
 }

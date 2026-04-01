@@ -272,3 +272,71 @@ Deno.test("[safety/what] all page proxy wire names use dot notation (page.*)", a
     );
   }
 });
+
+// --- Trace collection (Meta-Forge infrastructure) ---
+
+import { runTap, type TapModule } from "../executor.ts";
+
+Deno.test("[safety/what] runTap result includes trace array with step details", async () => {
+  // Why: Meta-Forge needs step-by-step traces to diagnose failures and iterate
+  const mockSend = (_t: string, method: string, _p: Record<string, unknown>) => {
+    if (method === "page.evalBatch") return Promise.resolve([42]);
+    return Promise.resolve({ url: "https://test.com" });
+  };
+  const tap: TapModule = {
+    site: "test", name: "trace", description: "test",
+    run: async (page: any) => {
+      await page.nav("https://test.com");
+      const r = await page.eval("1+1");
+      return [{ value: r }];
+    },
+  };
+  const result = await runTap(tap, {}, mockSend);
+  assertEquals(Array.isArray(result.trace), true, "result must have trace array");
+  assertEquals(result.trace!.length > 0, true, "trace must have at least 1 step");
+  const step = result.trace![0];
+  assertEquals(typeof step.method, "string");
+  assertEquals(typeof step.duration_ms, "number");
+  assertEquals(typeof step.params_summary, "string");
+});
+
+Deno.test("[safety/what] runTap trace captures error steps", async () => {
+  // Why: failed steps are the most valuable for Meta-Forge diagnosis
+  const mockSend = (_t: string, method: string, _p: Record<string, unknown>) => {
+    if (method === "page.click") return Promise.reject(new Error("element not found"));
+    if (method === "page.evalBatch") return Promise.resolve([null]);
+    return Promise.resolve({});
+  };
+  const tap: TapModule = {
+    site: "test", name: "trace-err", description: "test",
+    run: async (page: any) => {
+      await page.eval("1");
+      try { await page.click("missing"); } catch { /* ignore */ }
+      return [{ ok: true }];
+    },
+  };
+  const result = await runTap(tap, {}, mockSend);
+  const errStep = result.trace!.find(s => s.error);
+  assertEquals(!!errStep, true, "trace must contain error step");
+  assertEquals(errStep!.error!.includes("element not found"), true);
+});
+
+Deno.test("[quality/what] runTap trace truncates large params and results", async () => {
+  // Why: traces should be diagnostic, not gigabytes of raw data
+  const bigExpr = "x".repeat(5000);
+  const mockSend = (_t: string, method: string, _p: Record<string, unknown>) => {
+    if (method === "page.evalBatch") return Promise.resolve(["y".repeat(3000)]);
+    return Promise.resolve({});
+  };
+  const tap: TapModule = {
+    site: "test", name: "trace-trunc", description: "test",
+    run: async (page: any) => {
+      await page.eval(bigExpr);
+      return [{}];
+    },
+  };
+  const result = await runTap(tap, {}, mockSend);
+  const step = result.trace![0];
+  assertEquals(step.params_summary.length <= 210, true, "params_summary must be truncated");
+  assertEquals(step.result_summary!.length <= 510, true, "result_summary must be truncated");
+});
