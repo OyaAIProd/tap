@@ -32,6 +32,8 @@ One agent forges a tap. Every agent benefits.
 
 ### Why Tap
 
+[![SafeSkill 50/100](https://img.shields.io/badge/SafeSkill-50%2F100_Use%20with%20Caution-orange)](https://safeskill.dev/scan/leonting1010-tap)
+
 | What users care about | How Tap delivers |
 |----------------------|-----------------|
 | **Will my account get banned?** | Undetectable. Uses Chrome Extensions API (`chrome.scripting`), not debugger protocol. Websites cannot distinguish Tap from a normal browser extension. No yellow "debugging" bar. |
