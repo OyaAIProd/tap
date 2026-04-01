@@ -64,6 +64,27 @@ function summarize(s: string, max: number): string {
   return s.slice(0, max) + "...";
 }
 
+/** Check a tap result against its health contract. */
+export function checkHealth(
+  tap: TapModule,
+  result: TapResult,
+): { ok: boolean; issues: string[] } {
+  const issues: string[] = [];
+  if (!tap.health) return { ok: true, issues };
+  if (tap.health.min_rows && result.count < tap.health.min_rows) {
+    issues.push(`min_rows: expected ${tap.health.min_rows}, got ${result.count}`);
+  }
+  if (tap.health.non_empty && result.rows.length > 0) {
+    for (const col of tap.health.non_empty) {
+      const empty = result.rows.filter(r => !r[col] || r[col] === "");
+      if (empty.length > 0) {
+        issues.push(`non_empty: ${empty.length}/${result.rows.length} rows have empty "${col}"`);
+      }
+    }
+  }
+  return { ok: issues.length === 0, issues };
+}
+
 /** Load a single .tap.js from disk via dynamic import. */
 export async function loadTap(path: string): Promise<TapModule> {
   // Convert to file:// URL for Deno import

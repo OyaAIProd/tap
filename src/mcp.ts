@@ -62,6 +62,16 @@ export function handlePromptsList(id: unknown) {
             { name: "task", description: "What to do on the page", required: true },
           ],
         },
+        {
+          name: "meta-forge",
+          description:
+            "Iteratively improve a tap using execution history. Reads prior versions, traces, and scores to propose better strategies.",
+          arguments: [
+            { name: "site", description: "Site name", required: true },
+            { name: "name", description: "Tap name", required: true },
+            { name: "description", description: "What the tap should do", required: true },
+          ],
+        },
       ],
     },
   };
@@ -167,6 +177,14 @@ URL: ${url}
 - If you forge a new tap, it is now available for all future requests on this site.
 - Always check forge.verify diagnostics before giving up — they tell you what to fix.
 - Use similar_taps from forge.inspect as reference — don't write from scratch.`;
+      break;
+    }
+    case "meta-forge": {
+      const site = args.site || "<site>";
+      const name = args.name || "<name>";
+      const desc = args.description || "<description>";
+      // Return placeholder — actual prompt built async in cli.ts handler
+      text = `META-FORGE:${site}/${name}:${desc}`;
       break;
     }
     default:

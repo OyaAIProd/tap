@@ -674,9 +674,25 @@ async function cmdMcp(): Promise<void> {
         case "prompts/list":
           response = handlePromptsList(id);
           break;
-        case "prompts/get":
+        case "prompts/get": {
           response = handlePromptsGet(id, request.params || {});
+          // Meta-Forge prompt needs async history — intercept and rebuild
+          const promptText = response?.result?.messages?.[0]?.content?.text;
+          if (typeof promptText === "string" && promptText.startsWith("META-FORGE:")) {
+            const parts = promptText.slice("META-FORGE:".length);
+            const slashIdx = parts.indexOf("/");
+            const colonIdx = parts.indexOf(":", slashIdx);
+            if (slashIdx > 0 && colonIdx > 0) {
+              const site = parts.slice(0, slashIdx);
+              const name = parts.slice(slashIdx + 1, colonIdx);
+              const desc = parts.slice(colonIdx + 1);
+              const { buildMetaForgePrompt } = await import("./forge.ts");
+              const mfText = await buildMetaForgePrompt(site, name, desc);
+              response.result.messages[0].content.text = mfText;
+            }
+          }
           break;
+        }
         case "tools/call": {
           // Lazy-connect to daemon
           if (!client) {

@@ -275,7 +275,7 @@ Deno.test("[safety/what] all page proxy wire names use dot notation (page.*)", a
 
 // --- Trace collection (Meta-Forge infrastructure) ---
 
-import { runTap, type TapModule } from "../executor.ts";
+import { runTap, checkHealth, type TapModule, type TapResult } from "../executor.ts";
 
 Deno.test("[safety/what] runTap result includes trace array with step details", async () => {
   // Why: Meta-Forge needs step-by-step traces to diagnose failures and iterate
@@ -339,4 +339,29 @@ Deno.test("[quality/what] runTap trace truncates large params and results", asyn
   const step = result.trace![0];
   assertEquals(step.params_summary.length <= 210, true, "params_summary must be truncated");
   assertEquals(step.result_summary!.length <= 510, true, "result_summary must be truncated");
+});
+
+// --- Health check (Phase 3) ---
+
+Deno.test("[quality/what] checkHealth detects min_rows violation", () => {
+  const tap: TapModule = { site: "t", name: "t", description: "t", health: { min_rows: 5 } };
+  const result: TapResult = { columns: [], rows: [{ a: "1" }], rawRows: [{}], count: 1, timing: { total_ms: 0 } };
+  const { ok, issues } = checkHealth(tap, result);
+  assertEquals(ok, false);
+  assertEquals(issues[0].includes("min_rows"), true);
+});
+
+Deno.test("[quality/what] checkHealth detects non_empty violation", () => {
+  const tap: TapModule = { site: "t", name: "t", description: "t", health: { non_empty: ["title"] } };
+  const result: TapResult = { columns: ["title"], rows: [{ title: "" }, { title: "ok" }], rawRows: [{}, {}], count: 2, timing: { total_ms: 0 } };
+  const { ok, issues } = checkHealth(tap, result);
+  assertEquals(ok, false);
+  assertEquals(issues[0].includes("non_empty"), true);
+});
+
+Deno.test("[quality/what] checkHealth passes healthy result", () => {
+  const tap: TapModule = { site: "t", name: "t", description: "t", health: { min_rows: 1, non_empty: ["title"] } };
+  const result: TapResult = { columns: ["title"], rows: [{ title: "ok" }], rawRows: [{}], count: 1, timing: { total_ms: 0 } };
+  const { ok } = checkHealth(tap, result);
+  assertEquals(ok, true);
 });

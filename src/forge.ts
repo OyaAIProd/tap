@@ -450,3 +450,88 @@ export async function forgeInspect(
     similar_taps,
   };
 }
+
+// --- Meta-Forge: iterative search prompt ---
+
+import { readHistory } from "./history.ts";
+
+/** Build a prompt for Meta-Forge proposer with full history context. */
+export async function buildMetaForgePrompt(
+  site: string,
+  name: string,
+  description: string,
+): Promise<string> {
+  const history = await readHistory(site, name);
+
+  let historyContext = "";
+  if (history.length > 0) {
+    const lines = history.map(v => {
+      const score = v.score as Record<string, unknown> | undefined;
+      const rate = score?.success_rate ?? "?";
+      const latency = score?.avg_latency_ms ?? "?";
+      return `  ${v.version}: success_rate=${rate}, latency=${latency}ms, traces=${v.traceCount}`;
+    });
+    historyContext = `
+## Prior Versions
+${lines.join("\n")}
+
+Read the full history at ~/.tap/history/${site}/${name}/ — each version directory contains:
+- tap.js (source code)
+- score.json (evaluation metrics)
+- traces/ (step-by-step execution traces with timing and errors)
+
+Use \`cat\`, \`grep\`, \`diff\` to inspect prior versions and traces.
+Identify which steps failed, why, and what strategies worked in prior versions.
+`;
+  } else {
+    historyContext = `
+## No Prior History
+This is the first forge attempt. Start with forge.inspect to discover the interface.
+`;
+  }
+
+  return `# Meta-Forge: Iteratively Improve ${site}/${name}
+
+## Goal
+${description}
+
+## Search Process
+1. Read prior history (if any) — understand what worked and what failed
+2. Use forge.inspect to (re-)discover the target interface
+3. Propose a new tap strategy based on history + inspection
+4. Use forge.verify to test the strategy
+5. Use forge.save to persist if it works
+6. The system will automatically archive the version and collect traces
+
+${historyContext}
+## Tap Format
+\`\`\`javascript
+export default {
+  site: "${site}",
+  name: "${name}",
+  runtime: "extension" | "macos" | "playwright",
+  app: "AppName",  // macOS only
+  columns: ["col1", "col2"],
+  args: { key: { type: "string", required: true } },
+  health: { min_rows: 1, non_empty: ["col1"] },
+  async run(page, args) {
+    // Your automation strategy here
+    return [{ col1: "value", col2: "value" }];
+  }
+}
+\`\`\`
+
+## Strategy Preference (highest to lowest stability)
+1. API (page.fetch) — most stable, fastest
+2. SSR State (page.ssrState) — stable, no interaction needed
+3. Semantic targeting (page.click("text"), page.find("label")) — cross-version stable
+4. DOM selectors (page.eval with querySelector) — may break on redesign
+5. Coordinates (page.pointer) — last resort, breaks on resize
+
+## Constraints
+- Every tap MUST have a health contract (min_rows, non_empty)
+- Prefer fewer, larger page.eval calls over many small ones (reduces focus-switching on macOS)
+- Test with at least 2 different inputs via forge.verify before forge.save
+`;
+}
+
